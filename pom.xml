@@ -20,6 +20,7 @@
     <modules>
         <module>core</module>
         <module>adapters</module>
+        <module>ui</module>
     </modules>
 
     <properties>
