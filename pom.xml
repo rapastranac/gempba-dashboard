@@ -19,6 +19,7 @@
          io.gempba.dashboard.protocol — the compiler rejects it. -->
     <modules>
         <module>core</module>
+        <module>adapters</module>
     </modules>
 
     <properties>
