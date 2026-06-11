@@ -12,6 +12,15 @@
     <name>GemPBA Dashboard</name>
     <description>SWT desktop dashboard for the GemPBA telemetry stream</description>
 
+    <!-- Multi-module reactor. The module graph IS the architecture's
+         enforcement: app → {ui, adapters, core}, ui → core, adapters → core,
+         core → {}. Because ui and adapters never depend on each other and the
+         wire DTOs live in adapters, a ui class physically cannot import
+         io.gempba.dashboard.protocol — the compiler rejects it. -->
+    <modules>
+        <module>core</module>
+    </modules>
+
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>25</maven.compiler.release>
