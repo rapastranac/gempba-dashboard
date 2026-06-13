@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.gempba</groupId>
+        <artifactId>gempba-dashboard</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>core</artifactId>
+
+    <name>GemPBA Dashboard :: Core</name>
+    <description>
+        The hexagonal core: domain read-model, value objects, pure policies,
+        formatting, the pure SSH command authoring, view contracts, and
+        threading ports. No SWT, no Jackson, no java.net — it depends on nothing
+        but the JDK and its test tools.
+    </description>
+
+    <!-- No compile dependencies by design. The empty graph is the point:
+         everything else points inward to here. -->
+</project>
