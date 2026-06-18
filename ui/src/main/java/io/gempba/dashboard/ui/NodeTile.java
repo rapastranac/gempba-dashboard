@@ -26,7 +26,7 @@ final class NodeTile extends Canvas {
     static final int TILE_W = 240;
     static final int TILE_H = 150;
     private static final int PAD = 12;
-    private static final int CORNER = 10;
+    private static final int CORNER = 4;
     private static final int HEADER_H = 22;
     private static final int BAR_H = 6;          // memory bar thickness
     private static final int BAR_TEXT_GAP = 4;   // gap between mem text and bar
@@ -57,13 +57,13 @@ final class NodeTile extends Canvas {
         Card.CardStyle style = Card.CardStyle.node();
         fill = new Color(style.fill());
         border = new Color(style.border());
-        borderHover = new Color(90, 130, 170);
+        borderHover = new Color(15, 157, 107);   // emerald accent
         titleColor = new Color(style.title());
         mutedColor = new Color(style.subtitle());
-        cpuLine = new Color(23, 144, 214);   // Task-Manager-ish blue
-        cpuFill = new Color(23, 144, 214);
-        grid = new Color(200, 210, 222);
-        memTrack = new Color(210, 216, 226);
+        cpuLine = new Color(15, 157, 107);
+        cpuFill = new Color(15, 157, 107);
+        grid = new Color(238, 241, 246);
+        memTrack = new Color(238, 241, 246);
         memFill = new Color(120, 110, 200);
         nameFont = Fonts.bold(d.getSystemFont());
         readoutFont = Fonts.bold(d.getSystemFont(), 6);
