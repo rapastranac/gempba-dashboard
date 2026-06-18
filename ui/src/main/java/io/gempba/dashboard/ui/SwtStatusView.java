@@ -21,10 +21,10 @@ import org.eclipse.swt.widgets.Text;
  */
 public final class SwtStatusView implements StatusView {
 
-    private static final int CORNER_RADIUS = 10;
+    private static final int CORNER_RADIUS = 6;
     // Colors are device-free since SWT 3.115 — no disposal needed.
-    private static final Color BLOCK_FILL = new Color(244, 245, 248);
-    private static final Color BLOCK_BORDER = new Color(223, 226, 232);
+    private static final Color BLOCK_FILL = new Color(246, 249, 252);
+    private static final Color BLOCK_BORDER = new Color(230, 235, 242);
 
     private final Composite root;
     private final Text text;

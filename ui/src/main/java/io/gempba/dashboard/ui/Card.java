@@ -31,7 +31,7 @@ public class Card extends Composite {
      * Border accent used by sentinels — a deliberately warm gold to stand out.
      */
     public static final RGB SENTINEL_BORDER = new RGB(220, 150, 30);
-    private static final int CORNER_RADIUS = 12;
+    private static final int CORNER_RADIUS = 6;
     private static final int HEADER_HEIGHT = 38;
     private static final int SIDE_PADDING = 12;
     private static final int BOTTOM_PADDING = 12;
@@ -386,16 +386,16 @@ public class Card extends Composite {
 
         public static CardStyle world() {
             return new CardStyle(
-                    new RGB(232, 240, 248),
-                    new RGB(140, 170, 200),
+                    new RGB(246, 249, 252),
+                    new RGB(230, 235, 242),
                     new RGB(20, 50, 90),
                     new RGB(80, 110, 140));
         }
 
         public static CardStyle node() {
             return new CardStyle(
-                    new RGB(216, 228, 240),
-                    new RGB(120, 150, 185),
+                    new RGB(255, 255, 255),
+                    new RGB(230, 235, 242),
                     new RGB(15, 45, 80),
                     new RGB(70, 100, 130));
         }
@@ -405,16 +405,16 @@ public class Card extends Composite {
          */
         public static CardStyle socket() {
             return new CardStyle(
-                    new RGB(232, 228, 244),
-                    new RGB(150, 140, 195),
+                    new RGB(245, 248, 252),
+                    new RGB(233, 237, 244),
                     new RGB(40, 30, 80),
                     new RGB(95, 85, 130));
         }
 
         public static CardStyle worker() {
             return new CardStyle(
-                    new RGB(245, 248, 251),
-                    new RGB(180, 195, 215),
+                    new RGB(255, 255, 255),
+                    new RGB(237, 240, 246),
                     new RGB(35, 55, 80),
                     new RGB(100, 120, 145));
         }
