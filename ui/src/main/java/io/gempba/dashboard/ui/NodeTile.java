@@ -17,7 +17,7 @@ import org.eclipse.swt.widgets.Display;
  * readout, a filled-area CPU history graph, and a memory used/total bar.
  * Clicking opens that node's full detail (the host wires the listener).
  * <p>
- * Custom-painted {@link Canvas} like {@link Card} / {@link LiveToggle} — owns
+ * Custom-painted {@link Canvas} like {@link Card} — owns
  * its colours and fonts and disposes them. Reads nothing itself; the grid view
  * pushes a {@link NodeSeries} snapshot via {@link #update}.
  */

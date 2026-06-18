@@ -1,13 +1,13 @@
 package io.gempba.dashboard.app;
 
-import io.gempba.dashboard.config.Config;
-import io.gempba.dashboard.config.ConnectionSpec;
-import io.gempba.dashboard.config.RefreshInterval;
+import io.gempba.dashboard.config.*;
 import io.gempba.dashboard.connection.ConnectionController;
 import io.gempba.dashboard.history.NodeHistoryStore;
 import io.gempba.dashboard.presenter.*;
+import io.gempba.dashboard.settings.SettingsStore;
 import io.gempba.dashboard.telemetry.TelemetryStore;
 import io.gempba.dashboard.ui.*;
+import io.gempba.dashboard.ui.auth.SwtAuthPrompt;
 import io.gempba.dashboard.ui.settings.SwtSettingsView;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.Image;
@@ -15,6 +15,7 @@ import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.*;
 
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -28,14 +29,6 @@ import java.util.List;
  * the user closes the shell.
  */
 public final class DashboardApp {
-
-    /**
-     * gempba's center TCP server hardcodes loopback in
-     * {@code center_tcp_server.cpp}, so the dashboard always dials this for the
-     * initial status display (the actual connection details live inside
-     * {@link ConnectionController}).
-     */
-    private static final String LOOPBACK = "127.0.0.1";
 
     /**
      * Minimum gap between full renders (~30&nbsp;fps); see {@link FrameCoalescer}.
@@ -77,8 +70,35 @@ public final class DashboardApp {
         about.addListener(SWT.Selection, e -> AboutDialog.show(shell));
     }
 
+    /**
+     * Overlay any CLI/env ssh hints onto the saved settings: a jump host implies
+     * JUMP (ssh host becomes the compute target), an ssh host alone implies HOST;
+     * otherwise the saved settings stand. Precedence: CLI/env over saved over
+     * defaults.
+     */
+    private static DashboardSettings applyCliOverlay(DashboardSettings saved, Config cli) {
+        if (!cli.jumpHost().isBlank()) {
+            DashboardSettings.JumpSettings jumpSettings = new DashboardSettings.JumpSettings(
+                    cli.jumpHost(), SessionSpec.DEFAULT_SSH_PORT, cli.sshKey(),
+                    cli.sshHost(), cli.port(), saved.jump().recentTargets(), saved.jump().recentLoginHosts());
+
+            return new DashboardSettings(ConnectionMode.JUMP, saved.local(), saved.host(), jumpSettings, saved.workerIntervalMs(), saved.nodeIntervalMs());
+        }
+        if (!cli.sshHost().isBlank()) {
+            DashboardSettings.HostSettings hostSettings = new DashboardSettings.HostSettings(
+                    cli.sshHost(), SessionSpec.DEFAULT_SSH_PORT, cli.sshKey(),
+                    cli.port(), saved.host().recentPorts());
+
+            return new DashboardSettings(ConnectionMode.HOST, saved.local(), hostSettings, saved.jump(), saved.workerIntervalMs(), saved.nodeIntervalMs());
+        }
+        return saved;
+    }
+
     public void run() {
         Config initialConfig = Config.from(args);
+        SettingsStore store = SettingsStore.atDefaultLocation();
+        // Saved UI state seeds the bar; any CLI/env ssh hints overlay it.
+        DashboardSettings seed = applyCliOverlay(store.load(), initialConfig);
 
         Display display = new Display();
         Shell shell = new Shell(display);
@@ -94,22 +114,19 @@ public final class DashboardApp {
         buildMenuBar(shell);
 
         // ─── views (top to bottom) ──────────────────────────────────────────
-        SwtSettingsView settings = new SwtSettingsView(shell, initialConfig);
+        SwtSettingsView settings = new SwtSettingsView(shell, seed);
 
         Composite statusRow = new Composite(shell, SWT.NONE);
         statusRow.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
-        GridLayout statusLayout = new GridLayout(2, false);
+        GridLayout statusLayout = new GridLayout(1, false);
         statusLayout.marginWidth = 8;
         statusLayout.marginHeight = 2;
         statusLayout.horizontalSpacing = 10;
         statusRow.setLayout(statusLayout);
 
-        LiveToggle liveToggle = new LiveToggle(statusRow);
-        liveToggle.setLayoutData(new GridData(SWT.LEFT, SWT.CENTER, false, false));
-
         SwtStatusView statusBanner = new SwtStatusView(statusRow);
         statusBanner.control().setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-        statusBanner.setStatus("disconnected — target " + LOOPBACK + ":" + initialConfig.port());
+        statusBanner.setStatus("disconnected — pick a connection and press Connect (Local: just press Listen)");
 
         TabFolder tabs = new TabFolder(shell, SWT.NONE);
         tabs.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
@@ -141,36 +158,36 @@ public final class DashboardApp {
         DashboardCoordinator coordinator = new DashboardCoordinator(
                 display, RENDER_INTERVAL_MS, telemetryStore,
                 presenters, tabPresenters, statusBanner,
+                settings, store,
                 tabs::getSelectionIndex);
 
         tabs.addListener(SWT.Selection, e -> coordinator.onTabChanged());
 
         // ─── connection controller (owns clients, tunnels, sticky rates) ────
         // The coordinator is the controller's Listener (status + frames); the
-        // controller hops to the UI thread internally before calling it.
+        // controller hops to the UI thread internally before calling it. The
+        // AuthPrompt lets the embedded SSH client raise Duo / host-key / setup
+        // dialogs on this shell; known_hosts backs its trust-on-first-use.
+        SwtAuthPrompt authPrompt = new SwtAuthPrompt(display, shell);
+        Path knownHosts = Path.of(System.getProperty("user.home"), ".ssh", "known_hosts");
         ConnectionController controller = new ConnectionController(
-                new SwtUiExecutor(display), coordinator,
+                new SwtUiExecutor(display), coordinator, authPrompt, knownHosts,
                 RefreshInterval.DEFAULT_WORKER_MS, RefreshInterval.DEFAULT_NODE_MS);
 
-        coordinator.bind(controller, liveToggle);
-        liveToggle.setListener(controller::setLive);
+        coordinator.bind(controller);
         settings.setListener(coordinator);
 
         coordinator.start();             // sync presenter active-state to the Grid tab
 
-        ConnectionSpec connectionSpec = new ConnectionSpec(
-                initialConfig.port(),
-                initialConfig.sshHost(),
-                initialConfig.jumpHost(),
-                initialConfig.sshKey(),
-                false,
-                "");
-        controller.connect(connectionSpec);
+        // No auto-connect: the bar is pre-filled from saved settings and waits
+        // for the user to press Connect, so launching the app never fires an
+        // unprompted MFA challenge.
 
         shell.addListener(SWT.Close, e -> {
             // Close detail windows before the controller so no late frame races
-            // a half-disposed dialog.
+            // a half-disposed dialog. Persist the bar's state on the way out.
             detailWindows.clear();
+            store.save(settings.currentSettings());
             controller.close();
         });
 

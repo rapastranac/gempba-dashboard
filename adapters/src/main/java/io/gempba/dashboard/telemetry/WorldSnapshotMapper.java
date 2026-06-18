@@ -244,10 +244,13 @@ public final class WorldSnapshotMapper {
         long memTotal;
         long memUsed;
         if (nf != null) {
-            long total = nf.memTotalBytes();
-            long avail = nf.memAvailBytes();
-            memTotal = total;
-            memUsed = total > avail ? total - avail : 0;
+            long hostTotal = nf.memTotalBytes();
+            long hostUsed = hostTotal > nf.memAvailBytes() ? hostTotal - nf.memAvailBytes() : 0;
+            // Prefer the job's cgroup memory (its real footprint and allocation)
+            // over the host-wide totals, which on a shared node mostly reflect
+            // other tenants. Fall back per-field when a cgroup value is absent.
+            memUsed = nf.cgroupMemUsedBytes() > 0 ? nf.cgroupMemUsedBytes() : hostUsed;
+            memTotal = nf.cgroupMemLimitBytes() > 0 ? nf.cgroupMemLimitBytes() : hostTotal;
         } else if (topo != null) {
             memTotal = topo.memTotalBytes();
             memUsed = 0;

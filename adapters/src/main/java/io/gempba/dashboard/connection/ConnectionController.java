@@ -1,183 +1,245 @@
 package io.gempba.dashboard.connection;
 
-import io.gempba.dashboard.adapter.ssh.SshTunnel;
+import io.gempba.dashboard.adapter.ssh.Forward;
+import io.gempba.dashboard.adapter.ssh.PortForwardTunnel;
+import io.gempba.dashboard.adapter.ssh.RemoteConnection;
+import io.gempba.dashboard.adapter.ssh.RemoteConnectionFactory;
+import io.gempba.dashboard.auth.AuthPrompt;
 import io.gempba.dashboard.client.FrameListener;
 import io.gempba.dashboard.client.TelemetryClient;
 import io.gempba.dashboard.concurrent.UiExecutor;
-import io.gempba.dashboard.config.ConnectionSpec;
+import io.gempba.dashboard.config.ConnectionMode;
+import io.gempba.dashboard.config.ConnectionState;
+import io.gempba.dashboard.config.SessionSpec;
+import io.gempba.dashboard.config.TargetSpec;
 import io.gempba.dashboard.protocol.BroadcastEnvelope;
-import io.gempba.dashboard.ssh.SshCommand;
 
 import java.io.IOException;
-import java.util.List;
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Owns the runtime lifecycle of a connection to a gempba center —
- * {@link TelemetryClient} and (optionally) {@link SshTunnel}, plus the
- * sticky refresh-rate intervals re-pushed on every (re)connect.
- * <p>
- * Inputs from the UI come in as {@link ConnectionSpec} for connect calls
- * and as plain ints for rate pushes. Outputs go back through
- * {@link Listener} on the UI thread (the controller hops via the injected
- * {@link UiExecutor} internally), so listener implementations can touch
- * widgets directly without checking the current thread. Crucially the
- * controller itself imports no UI toolkit — only the {@code UiExecutor} port —
- * so it lives in the SWT-free adapter layer.
- * <p>
- * Threading shape:
+ * Owns the runtime lifecycle of a connection to a gempba center, split into two
+ * decoupled phases so authenticating (the expensive, MFA-gated step) happens
+ * <em>once</em> and re-pointing at a different job is cheap:
  * <ul>
- *   <li>Public methods are call-from-anywhere safe; they may block briefly
- *       on teardown but never on remote I/O.</li>
- *   <li>SSH tunnel readiness probe runs on a dedicated daemon thread — it
- *       can take ~20s on a cold connect, so we don't pin the caller.</li>
- *   <li>{@link FrameListener} callbacks fire on the
- *       {@link TelemetryClient}'s worker thread; the controller hops them
- *       to the UI thread before invoking {@link Listener}.</li>
+ *   <li>{@link #connect} authenticates and holds a {@link RemoteConnection}
+ *       (no-op for LOCAL). This is the only place an interactive MFA prompt
+ *       fires.</li>
+ *   <li>{@link #listen} opens a {@link Forward} over the held connection and
+ *       starts a {@link TelemetryClient} on it; re-callable to switch targets,
+ *       reusing the connection with no re-authentication.</li>
+ *   <li>{@link #stopListening} stops the telemetry stream but keeps the
+ *       authenticated connection warm, so a later {@link #listen} never
+ *       re-prompts. The same teardown runs automatically when the gempba stream
+ *       ends, reverting the UI from LISTENING back to CONNECTED.</li>
+ *   <li>{@link #disconnect} tears everything down.</li>
  * </ul>
  * <p>
- * Lifecycle: one instance lives for the whole shell. {@link #connect}
- * tears down any prior client/tunnel before starting a new one. {@link #close}
- * tears down the current one and signals "no more callbacks" — async
- * tunnel-opener threads still in flight will silently drop their results.
- * <p>
- * Live vs. paused: {@link #setLive} toggles the auto-reconnect machinery.
- * While live (the default), a {@link TelemetryClient} is active and retries
- * the connection continuously. When paused, the client and tunnel are torn
- * down — no reconnect attempts, no new frames — but nothing is cleared, so
- * the UI keeps showing the last data it received. Re-enabling live
- * reconnects to the most recent {@link ConnectionSpec}.
- * <p>
- * Stale-callback guard: every (re)connect and teardown bumps an epoch
- * counter, and each frame listener captures the epoch it was created under.
- * Callbacks whose epoch no longer matches are dropped, so a client that's
- * being torn down can't post a late "disconnected — retrying…" over a fresh
- * "paused" status, nor leak frames from a previous target.
+ * Outputs go back through {@link Listener} on the UI thread (the controller hops
+ * via the injected {@link UiExecutor}); the controller itself imports no UI
+ * toolkit. Threading: public methods are call-from-anywhere safe; SSH work runs
+ * on a dedicated daemon thread (it can block on a Duo dialog), and frame
+ * callbacks are hopped to the UI thread. An epoch counter plus a closed flag
+ * drop callbacks from a connection/stream that has since been superseded.
  */
 public final class ConnectionController implements AutoCloseable {
 
-    /**
-     * gempba's center TCP server hardcodes loopback in
-     * {@code center_tcp_server.cpp}; the controller always dials this,
-     * either as a local gempba directly or as the local end of an SSH tunnel.
-     */
     private static final String LOOPBACK = "127.0.0.1";
+    private static final String SSH_OPENER_THREAD = "gempba-ssh-opener";
+    private static final String FORWARD_OPENER_THREAD = "gempba-forward-opener";
+
     private final UiExecutor uiExecutor;
     private final Listener listener;
+    private final AuthPrompt authPrompt;
+    private final Path knownHostsPath;
+    private final RemoteConnectionFactory connectionFactory;
+
+    private final AtomicReference<RemoteConnection> connectionRef = new AtomicReference<>();
+    private final AtomicReference<PortForwardTunnel> forwardRef = new AtomicReference<>();
     private final AtomicReference<TelemetryClient> clientRef = new AtomicReference<>();
-    private final AtomicReference<SshTunnel> tunnelRef = new AtomicReference<>();
-    /**
-     * User-facing description of the current connection target — used to
-     * stamp status messages with something like {@code "user@vm → 127.0.0.1:9000"}.
-     * Set whenever {@link #connect} starts and not cleared until the next
-     * one starts.
-     */
     private final AtomicReference<String> activeTarget = new AtomicReference<>("");
-    /**
-     * Last-applied intervals, re-pushed on every (re)connect so a gempba
-     * restart inherits them. Default values match gempba's defaults so the
-     * initial push is a no-op for users who haven't customised.
-     */
+
     private final AtomicInteger desiredWorkerIntervalMs;
     private final AtomicInteger desiredNodeIntervalMs;
-    /**
-     * Set by {@link #close}. Async work in flight (tunnel openers, frame
-     * dispatches) checks this before touching the listener so a closed
-     * controller never fires.
-     */
+
     private final AtomicBoolean closed = new AtomicBoolean(false);
     /**
-     * Bumped on every {@link #teardownInternal} (i.e. every (re)connect,
-     * pause, and close). Frame listeners and tunnel openers capture the
-     * epoch they belong to and ignore their own callbacks once it's stale.
+     * Bumped on every teardown (connect, listen, disconnect, pause). Frame
+     * listeners and async openers capture the epoch they belong to and ignore
+     * their own callbacks once it's stale.
      */
     private final AtomicInteger epoch = new AtomicInteger(0);
-    /**
-     * The most recent target. Remembered so {@link #setLive}{@code (true)}
-     * can reconnect after a pause without the UI having to re-supply it.
-     * UI-thread state.
-     */
-    private ConnectionSpec lastSpec;
-    /**
-     * Whether the auto-reconnect machinery is active. Starts {@code true}
-     * (the dashboard connects and retries by default). UI-thread state.
-     */
-    private boolean live = true;
+
+    // UI-thread state, remembered for re-listen.
+    private SessionSpec lastSession;
+    private TargetSpec lastTarget;
 
     public ConnectionController(UiExecutor uiExecutor,
                                 Listener listener,
+                                AuthPrompt authPrompt,
+                                Path knownHostsPath,
+                                int initialWorkerIntervalMs,
+                                int initialNodeIntervalMs) {
+        this(uiExecutor, listener, authPrompt, knownHostsPath, RemoteConnection::connect, initialWorkerIntervalMs, initialNodeIntervalMs);
+    }
+
+    /**
+     * Constructor with an injectable connection factory (for tests).
+     */
+    public ConnectionController(UiExecutor uiExecutor,
+                                Listener listener,
+                                AuthPrompt authPrompt,
+                                Path knownHostsPath,
+                                RemoteConnectionFactory connectionFactory,
                                 int initialWorkerIntervalMs,
                                 int initialNodeIntervalMs) {
         this.uiExecutor = uiExecutor;
         this.listener = listener;
+        this.authPrompt = authPrompt;
+        this.knownHostsPath = knownHostsPath;
+        this.connectionFactory = connectionFactory;
         this.desiredWorkerIntervalMs = new AtomicInteger(initialWorkerIntervalMs);
         this.desiredNodeIntervalMs = new AtomicInteger(initialNodeIntervalMs);
     }
 
+    // ─── phase 1: connect (authenticate once) ────────────────────────────────
+
     /**
-     * Switch to a new connection target. Tears down any current
-     * client/tunnel first; opens the new one asynchronously when an SSH
-     * tunnel is involved (the readiness probe blocks for up to ~20 s on a
-     * cold connect, so {@code connect} returns immediately and the result
-     * arrives via {@link Listener#onStatus}).
+     * Authenticate to the given connection and hold it open. Tears down any
+     * prior connection first. For LOCAL there is nothing to authenticate, so it
+     * succeeds immediately. For HOST/JUMP the handshake (and any Duo prompt) runs
+     * on a daemon thread, so this returns at once and the result arrives via
+     * {@link Listener}.
      */
-    public void connect(ConnectionSpec spec) {
-        // Remember the target and mark us live: an explicit connect is an
-        // intent to be live, so it also un-pauses if we were paused.
-        this.lastSpec = spec;
-        this.live = true;
-        teardownInternal();
-        FrameListener frameListener = newFrameListener();
+    public void connect(SessionSpec session) {
+        this.lastSession = session;
+        teardownAll();
 
-        if (spec.overrideMode()) {
-            List<String> template;
+        if (session.mode() == ConnectionMode.LOCAL) {
+            postStatus("local — pick a port and press Go");
+            postState(ConnectionState.CONNECTED);
+            return;
+        }
+
+        final int myEpoch = epoch.get();
+        postStatus("connecting to " + session.host() + "… (enter your MFA code if prompted)");
+        postState(ConnectionState.CONNECTING);
+        Thread opener = new Thread(() -> {
             try {
-                template = SshCommand.tokenizeCommand(spec.customCommand());
-            } catch (IllegalArgumentException ex) {
-                postStatus("invalid override command: " + ex.getMessage());
-                return;
+                RemoteConnection remoteConnection = connectionFactory.connect(session, authPrompt, knownHostsPath);
+                hopToUi(() -> {
+                    if (closed.get() || myEpoch != epoch.get()) {
+                        remoteConnection.close();
+                        return;
+                    }
+                    connectionRef.set(remoteConnection);
+                    listener.onStatus("connected to " + session.host() + " — pick a target and press Go");
+                    listener.onConnectionState(ConnectionState.CONNECTED);
+                });
+            } catch (IOException ex) {
+                hopToUi(() -> {
+                    if (closed.get() || myEpoch != epoch.get()) {
+                        return;
+                    }
+                    listener.onStatus("connection failed: " + ex.getMessage());
+                    listener.onConnectionState(ConnectionState.DISCONNECTED);
+                });
             }
-            if (template.isEmpty()) {
-                postStatus("override command is empty");
-                return;
-            }
-            openTunnel(template, spec.sshKey(), "(custom command)", frameListener);
+        }, SSH_OPENER_THREAD);
+        opener.setDaemon(true);
+        opener.start();
+    }
+
+    // ─── phase 2: listen (point at a job, cheaply, no re-auth) ───────────────
+
+    /**
+     * Observe the given target over the held connection. Tears down the prior
+     * forward + telemetry client (but not the connection) and opens a new one.
+     * For LOCAL it dials {@code 127.0.0.1:port} directly.
+     */
+    public void listen(TargetSpec target) {
+        this.lastTarget = target;
+        ConnectionMode mode = currentMode();
+        teardownStream();
+        final int myEpoch = epoch.get();
+        FrameListener frameListener = newFrameListener(myEpoch);
+
+        if (mode == ConnectionMode.LOCAL) {
+            String desc = LOOPBACK + ":" + target.gempbaPort();
+            activeTarget.set(desc);
+            postStatus("connecting to " + desc + "…");
+            postState(ConnectionState.LISTENING);
+            startClient(target.gempbaPort(), frameListener);
             return;
         }
 
-        if (spec.sshHost().isBlank()) {
-            String target = LOOPBACK + ":" + spec.port();
-            activeTarget.set(target);
-            postStatus("connecting to " + target + "…");
-            TelemetryClient client = new TelemetryClient(LOOPBACK, spec.port(), frameListener);
-            // Publish before start: onConnected reads clientRef from the
-            // worker thread, which may fire before a post-start set().
-            clientRef.set(client);
-            client.start();
+        RemoteConnection conn = connectionRef.get();
+        if (conn == null || !conn.isAlive()) {
+            postStatus("not connected — press Connect first");
+            postState(ConnectionState.DISCONNECTED);
             return;
         }
-
-        String hopDescription = spec.jumpHost().isBlank()
-                ? spec.sshHost() + " → " + LOOPBACK + ":" + spec.port()
-                : spec.jumpHost() + " ⇒ " + spec.sshHost() + " → " + LOOPBACK + ":" + spec.port();
-        List<String> template = SshCommand.buildTemplate(
-                spec.sshHost(), LOOPBACK, spec.port(),
-                spec.sshKey().isBlank() ? null : spec.sshKey(),
-                spec.jumpHost().isBlank() ? null : spec.jumpHost());
-        openTunnel(template, spec.sshKey(), hopDescription, frameListener);
+        String desc = describeTarget(mode, target);
+        activeTarget.set(desc);
+        postStatus("opening telemetry forward to " + desc + "…");
+        Thread opener = new Thread(() -> {
+            try {
+                Forward forward = conn.openForward(target);
+                hopToUi(() -> {
+                    if (closed.get() || myEpoch != epoch.get()) {
+                        forward.close();
+                        return;
+                    }
+                    forwardRef.set(forward);
+                    listener.onStatus("listening to " + desc + " (127.0.0.1:" + forward.localPort() + ")…");
+                    listener.onConnectionState(ConnectionState.LISTENING);
+                    startClient(forward.localPort(), frameListener);
+                });
+            } catch (IOException ex) {
+                hopToUi(() -> {
+                    if (closed.get() || myEpoch != epoch.get()) {
+                        return;
+                    }
+                    // The session is still fine; only this target failed.
+                    listener.onStatus("could not observe " + desc + ": " + ex.getMessage());
+                    listener.onConnectionState(ConnectionState.CONNECTED);
+                });
+            }
+        }, FORWARD_OPENER_THREAD);
+        opener.setDaemon(true);
+        opener.start();
     }
 
     /**
-     * Push the chosen worker and node frame intervals to the running
-     * gempba. Stores them as the new desired values so subsequent
-     * reconnects re-apply them. If currently disconnected, only the desired
-     * values are stored; the next connect will push them as a side effect
-     * of {@link FrameListener#onConnected}.
-     * <p>
-     * The result (success / saved-offline / partial-failure) is reported
-     * via {@link Listener#onStatus}.
+     * Tear everything down and return to disconnected.
+     */
+    public void disconnect() {
+        teardownAll();
+        postStatus("disconnected");
+        postState(ConnectionState.DISCONNECTED);
+    }
+
+    /**
+     * Stop observing the current target (close the telemetry client and its
+     * forward) while keeping the authenticated connection open, so a later
+     * {@link #listen} reuses it with no re-authentication. Returns to CONNECTED
+     * (or DISCONNECTED if the session itself is gone). This is what the UI's
+     * Listen/Stop toggle calls, and what {@link #listen}'s stream-end handler
+     * runs automatically when gempba finishes.
+     */
+    public void stopListening() {
+        teardownStream();
+        postState(heldConnectionState());
+        postStatus(isConnectionHeld() ? "stopped — connection kept, press Listen to observe again" : "disconnected");
+    }
+
+    /**
+     * Push the chosen worker and node frame intervals to the running gempba over
+     * the live telemetry socket. Stores them as the new desired values so a
+     * (re)connect re-applies them.
      */
     public void pushRates(int workerIntervalMs, int nodeIntervalMs) {
         desiredWorkerIntervalMs.set(workerIntervalMs);
@@ -196,114 +258,100 @@ public final class ConnectionController implements AutoCloseable {
         }
     }
 
-    /**
-     * Whether the auto-reconnect machinery is currently active.
-     */
-    public boolean isLive() {
-        return live;
-    }
-
-    /**
-     * Turn the auto-reconnect machinery on or off.
-     * <p>
-     * {@code setLive(false)} tears down the active client and tunnel and
-     * stops all reconnect attempts; the UI keeps whatever it last showed
-     * (nothing is cleared). {@code setLive(true)} reconnects to the most
-     * recent {@link ConnectionSpec}, if there is one. No-op when already in
-     * the requested state.
-     */
-    public void setLive(boolean live) {
-        if (this.live == live) {
-            return;
-        }
-        this.live = live;
-        if (!live) {
-            teardownInternal();
-            postStatus("paused — showing last received data (auto-reconnect off)");
-        } else if (lastSpec != null) {
-            connect(lastSpec);
-        } else {
-            postStatus("ready — apply a connection to go live");
-        }
-    }
-
     @Override
     public void close() {
         closed.set(true);
-        teardownInternal();
+        teardownAll();
     }
 
-    private void teardownInternal() {
-        // Invalidate any in-flight callbacks from the client/tunnel we're
-        // about to drop, so their late status/frames don't land on the UI.
-        epoch.incrementAndGet();
+    // ─── internals ───────────────────────────────────────────────────────────
+
+    private ConnectionMode currentMode() {
+        return (lastSession != null) ? lastSession.mode() : ConnectionMode.LOCAL;
+    }
+
+    private String describeTarget(ConnectionMode mode, TargetSpec target) {
+        String dest = (mode == ConnectionMode.JUMP && target.hasTargetHost())
+                ? target.targetHost()
+                : (lastSession != null ? lastSession.host() : "");
+        return dest + " → 127.0.0.1:" + target.gempbaPort();
+    }
+
+    /**
+     * Start a telemetry client on a loopback port at the current epoch. Closes
+     * any prior client first.
+     */
+    private void startClient(int localPort, FrameListener frameListener) {
         TelemetryClient old = clientRef.getAndSet(null);
         if (old != null) {
             old.close();
         }
-        SshTunnel oldTunnel = tunnelRef.getAndSet(null);
-        if (oldTunnel != null) {
-            oldTunnel.close();
+        // One-shot: when the stream ends we revert to "ready" rather than silently
+        // reconnecting, so the worker must not retry on its own (that also rules
+        // out a reconnect racing the teardown that onDisconnected schedules).
+        TelemetryClient client = new TelemetryClient(LOOPBACK, localPort, frameListener, false);
+        // Publish before start: onConnected reads clientRef from the worker
+        // thread, which may fire before a post-start set().
+        clientRef.set(client);
+        client.start();
+    }
+
+    /**
+     * Whether an authenticated connection is still usable for a (re)listen:
+     * always true for LOCAL (no SSH session needed), otherwise true while the
+     * SSH session is alive.
+     */
+    private boolean isConnectionHeld() {
+        if (currentMode() == ConnectionMode.LOCAL) {
+            return true;
+        }
+        RemoteConnection conn = connectionRef.get();
+        return conn != null && conn.isAlive();
+    }
+
+    private ConnectionState heldConnectionState() {
+        return isConnectionHeld() ? ConnectionState.CONNECTED : ConnectionState.DISCONNECTED;
+    }
+
+    /**
+     * Tear down the telemetry stream + forward (not the connection). Bumps epoch.
+     */
+    private void teardownStream() {
+        epoch.incrementAndGet();
+        TelemetryClient client = clientRef.getAndSet(null);
+        if (client != null) {
+            client.close();
+        }
+        PortForwardTunnel forward = forwardRef.getAndSet(null);
+        if (forward != null) {
+            forward.close();
         }
     }
 
-    // ─── internals ──────────────────────────────────────────────────────────
-
-    private void openTunnel(List<String> template,
-                            String sshKeyForSubst,
-                            String hopDescription,
-                            FrameListener frameListener) {
-        // The epoch this tunnel belongs to. If a pause/reconnect/close bumps
-        // it while the ~20s readiness probe runs, the opened tunnel is
-        // discarded instead of becoming the active connection.
-        final int myEpoch = epoch.get();
-        activeTarget.set(hopDescription);
-        postStatus("opening ssh tunnel via " + hopDescription + "…");
-        Thread opener = new Thread(() -> {
-            try {
-                SshTunnel tunnel = SshTunnel.openWithTemplate(
-                        template,
-                        (sshKeyForSubst == null || sshKeyForSubst.isBlank()) ? null : sshKeyForSubst,
-                        SshTunnel.DEFAULT_ACCEPT_TIMEOUT);
-                hopToUi(() -> {
-                    if (closed.get() || myEpoch != epoch.get()) {
-                        tunnel.close();
-                        return;
-                    }
-                    tunnelRef.set(tunnel);
-                    int local = tunnel.localPort();
-                    listener.onStatus("ssh tunnel up via " + hopDescription + " (127.0.0.1:" + local + ") — connecting…");
-                    TelemetryClient client = new TelemetryClient(LOOPBACK, local, frameListener);
-                    // Publish before start: onConnected reads clientRef from the
-                    // worker thread, which may fire before a post-start set().
-                    clientRef.set(client);
-                    client.start();
-                });
-            } catch (IOException ex) {
-                postStatusForEpoch(myEpoch, "ssh tunnel failed (" + hopDescription + "): " + ex.getMessage());
-            }
-        }, "gempba-ssh-opener");
-        opener.setDaemon(true);
-        opener.start();
+    /**
+     * Tear down stream + forward + connection.
+     */
+    private void teardownAll() {
+        teardownStream();
+        RemoteConnection remoteConnection = connectionRef.getAndSet(null);
+        if (remoteConnection != null) {
+            remoteConnection.close();
+        }
     }
 
-    private FrameListener newFrameListener() {
-        // Capture the epoch this listener belongs to (connect() bumped it via
-        // teardownInternal just before calling us). Stale callbacks from a
-        // superseded client compare unequal and are dropped.
-        final int myEpoch = epoch.get();
+    private FrameListener newFrameListener(int myEpoch) {
         return new FrameListener() {
             @Override
             public void onConnected() {
-                // Push sticky intervals from this (worker) thread before
-                // the UI sees "connected" — the socket is open and the
-                // worker thread can write directly.
-                TelemetryClient c = clientRef.get();
-                if (c != null) {
-                    c.sendControl(TelemetryClient.CONTROL_SET_WORKER_INTERVAL_MS, desiredWorkerIntervalMs.get());
-                    c.sendControl(TelemetryClient.CONTROL_SET_NODE_INTERVAL_MS, desiredNodeIntervalMs.get());
+                if (closed.get() || myEpoch != epoch.get()) {
+                    return; // superseded by a newer listen/stop/disconnect
                 }
-                postStatusForEpoch(myEpoch, "connected to " + activeTarget.get());
+                TelemetryClient client = clientRef.get();
+                if (client != null) {
+                    client.sendControl(TelemetryClient.CONTROL_SET_WORKER_INTERVAL_MS, desiredWorkerIntervalMs.get());
+                    client.sendControl(TelemetryClient.CONTROL_SET_NODE_INTERVAL_MS, desiredNodeIntervalMs.get());
+                }
+                postStatusForEpoch(myEpoch, "streaming " + activeTarget.get());
             }
 
             @Override
@@ -318,8 +366,21 @@ public final class ConnectionController implements AutoCloseable {
 
             @Override
             public void onDisconnected(Exception cause) {
-                String reason = (cause == null) ? "peer closed" : cause.getMessage();
-                postStatusForEpoch(myEpoch, "disconnected from " + activeTarget.get() + " (" + reason + ") — retrying…");
+                hopToUi(() -> {
+                    if (closed.get() || myEpoch != epoch.get()) {
+                        return; // superseded by a newer listen/stop/disconnect
+                    }
+                    // The stream ended — gempba finished, or the link dropped.
+                    // Stop listening (so we don't silently retry) but keep the
+                    // authenticated connection warm, and revert LISTENING →
+                    // CONNECTED so the Listen/Stop toggle flips back on its own.
+                    String target = activeTarget.get();
+                    teardownStream();
+                    boolean held = isConnectionHeld();
+                    String why = (cause == null) ? "stream ended" : ("link lost: " + cause.getMessage());
+                    listener.onStatus(target + " — " + why + (held ? " (press Listen to observe again)" : ""));
+                    listener.onConnectionState(heldConnectionState());
+                });
             }
         };
     }
@@ -333,9 +394,6 @@ public final class ConnectionController implements AutoCloseable {
         });
     }
 
-    /**
-     * Like {@link #postStatus} but dropped when the epoch has moved on.
-     */
     private void postStatusForEpoch(int myEpoch, String text) {
         hopToUi(() -> {
             if (closed.get() || myEpoch != epoch.get()) {
@@ -345,12 +403,15 @@ public final class ConnectionController implements AutoCloseable {
         });
     }
 
-    /**
-     * Schedule {@code r} on the UI thread via the injected {@link UiExecutor}.
-     * Silently no-ops when the controller is closed; the executor itself drops
-     * work if the UI is gone (both happen during shell teardown when in-flight
-     * async work is racing the exit sequence).
-     */
+    private void postState(ConnectionState state) {
+        hopToUi(() -> {
+            if (closed.get()) {
+                return;
+            }
+            listener.onConnectionState(state);
+        });
+    }
+
     private void hopToUi(Runnable r) {
         if (closed.get()) {
             return;
@@ -359,23 +420,25 @@ public final class ConnectionController implements AutoCloseable {
     }
 
     /**
-     * Outward callbacks from the controller. All methods fire on the SWT
-     * UI thread.
+     * Outward callbacks from the controller. All methods fire on the UI thread.
      */
     public interface Listener {
+
         /**
-         * A user-facing status update — status banner text, basically.
-         * Covers connecting / connected / disconnected / tunnel-failed /
-         * rates-pushed / etc. The controller pre-formats each message so
-         * the listener doesn't need to care about the underlying state
-         * machine.
+         * A user-facing status line (connecting / connected / listening /
+         * paused / failed / rates-pushed / …), pre-formatted by the controller.
          */
         void onStatus(String text);
 
         /**
-         * A telemetry frame arrived. The listener typically forwards this
-         * to whatever views need it.
+         * A telemetry frame arrived.
          */
         void onFrame(BroadcastEnvelope frame);
+
+        /**
+         * The connection lifecycle moved, so the UI can lock/unlock fields and
+         * flip the Connect/Disconnect button.
+         */
+        void onConnectionState(ConnectionState state);
     }
 }

@@ -30,7 +30,7 @@ import java.util.List;
  * to. The argv produced by {@link SshCommand#buildTemplate} carries two
  * placeholders substituted at exec time by {@link SshCommand#resolveTemplate}.
  */
-public final class SshTunnel implements AutoCloseable {
+public final class SshTunnel implements PortForwardTunnel {
 
     /**
      * Default time to wait for the local forwarded port to start accepting
