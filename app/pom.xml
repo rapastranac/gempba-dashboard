@@ -49,6 +49,9 @@
                     <archive>
                         <manifest>
                             <mainClass>${main.class}</mainClass>
+                            <!-- Stamps Implementation-Version into the manifest so the About dialog
+                                 shows the release version (it falls back to "dev" without it). -->
+                            <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
                         </manifest>
                     </archive>
                 </configuration>
