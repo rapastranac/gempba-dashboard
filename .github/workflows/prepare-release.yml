@@ -1,0 +1,140 @@
+name: Prepare release
+
+# Manually-triggered: opens a release-prep PR against main for version X.Y.Z —
+# bumps the Maven reactor version, drafts release notes from git log, and opens
+# the PR. After curating the notes and merging, push the v<version> tag and
+# release-desktop.yml builds and publishes the app-images.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Target version (e.g. 1.1.0; no leading v)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
+    timeout-minutes: 15
+    steps:
+      - name: Validate version
+        run: |
+          set -euo pipefail
+          V='${{ inputs.version }}'
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z (got '$V')"
+            exit 1
+          fi
+          {
+            echo "VERSION=$V"
+            echo "TAG=v$V"
+            echo "BRANCH=prep/v$V"
+          } >> "$GITHUB_ENV"
+
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0  # full history so release-notes generation sees the prior tag
+
+      - name: Setup JDK 25
+        uses: ./.github/actions/setup-java-jdk
+
+      - name: Refuse if the tag or branch already exists
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+            echo "::error::tag $TAG already exists on origin"
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "::error::branch $BRANCH already exists on origin"
+            exit 1
+          fi
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create the prep branch
+        run: git switch -c "$BRANCH"
+
+      - name: Bump the Maven reactor version
+        run: mvn -B -ntp versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+
+      - name: Draft the release notes
+        run: |
+          set -euo pipefail
+          NOTES_DIR=docs/releases
+          NOTES="${NOTES_DIR}/release-notes-v${VERSION}.md"
+          mkdir -p "$NOTES_DIR"
+          if [ -f "$NOTES" ]; then
+            echo "::notice::$NOTES already exists; leaving it in place"
+            exit 0
+          fi
+          LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -1 || true)
+          if [ -z "$LAST_TAG" ]; then
+            RANGE=""
+            SINCE="initial release"
+          else
+            RANGE="${LAST_TAG}..HEAD"
+            SINCE="$LAST_TAG"
+          fi
+          DATE=$(date -u +%Y-%m-%d)
+          TAG_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          {
+            printf '%s\n\n' "# v${VERSION}"
+            printf '%s\n\n' "<small>${DATE} · [tag](${TAG_URL})</small>"
+            printf '%s\n\n' "<!-- TODO: one-line tagline -->"
+            printf '%s\n\n' "## Changed"
+            if [ -n "$RANGE" ]; then
+              git log --no-merges --pretty='- %s' "$RANGE" | head -200
+            fi
+            printf '\n%s\n' "<!-- TODO: curate — drop CI / internal items, rewrite for end-users; add Added / Fixed / Removed sections as needed. -->"
+          } > "$NOTES"
+          echo "wrote $NOTES (since ${SINCE})"
+
+      - name: Commit
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::error::nothing staged — the version bump and notes produced no diff"
+            exit 1
+          fi
+          git commit -m "$(printf '%s\n\n%s\n%s' \
+            "Prep release ${TAG}" \
+            "- Bump the Maven reactor version to ${VERSION}" \
+            "- Add docs/releases/release-notes-v${VERSION}.md draft (curate before merging)")"
+
+      - name: Push the prep branch
+        run: git push -u origin "$BRANCH"
+
+      - name: Open the prep PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BODY=$(mktemp)
+          printf '%s\n' \
+            "Auto-opened by the prepare-release workflow." \
+            "" \
+            "**Changes**" \
+            "" \
+            "- Maven reactor version bumped to \`${VERSION}\` (\`mvn versions:set\`)." \
+            "- Release-notes draft at \`docs/releases/release-notes-v${VERSION}.md\`, generated from \`git log\` — **curate before merging** (drop CI / internal items, write for end-users)." \
+            "" \
+            "**Operator checklist**" \
+            "" \
+            "- [ ] Curate \`docs/releases/release-notes-v${VERSION}.md\`." \
+            "- [ ] Confirm CI is green on this branch." \
+            "- [ ] Merge to \`main\`." \
+            "- [ ] Push the \`${TAG}\` tag — release-desktop.yml builds and publishes the app-images." \
+            > "$BODY"
+          gh pr create --base main --head "$BRANCH" --title "Prep release ${TAG}" --label Release --body-file "$BODY"
