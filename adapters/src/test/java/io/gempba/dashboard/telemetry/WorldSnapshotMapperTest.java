@@ -47,6 +47,7 @@ class WorldSnapshotMapperTest {
         NodeFrame nf = new NodeFrame(10L, 0L, "n0", 2, 8,
                 /*memTotal*/ 64L * 1024 * 1024 * 1024,
                 /*memAvail*/ 24L * 1024 * 1024 * 1024,
+                /*cgroupUsed*/ 0L, /*cgroupLimit*/ 0L,
                 null, null, null);
 
         WorkerFrame w10 = frame(10, 5, 80.0f, 500_000, List.of(new EdgeOut(11, 4096, 3)));
@@ -130,6 +131,26 @@ class WorldSnapshotMapperTest {
         assertThat(n.memTotalBytes()).isEqualTo(64L * 1024 * 1024 * 1024);
         assertThat(n.memUsedBytes()).isEqualTo(40L * 1024 * 1024 * 1024); // 64 - 24
         assertThat(n.sentinelWorkerId()).isEqualTo(10L);
+    }
+
+    @Test
+    void prefers_cgroup_memory_over_host_when_present() {
+        TopologyNode n0 = new TopologyNode("n0", 10L, 4, 8, 64L * 1024 * 1024 * 1024,
+                List.of(10L), List.of(socket(0, "Xeon", 2, 4, List.of(0, 1, 2, 3))));
+        Topology topo = new Topology(List.of(n0), List.of(ident(10, "n0", 1000, 0, List.of(0))));
+        NodeFrame nf = new NodeFrame(10L, 0L, "n0", 1, 8,
+                /*memTotal host*/ 64L * 1024 * 1024 * 1024,
+                /*memAvail host*/ 24L * 1024 * 1024 * 1024,
+                /*cgroupUsed*/ 512L * 1024 * 1024,
+                /*cgroupLimit*/ 8L * 1024 * 1024 * 1024,
+                null, null, null);
+        BroadcastEnvelope env = new BroadcastEnvelope(7, 1L, 0L, topo,
+                List.of(frame(10, 1, 50.0f, 0, List.of())), List.of(nf));
+
+        NodeSnapshot n = WorldSnapshotMapper.toWorldSnapshot(env).nodes().getFirst();
+        // cgroup figures win over the host's 40 GiB used / 64 GiB total.
+        assertThat(n.memUsedBytes()).isEqualTo(512L * 1024 * 1024);
+        assertThat(n.memTotalBytes()).isEqualTo(8L * 1024 * 1024 * 1024);
     }
 
     @Test

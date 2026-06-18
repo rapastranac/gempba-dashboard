@@ -23,7 +23,7 @@ class TelemetryStoreTest {
     }
 
     private static io.gempba.dashboard.protocol.NodeFrame nodeFrame() {
-        return new io.gempba.dashboard.protocol.NodeFrame(0, 0L, "h", 1, 4, 1000L, 250L, null, null, null);
+        return new io.gempba.dashboard.protocol.NodeFrame(0, 0L, "h", 1, 4, 1000L, 250L, 0L, 0L, null, null, null);
     }
 
     private static WorkerFrame cpuFrame(long wid, float cpu) {
