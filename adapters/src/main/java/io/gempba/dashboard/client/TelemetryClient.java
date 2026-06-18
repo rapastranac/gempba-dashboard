@@ -23,7 +23,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * 1. opens a TCP socket to (host, port),
  * 2. reads one JSON object per line and parses each into a {@link BroadcastEnvelope},
  * 3. invokes the {@link FrameListener} on every frame,
- * 4. on any I/O failure, fires onDisconnected and retries after the configured backoff.
+ * 4. on disconnect, fires onDisconnected and — when {@code autoReconnect} — retries
+ * after the configured backoff. A one-shot client ({@code autoReconnect=false})
+ * instead stops after the first disconnect, leaving any retry decision to the
+ * caller (so the stream ending is a single, final event).
  * <p>
  * {@link #sendControl} writes a single {@code \n}-terminated JSON line on the
  * write half of the same socket — the server side
@@ -69,6 +72,7 @@ public final class TelemetryClient implements AutoCloseable {
     private final FrameListener listener;
     private final ObjectMapper mapper;
     private final Duration reconnectBackoff;
+    private final boolean autoReconnect;
     private final Thread worker;
     private final AtomicBoolean running = new AtomicBoolean(false);
     /**
@@ -80,14 +84,28 @@ public final class TelemetryClient implements AutoCloseable {
     private final Object writeLock = new Object();
 
     public TelemetryClient(String host, int port, FrameListener listener) {
-        this(host, port, listener, DEFAULT_RECONNECT_BACKOFF);
+        this(host, port, listener, DEFAULT_RECONNECT_BACKOFF, true);
+    }
+
+    /**
+     * One-shot vs. auto-reconnecting client. With {@code autoReconnect=false} the
+     * worker stops after the first disconnect rather than retrying.
+     */
+    public TelemetryClient(String host, int port, FrameListener listener, boolean autoReconnect) {
+        this(host, port, listener, DEFAULT_RECONNECT_BACKOFF, autoReconnect);
     }
 
     public TelemetryClient(String host, int port, FrameListener listener, Duration reconnectBackoff) {
+        this(host, port, listener, reconnectBackoff, true);
+    }
+
+    public TelemetryClient(String host, int port, FrameListener listener, Duration reconnectBackoff,
+                           boolean autoReconnect) {
         this.host = host;
         this.port = port;
         this.listener = listener;
         this.reconnectBackoff = reconnectBackoff;
+        this.autoReconnect = autoReconnect;
         this.mapper = JsonMapper.create();
         this.worker = new Thread(this::run, "gempba-telemetry-client");
         this.worker.setDaemon(true);
@@ -161,8 +179,7 @@ public final class TelemetryClient implements AutoCloseable {
     private void run() {
         while (running.get()) {
             try (Socket socket = new Socket(host, port);
-                 BufferedReader reader = new BufferedReader(
-                         new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
 
                 activeSocket.set(socket);
                 try {
@@ -178,6 +195,11 @@ public final class TelemetryClient implements AutoCloseable {
                 listener.onDisconnected(ioe);
             }
 
+            if (!autoReconnect) {
+                // One-shot: the disconnect just delivered is final; don't retry.
+                running.set(false);
+                return;
+            }
             sleepBackoff();
         }
     }
