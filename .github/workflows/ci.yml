@@ -1,0 +1,115 @@
+name: CI
+
+# Build, test, and package the dashboard on every pull request (and push to main).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ (matrix.os == 'linux' && fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]')) || (matrix.os == 'windows' && fromJSON(vars.RUNNER_WINDOWS || '["windows-2025"]')) || fromJSON(vars.RUNNER_MACOS || '["macos-26"]') }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ linux, windows, macos ]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Clean stale .git locks
+        if: runner.os == 'macOS'
+        run: |
+          if [ -d "$GITHUB_WORKSPACE/.git" ]; then
+            find "$GITHUB_WORKSPACE/.git" -name '*.lock' -delete 2>/dev/null || true
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref }}
+
+      - name: Setup JDK 25
+        uses: ./.github/actions/setup-java-jdk
+
+      - name: Build (skip tests)
+        run: mvn -B -ntp -DskipTests verify
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ (matrix.os == 'linux' && fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]')) || (matrix.os == 'windows' && fromJSON(vars.RUNNER_WINDOWS || '["windows-2025"]')) || fromJSON(vars.RUNNER_MACOS || '["macos-26"]') }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ linux, windows, macos ]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Clean stale .git locks
+        if: runner.os == 'macOS'
+        run: |
+          if [ -d "$GITHUB_WORKSPACE/.git" ]; then
+            find "$GITHUB_WORKSPACE/.git" -name '*.lock' -delete 2>/dev/null || true
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref }}
+
+      - name: Setup JDK 25
+        uses: ./.github/actions/setup-java-jdk
+
+      - name: Test
+        run: mvn -B -ntp test
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ matrix.os }}
+          path: '**/target/surefire-reports/TEST-*.xml'
+          if-no-files-found: warn
+
+  publish-test-results:
+    name: publish-test-results
+    needs: test
+    runs-on: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
+    if: ${{ !cancelled() }}
+    steps:
+      - name: Download all test results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-*
+
+      - name: Publish JUnit report
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: '**/TEST-*.xml'
+          check_name: Test Results
+          fail_on_failure: true
+          detailed_summary: true
+          include_passed: true
+
+  package:
+    uses: ./.github/workflows/_package-app-images.yml
+    with:
+      version: '1.0.0'
+    secrets: inherit
