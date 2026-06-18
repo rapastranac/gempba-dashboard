@@ -107,3 +107,9 @@ jobs:
           fail_on_failure: true
           detailed_summary: true
           include_passed: true
+
+  package:
+    uses: ./.github/workflows/_package-app-images.yml
+    with:
+      version: '1.0.0'
+    secrets: inherit
