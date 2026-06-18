@@ -30,12 +30,12 @@ class SshCommandTest {
         // Even a long path is rendered as <ssh-key> in the template, keeping
         // the displayed command short and stable for the override field.
         List<String> tpl = SshCommand.buildTemplate("user@vm", "127.0.0.1", 9000,
-                "C:/Users/andres/.ssh/very/long/path/to/aws-key.pem", null);
+                "C:/Users/user/.ssh/very/long/path/to/aws-key.pem", null);
         assertThat(tpl).containsSubsequence(
                 "-i", "<ssh-key>",
                 "-o", "IdentitiesOnly=yes",
                 "-L", "<local-port>:127.0.0.1:9000");
-        assertThat(tpl).doesNotContain("C:/Users/andres/.ssh/very/long/path/to/aws-key.pem");
+        assertThat(tpl).doesNotContain("C:/Users/user/.ssh/very/long/path/to/aws-key.pem");
     }
 
     @Test
