@@ -1,301 +1,487 @@
 package io.gempba.dashboard.ui.settings;
 
-import io.gempba.dashboard.config.Config;
-import io.gempba.dashboard.config.ConnectionSpec;
-import io.gempba.dashboard.config.RefreshInterval;
-import io.gempba.dashboard.ssh.SshCommand;
+import io.gempba.dashboard.config.*;
 import io.gempba.dashboard.view.SettingsView;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionAdapter;
-import org.eclipse.swt.events.SelectionEvent;
+import org.eclipse.swt.custom.StackLayout;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Self-contained widget tree for the dashboard's settings strip — the band
- * across the top of the shell with port / SSH host / jump host / SSH key /
- * generated ssh command / override toggle / Apply / refresh-rate spinners /
- * Apply rates.
+ * The connection bar: a mode dropdown (Local / Host / Jump) whose fields split
+ * into a <em>connection</em> half (authenticate once — Connect/Disconnect) and a
+ * <em>target</em> half (point at a job — a Listen/Stop toggle), so re-pointing
+ * never re-authenticates. Per-mode field groups are swapped with a
+ * {@link StackLayout}; short lists of recent targets and login hosts are
+ * remembered for quick switching.
  * <p>
- * The strip owns its own widgets, validation, and internal UI state
- * (override-mode toggling, ssh-command preview rendering, Browse dialog).
- * It does not own the connection lifecycle, the status banner, or anything
- * outside the settings band — those are the surrounding application's job.
- * The strip is the SWT implementation of the {@link SettingsView} view
- * contract: clean specs, validation errors, and rate pushes all flow outward
- * through the {@link SettingsView.Listener} it is given.
- * <p>
- * Threading: all callbacks fire on the SWT UI thread. Listener implementations
- * that hand off to background work are responsible for doing so themselves.
+ * The bar owns its widgets and validation and emits intent through
+ * {@link SettingsView.Listener}; the application pushes lifecycle back in via
+ * {@link #setConnectionState}, which also flips the Listen/Stop toggle — so when
+ * the stream ends (gempba finished) the toggle reverts to "Listen" on its own.
+ * All callbacks fire on the UI thread.
  */
 public final class SwtSettingsView implements SettingsView {
 
-    private static final String LOOPBACK = "127.0.0.1";
+    private static final int RECENTS_CAP = 10;
+    private static final String[] MODE_LABELS = {"Local", "Host", "Jump host"};
 
-    private static final String DIRECT_PREVIEW = "(direct TCP — no ssh command; tick Override to enter one manually)";
-    private static final String INVALID_PORT_PREVIEW = "(invalid port — fix the Port field above)";
-
-    /**
-     * Stand-in used between construction and the host application calling
-     * {@link #setListener}. Lets us build the strip in the natural order
-     * (widgets first, controllers second) without forward-reference holders
-     * — clicks that arrive before a real listener is attached are dropped
-     * silently, which is the right thing during a short, intentional
-     * wiring window.
-     */
-    private static final SettingsView.Listener NO_OP_LISTENER = new SettingsView.Listener() {
+    private static final SettingsView.Listener NO_OP = new SettingsView.Listener() {
         @Override
-        public void onConnectionApply(ConnectionSpec spec) {
+        public void onConnect(SessionSpec s) {
         }
 
         @Override
-        public void onConnectionInvalid(String reason) {
+        public void onDisconnect() {
         }
 
         @Override
-        public void onRatesApply(int workerIntervalMs, int nodeIntervalMs) {
+        public void onListen(TargetSpec t) {
+        }
+
+        @Override
+        public void onStopListen() {
+        }
+
+        @Override
+        public void onModeChange() {
+        }
+
+        @Override
+        public void onRatesApply(int w, int n) {
+        }
+
+        @Override
+        public void onInvalid(String r) {
         }
     };
-    // Connection inputs.
-    private final Text portField;
-    private final Text sshHostField;
-    private final Text jumpHostField;
-    private final Text sshKeyField;
-    private final Text cmdField;
-    private final Button overrideButton;
-    // Rate inputs.
+
+    // mode
+    private final Combo modeCombo;
+    // connection inputs (locked while connected)
+    private final StackLayout connStack;
+    private final Composite connArea;
+    private final Composite[] connByMode;       // indexed by ConnectionMode.ordinal()
+    private final Text hostField;
+    private final Spinner hostSshPort;
+    private final Text hostKeyField;
+    private final Combo loginCombo;
+    private final Spinner jumpSshPort;
+    private final Text jumpKeyField;
+    private final List<Control> connectionInputs = new ArrayList<>();
+    private final Button connectButton;
+    // target inputs (free once connected)
+    private final StackLayout targetStack;
+    private final Composite targetArea;
+    private final Composite[] targetByMode;
+    private final Combo localPortCombo;
+    private final Combo hostPortCombo;
+    private final Combo jumpTargetCombo;
+    private final Spinner jumpPort;
+    private final Button listenButton;
+    // rates
     private final Spinner workerRateSpinner;
     private final Spinner nodeRateSpinner;
-    private SettingsView.Listener listener = NO_OP_LISTENER;
+    // recents (mutable; mirrored into the combos)
+    private final List<Integer> localRecents = new ArrayList<>();
+    private final List<Integer> hostRecents = new ArrayList<>();
+    private final List<String> jumpRecents = new ArrayList<>();
+    private final List<String> jumpLoginRecents = new ArrayList<>();
 
-    public SwtSettingsView(Composite parent, Config initialConfig) {
-        Composite settings = new Composite(parent, SWT.BORDER);
-        settings.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
-        GridLayout settingsLayout = new GridLayout(1, false);
-        settingsLayout.marginWidth = 8;
-        settingsLayout.marginHeight = 6;
-        settingsLayout.verticalSpacing = 4;
-        settings.setLayout(settingsLayout);
+    private SettingsView.Listener listener = NO_OP;
+    private boolean connected = false;
+    private boolean listening = false;
+    private ConnectionMode shownMode = null;
 
-        // Row 1: Port / SSH host. There is no Host field — gempba binds to
-        // loopback only, so the dashboard always dials 127.0.0.1 (the local
-        // gempba directly, or the local end of the SSH tunnel).
-        Composite row1 = horizontalRow(settings, 4);
+    public SwtSettingsView(Composite parent, DashboardSettings initial) {
+        Composite root = new Composite(parent, SWT.BORDER);
+        root.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
+        GridLayout rootLayout = new GridLayout(1, false);
+        rootLayout.marginWidth = 8;
+        rootLayout.marginHeight = 6;
+        rootLayout.verticalSpacing = 6;
+        root.setLayout(rootLayout);
 
-        new Label(row1, SWT.NONE).setText("Port:");
-        portField = new Text(row1, SWT.BORDER);
-        GridData portGd = new GridData(SWT.LEFT, SWT.CENTER, false, false);
-        portGd.widthHint = 70;
-        portField.setLayoutData(portGd);
-        portField.setText(String.valueOf(initialConfig.port()));
-        portField.setToolTipText(
-                "gempba's listening port: what GEMPBA_TELEMETRY_PORT is "
-                        + "set to on the running process (default 9000). "
-                        + "The dashboard always dials 127.0.0.1 on this "
-                        + "port, either locally or through the SSH tunnel.");
+        // ── Row 1: mode + connection fields + Connect/Disconnect ──
+        Composite row1 = row(root, 4);
+        new Label(row1, SWT.NONE).setText("Mode:");
+        modeCombo = new Combo(row1, SWT.DROP_DOWN | SWT.READ_ONLY);
+        modeCombo.setItems(MODE_LABELS);
 
-        new Label(row1, SWT.NONE).setText("SSH host:");
-        sshHostField = new Text(row1, SWT.BORDER);
-        sshHostField.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-        sshHostField.setMessage("user@vm-ip   (node running GemPBA)");
-        sshHostField.setToolTipText(
-                "Optional. SSH destination: must include the remote "
-                        + "username, e.g. 'user@35.227.142.127'. "
-                        + "Without 'user@', ssh defaults to your local "
-                        + "Windows username, which usually fails on GCP.\n"
-                        + "When set, the dashboard tunnels via 'ssh -N -L' "
-                        + "using your system ssh client (~/.ssh/config, "
-                        + "ssh-agent, OS Login). Leave blank for direct TCP "
-                        + "to a gempba running on this machine.");
-        sshHostField.setText(initialConfig.sshHost());
+        connArea = new Composite(row1, SWT.NONE);
+        connArea.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        connStack = new StackLayout();
+        connArea.setLayout(connStack);
 
-        // Row 2: Jump host / SSH key / Browse
-        Composite row2 = horizontalRow(settings, 5);
+        // LOCAL connection: nothing to configure.
+        Composite localConn = new Composite(connArea, SWT.NONE);
+        localConn.setLayout(zeroGrid(1));
+        Label localNote = new Label(localConn, SWT.NONE);
+        localNote.setText("gempba on this machine — no SSH.");
 
-        new Label(row2, SWT.NONE).setText("Jump host:");
-        jumpHostField = new Text(row2, SWT.BORDER);
-        jumpHostField.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-        jumpHostField.setMessage("user@login.cluster.edu   (HPC: tunnel hops through here)");
-        jumpHostField.setToolTipText(
-                "Optional. SSH jump host (-J / ProxyJump). Use this for the "
-                        + "HPC pattern where you ssh to a login node and then "
-                        + "from there to a compute node running gempba: put "
-                        + "the login node here and the compute node in 'SSH "
-                        + "host'. Leave blank for a single-hop tunnel.");
-        jumpHostField.setText(initialConfig.jumpHost());
+        // HOST connection.
+        Composite hostConn = new Composite(connArea, SWT.NONE);
+        hostConn.setLayout(zeroGrid(7));
+        new Label(hostConn, SWT.NONE).setText("SSH host:");
+        hostField = new Text(hostConn, SWT.BORDER);
+        hostField.setLayoutData(fill(220));
+        hostField.setMessage("user@vm-ip");
+        new Label(hostConn, SWT.NONE).setText("Port:");
+        hostSshPort = sshPortSpinner(hostConn);
+        new Label(hostConn, SWT.NONE).setText("Key:");
+        hostKeyField = new Text(hostConn, SWT.BORDER);
+        hostKeyField.setLayoutData(fill(160));
+        hostKeyField.setMessage("(optional)");
+        addBrowse(hostConn, hostKeyField);
 
-        new Label(row2, SWT.NONE).setText("SSH key:");
-        sshKeyField = new Text(row2, SWT.BORDER);
-        sshKeyField.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
-        sshKeyField.setMessage("(optional: uses system ssh config when blank)");
-        sshKeyField.setToolTipText(
-                "Optional. Private key file passed to 'ssh -i'. Leave blank "
-                        + "to use ssh-agent / ~/.ssh/config / OS Login — fine "
-                        + "for GCP where your public key is registered on the "
-                        + "VM, and for HPC clusters where your key is "
-                        + "registered on the login node. Set this only when "
-                        + "you need a specific PEM (typical AWS workflow).\n"
-                        + "Stays editable in override mode — the displayed "
-                        + "'<ssh-key>' placeholder is substituted at exec time.");
-        sshKeyField.setText(initialConfig.sshKey());
+        // JUMP connection.
+        Composite jumpConn = new Composite(connArea, SWT.NONE);
+        jumpConn.setLayout(zeroGrid(7));
+        new Label(jumpConn, SWT.NONE).setText("Login host:");
+        loginCombo = new Combo(jumpConn, SWT.DROP_DOWN);
+        loginCombo.setLayoutData(fill(220));
+        loginCombo.setToolTipText("The login node you authenticate to, e.g. user@login.cluster.edu. "
+                + "Recent login hosts are remembered for jumping between clusters.");
+        new Label(jumpConn, SWT.NONE).setText("Port:");
+        jumpSshPort = sshPortSpinner(jumpConn);
+        new Label(jumpConn, SWT.NONE).setText("Key:");
+        jumpKeyField = new Text(jumpConn, SWT.BORDER);
+        jumpKeyField.setLayoutData(fill(160));
+        jumpKeyField.setMessage("(optional)");
+        addBrowse(jumpConn, jumpKeyField);
 
-        Button browseButton = new Button(row2, SWT.PUSH);
-        browseButton.setText("Browse…");
+        connByMode = new Composite[]{localConn, hostConn, jumpConn};
+        connectionInputs.add(hostField);
+        connectionInputs.add(hostSshPort);
+        connectionInputs.add(hostKeyField);
+        connectionInputs.add(loginCombo);
+        connectionInputs.add(jumpSshPort);
+        connectionInputs.add(jumpKeyField);
 
-        // Row 3: ssh command preview / override target
-        Composite row3 = horizontalRow(settings, 2);
+        connectButton = new Button(row1, SWT.PUSH);
+        connectButton.setLayoutData(new GridData(SWT.RIGHT, SWT.CENTER, false, false, 1, 1));
+        ((GridData) connectButton.getLayoutData()).widthHint = 100;
 
-        Label cmdLabel = new Label(row3, SWT.NONE);
-        cmdLabel.setText("ssh command:");
-        cmdLabel.setLayoutData(new GridData(SWT.LEFT, SWT.TOP, false, false));
+        // ── Row 2: target fields + Go ──
+        Composite row2 = row(root, 2);
+        targetArea = new Composite(row2, SWT.NONE);
+        targetArea.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+        targetStack = new StackLayout();
+        targetArea.setLayout(targetStack);
 
-        cmdField = new Text(row3, SWT.BORDER | SWT.WRAP | SWT.MULTI);
-        GridData cmdGd = new GridData(SWT.FILL, SWT.CENTER, true, false);
-        cmdGd.heightHint = 48;
-        cmdField.setLayoutData(cmdGd);
-        cmdField.setEditable(false);
-        cmdField.setToolTipText(
-                "The 'ssh' command the dashboard will run when SSH host is "
-                        + "set. Read-only until you tick 'Override' below.\n"
-                        + "Placeholders: <local-port> is substituted with an "
-                        + "auto-picked port at exec time; <ssh-key> is "
-                        + "substituted with the SSH key field above. Keep "
-                        + "them as-is in override mode unless you have a "
-                        + "specific reason to fix the local port (then put "
-                        + "a literal number in -L; the dashboard will parse "
-                        + "it back).");
+        Composite localTarget = new Composite(targetArea, SWT.NONE);
+        localTarget.setLayout(zeroGrid(2));
+        new Label(localTarget, SWT.NONE).setText("gempba port:");
+        localPortCombo = new Combo(localTarget, SWT.DROP_DOWN);
+        localPortCombo.setLayoutData(fill(120));
 
-        // Row 4: override toggle + Apply
-        Composite row4 = horizontalRow(settings, 2);
+        Composite hostTarget = new Composite(targetArea, SWT.NONE);
+        hostTarget.setLayout(zeroGrid(2));
+        new Label(hostTarget, SWT.NONE).setText("gempba port:");
+        hostPortCombo = new Combo(hostTarget, SWT.DROP_DOWN);
+        hostPortCombo.setLayoutData(fill(120));
 
-        overrideButton = new Button(row4, SWT.CHECK);
-        overrideButton.setText("Override command line");
-        overrideButton.setLayoutData(new GridData(SWT.LEFT, SWT.CENTER, true, false));
-        overrideButton.setToolTipText(
-                "Take manual control of the ssh command above. Use this "
-                        + "when your tunnel needs flags the dashboard "
-                        + "doesn't expose (e.g. -A for agent forwarding, "
-                        + "multiple -L forwards, extra -o options). The "
-                        + "Port / SSH host / Jump host fields above are "
-                        + "disabled while override is on; SSH key stays "
-                        + "active because the command references it via "
-                        + "the <ssh-key> placeholder.");
+        Composite jumpTarget = new Composite(targetArea, SWT.NONE);
+        jumpTarget.setLayout(zeroGrid(4));
+        new Label(jumpTarget, SWT.NONE).setText("Compute node:");
+        jumpTargetCombo = new Combo(jumpTarget, SWT.DROP_DOWN);
+        jumpTargetCombo.setLayoutData(fill(220));
+        jumpTargetCombo.setToolTipText("The compute node running gempba, e.g. fc30557 — find it with squeue. "
+                + "Your login account carries over automatically, so just the node name is enough.");
+        new Label(jumpTarget, SWT.NONE).setText("Port:");
+        jumpPort = new Spinner(jumpTarget, SWT.BORDER);
+        jumpPort.setMinimum(1);
+        jumpPort.setMaximum(65_535);
 
-        Button applyButton = new Button(row4, SWT.PUSH);
-        applyButton.setText("Apply");
+        targetByMode = new Composite[]{localTarget, hostTarget, jumpTarget};
 
-        // Row 5: refresh rates pushed to the running gempba over the same
-        // socket. gempba's center clamps incoming values to [50, 600000] ms
-        // (parse_control_line / apply_control_from_client), so the spinners
-        // mirror that range; we don't pre-clamp client-side, the user sees
-        // exactly what they sent.
-        Composite row5 = horizontalRow(settings, 5);
-        ((GridLayout) row5.getLayout()).horizontalSpacing = 8;
+        listenButton = new Button(row2, SWT.PUSH);
+        listenButton.setText("Listen");
+        GridData listenGd = new GridData(SWT.RIGHT, SWT.CENTER, false, false);
+        listenGd.widthHint = 100;
+        listenButton.setLayoutData(listenGd);
 
-        new Label(row5, SWT.NONE).setText("Worker rate (ms):");
-        workerRateSpinner = new Spinner(row5, SWT.BORDER);
-        workerRateSpinner.setMinimum(RefreshInterval.MIN_MS);
-        workerRateSpinner.setMaximum(RefreshInterval.MAX_MS);
-        workerRateSpinner.setIncrement(50);
-        workerRateSpinner.setPageIncrement(500);
-        workerRateSpinner.setSelection(RefreshInterval.DEFAULT_WORKER_MS);
-        workerRateSpinner.setToolTipText(
-                "How often each worker emits a frame, in milliseconds. "
-                        + "Lower = smoother dashboard but more CPU/network "
-                        + "overhead on the worker. Range: "
-                        + RefreshInterval.MIN_MS + "–"
-                        + RefreshInterval.MAX_MS + " ms (gempba "
-                        + "clamps to this range server-side).");
+        // ── Row 3: rates ──
+        Composite row3 = row(root, 5);
+        ((GridLayout) row3.getLayout()).horizontalSpacing = 8;
+        new Label(row3, SWT.NONE).setText("Worker rate (ms):");
+        workerRateSpinner = rateSpinner(row3, 50, 500, initial.workerIntervalMs());
+        new Label(row3, SWT.NONE).setText("Node rate (ms):");
+        nodeRateSpinner = rateSpinner(row3, 100, 1000, initial.nodeIntervalMs());
+        Button applyRates = new Button(row3, SWT.PUSH);
+        applyRates.setText("Apply rates");
 
-        new Label(row5, SWT.NONE).setText("Node rate (ms):");
-        nodeRateSpinner = new Spinner(row5, SWT.BORDER);
-        nodeRateSpinner.setMinimum(RefreshInterval.MIN_MS);
-        nodeRateSpinner.setMaximum(RefreshInterval.MAX_MS);
-        nodeRateSpinner.setIncrement(100);
-        nodeRateSpinner.setPageIncrement(1000);
-        nodeRateSpinner.setSelection(RefreshInterval.DEFAULT_NODE_MS);
-        nodeRateSpinner.setToolTipText(
-                "How often the per-node sentinel emits a node frame, in "
-                        + "milliseconds. Same range as worker rate. Node "
-                        + "telemetry is more expensive (probes the OS for "
-                        + "CPU/memory/disk/net), so the default is slower.");
-
-        Button applyRatesButton = new Button(row5, SWT.PUSH);
-        applyRatesButton.setText("Apply rates");
-        applyRatesButton.setToolTipText(
-                "Push the chosen worker and node frame intervals to the "
-                        + "running gempba over the existing telemetry "
-                        + "connection (no reconnect). Takes effect on "
-                        + "gempba's next emission cycle. The dashboard also "
-                        + "re-sends these on every (re)connect, so a gempba "
-                        + "restart inherits whatever you last set.");
-
-        // ─── interaction wiring ─────────────────────────────────────────────
-
-        // Live-update the preview on any input change (no-op while override
-        // is on — the user is editing the command directly).
-        portField.addListener(SWT.Modify, e -> updatePreview());
-        sshHostField.addListener(SWT.Modify, e -> updatePreview());
-        jumpHostField.addListener(SWT.Modify, e -> updatePreview());
-        sshKeyField.addListener(SWT.Modify, e -> updatePreview());
-
-        // Toggle override: edit the command directly, lock the template
-        // params (sshKey stays free since the command references it via
-        // <ssh-key>).
-        overrideButton.addListener(SWT.Selection, e -> {
-            boolean on = overrideButton.getSelection();
-            cmdField.setEditable(on);
-            portField.setEnabled(!on);
-            sshHostField.setEnabled(!on);
-            jumpHostField.setEnabled(!on);
-            // Re-sync the preview from inputs when leaving override mode so
-            // the user sees what their fields would produce; never auto-clear
-            // their custom command on the way in.
-            if (!on) {
-                updatePreview();
+        // ── prefill + wiring ──
+        applyInitial(initial);
+        modeCombo.addListener(SWT.Selection, e -> onModeChanged());
+        connectButton.addListener(SWT.Selection, e -> {
+            if (connected) {
+                listener.onDisconnect();
+            } else {
+                fireConnect();
             }
         });
+        listenButton.addListener(SWT.Selection, e -> {
+            if (listening) {
+                listener.onStopListen();
+            } else {
+                fireListen();
+            }
+        });
+        applyRates.addListener(SWT.Selection, e ->
+                listener.onRatesApply(workerRateSpinner.getSelection(), nodeRateSpinner.getSelection()));
 
-        browseButton.addListener(SWT.Selection, e -> {
-            Shell shell = settings.getShell();
-            FileDialog dialog = new FileDialog(shell, SWT.OPEN);
+        // Seed shownMode so the construction-time onModeChanged() lays out the
+        // panels without firing onModeChange(); the first real switch will.
+        shownMode = currentMode();
+        onModeChanged();
+        setConnectionState(ConnectionState.DISCONNECTED);
+    }
+
+    @Override
+    public void setListener(SettingsView.Listener listener) {
+        this.listener = (listener != null) ? listener : NO_OP;
+    }
+
+    @Override
+    public void setConnectionState(ConnectionState state) {
+        if (modeCombo.isDisposed()) {
+            return;
+        }
+        connected = state == ConnectionState.CONNECTED || state == ConnectionState.LISTENING;
+        listening = state == ConnectionState.LISTENING;
+        boolean connecting = state == ConnectionState.CONNECTING;
+        ConnectionMode mode = currentMode();
+
+        connectButton.setText(connected ? "Disconnect" : "Connect");
+        // LOCAL needs no separate authentication step — Listen does it all.
+        boolean showConnect = mode != ConnectionMode.LOCAL || connected;
+        setVisible(connectButton, showConnect);
+        connectButton.setEnabled(!connecting);
+        connectButton.requestLayout();
+
+        boolean fieldsLocked = connected || connecting;
+        modeCombo.setEnabled(!fieldsLocked);
+        for (Control c : connectionInputs) {
+            c.setEnabled(!fieldsLocked);
+        }
+        // One toggle: "Listen" starts observing the target, "Stop" stops it while
+        // keeping the connection. It reverts to "Listen" automatically when the
+        // stream ends (gempba finished), driven by the LISTENING→CONNECTED state.
+        listenButton.setText(listening ? "Stop" : "Listen");
+        listenButton.setEnabled(!connecting && (mode == ConnectionMode.LOCAL || connected));
+    }
+
+    /**
+     * A snapshot of the current bar state, for persistence.
+     */
+    public DashboardSettings currentSettings() {
+        ConnectionMode lastMode = currentMode();
+
+        DashboardSettings.LocalSettings localSettings = new DashboardSettings.LocalSettings(comboPort(localPortCombo, 9000),
+                new ArrayList<>(localRecents));
+
+        DashboardSettings.HostSettings hostSettings = new DashboardSettings.HostSettings(hostField.getText().trim(), hostSshPort.getSelection(),
+                hostKeyField.getText().trim(), comboPort(hostPortCombo, 9000), new ArrayList<>(hostRecents));
+
+        DashboardSettings.JumpSettings jumpSettings = new DashboardSettings.JumpSettings(loginCombo.getText().trim(), jumpSshPort.getSelection(),
+                jumpKeyField.getText().trim(), jumpTargetCombo.getText().trim(), jumpPort.getSelection(), new ArrayList<>(jumpRecents),
+                new ArrayList<>(jumpLoginRecents));
+
+        return new DashboardSettings(lastMode, localSettings, hostSettings, jumpSettings, workerRateSpinner.getSelection(),
+                nodeRateSpinner.getSelection());
+    }
+
+    // ─── event handlers ──────────────────────────────────────────────────────
+
+    private void onModeChanged() {
+        ConnectionMode mode = currentMode();
+        connStack.topControl = connByMode[mode.ordinal()];
+        targetStack.topControl = targetByMode[mode.ordinal()];
+        connArea.layout();
+        targetArea.layout();
+        // Re-evaluate button visibility/enablement for the new mode.
+        setConnectionState(connected ? ConnectionState.LISTENING : ConnectionState.DISCONNECTED);
+        // A real mode switch is a new observation context — let the app clear the
+        // previous session's tiles/cards. (Skipped on the first, construction-time
+        // call and on re-selecting the same mode.)
+        if (mode != shownMode) {
+            shownMode = mode;
+            listener.onModeChange();
+        }
+    }
+
+    private void fireConnect() {
+        ConnectionMode mode = currentMode();
+        if (mode == ConnectionMode.HOST && hostField.getText().isBlank()) {
+            listener.onInvalid("enter the SSH host (user@vm-ip)");
+            return;
+        }
+        if (mode == ConnectionMode.JUMP && loginCombo.getText().isBlank()) {
+            listener.onInvalid("enter the login host (user@login)");
+            return;
+        }
+        if (mode == ConnectionMode.JUMP) {
+            pushString(jumpLoginRecents, loginCombo, loginCombo.getText().trim());
+        }
+        listener.onConnect(buildSession(mode));
+    }
+
+    private void fireListen() {
+        ConnectionMode mode = currentMode();
+        TargetSpec target = buildTarget(mode);
+        if (target == null) {
+            return; // buildTarget reported the error
+        }
+        // LOCAL has no separate connect step: ensure connected, then listen.
+        if (mode == ConnectionMode.LOCAL && !connected) {
+            listener.onConnect(SessionSpec.local());
+        }
+        rememberTarget(mode, target);
+        listener.onListen(target);
+    }
+
+    // ─── builders ──────────────────────────────────────────────────────────--
+
+    private SessionSpec buildSession(ConnectionMode mode) {
+        return switch (mode) {
+            case LOCAL -> SessionSpec.local();
+            case HOST -> new SessionSpec(ConnectionMode.HOST, hostField.getText().trim(),
+                    hostSshPort.getSelection(), hostKeyField.getText().trim(), SessionSpec.AuthMethod.SSH_KEY);
+            case JUMP -> new SessionSpec(ConnectionMode.JUMP, loginCombo.getText().trim(),
+                    jumpSshPort.getSelection(), jumpKeyField.getText().trim(), SessionSpec.AuthMethod.SSH_KEY);
+        };
+    }
+
+    private TargetSpec buildTarget(ConnectionMode mode) {
+        return switch (mode) {
+            case LOCAL -> portTarget("", localPortCombo);
+            case HOST -> portTarget("", hostPortCombo);
+            case JUMP -> {
+                String node = jumpTargetCombo.getText().trim();
+                if (node.isBlank()) {
+                    listener.onInvalid("enter the compute node to observe (user@node)");
+                    yield null;
+                }
+                yield new TargetSpec(node, jumpPort.getSelection());
+            }
+        };
+    }
+
+    private TargetSpec portTarget(String host, Combo portCombo) {
+        int port = parsePort(portCombo.getText().trim());
+        if (port < 0) {
+            listener.onInvalid("invalid gempba port (must be 1–65535)");
+            return null;
+        }
+        return new TargetSpec(host, port);
+    }
+
+    // ─── recents ───────────────────────────────────────────────────────────--
+
+    private void rememberTarget(ConnectionMode mode, TargetSpec target) {
+        switch (mode) {
+            case LOCAL -> pushPort(localRecents, localPortCombo, target.gempbaPort());
+            case HOST -> pushPort(hostRecents, hostPortCombo, target.gempbaPort());
+            case JUMP -> pushString(jumpRecents, jumpTargetCombo, target.targetHost());
+        }
+    }
+
+    private void pushPort(List<Integer> recents, Combo combo, int port) {
+        recents.remove(Integer.valueOf(port));
+        recents.add(0, port);
+        while (recents.size() > RECENTS_CAP) {
+            recents.remove(recents.size() - 1);
+        }
+        String text = String.valueOf(port);
+        combo.setItems(recents.stream().map(String::valueOf).toArray(String[]::new));
+        combo.setText(text);
+    }
+
+    private void pushString(List<String> recents, Combo combo, String value) {
+        recents.remove(value);
+        recents.add(0, value);
+        while (recents.size() > RECENTS_CAP) {
+            recents.remove(recents.size() - 1);
+        }
+        combo.setItems(recents.toArray(new String[0]));
+        combo.setText(value);
+    }
+
+    // ─── prefill + small helpers ─────────────────────────────────────────────
+
+    private void applyInitial(DashboardSettings s) {
+        modeCombo.select(s.lastMode().ordinal());
+
+        hostField.setText(s.host().host());
+        hostSshPort.setSelection(s.host().sshPort());
+        hostKeyField.setText(s.host().sshKey());
+        jumpSshPort.setSelection(s.jump().sshPort());
+        jumpKeyField.setText(s.jump().sshKey());
+
+        localRecents.addAll(s.local().recentPorts());
+        hostRecents.addAll(s.host().recentPorts());
+        jumpRecents.addAll(s.jump().recentTargets());
+        jumpLoginRecents.addAll(s.jump().recentLoginHosts());
+        localPortCombo.setItems(localRecents.stream().map(String::valueOf).toArray(String[]::new));
+        hostPortCombo.setItems(hostRecents.stream().map(String::valueOf).toArray(String[]::new));
+        jumpTargetCombo.setItems(jumpRecents.toArray(new String[0]));
+        loginCombo.setItems(jumpLoginRecents.toArray(new String[0]));
+        localPortCombo.setText(String.valueOf(s.local().gempbaPort()));
+        hostPortCombo.setText(String.valueOf(s.host().gempbaPort()));
+        jumpTargetCombo.setText(s.jump().targetHost());
+        loginCombo.setText(s.jump().loginHost());
+        jumpPort.setSelection(s.jump().gempbaPort());
+    }
+
+    private ConnectionMode currentMode() {
+        int i = modeCombo.getSelectionIndex();
+        return switch (i) {
+            case 1 -> ConnectionMode.HOST;
+            case 2 -> ConnectionMode.JUMP;
+            default -> ConnectionMode.LOCAL;
+        };
+    }
+
+    private void addBrowse(Composite parent, Text keyField) {
+        Button browse = new Button(parent, SWT.PUSH);
+        browse.setText("Browse…");
+        connectionInputs.add(browse);
+        browse.addListener(SWT.Selection, e -> {
+            FileDialog dialog = new FileDialog(parent.getShell(), SWT.OPEN);
             dialog.setText("Select SSH private key");
             dialog.setFilterNames(new String[]{"All files", "PEM keys", "PuTTY keys"});
             dialog.setFilterExtensions(new String[]{"*.*", "*.pem", "*.ppk"});
             String path = dialog.open();
             if (path != null) {
-                sshKeyField.setText(path);
+                keyField.setText(path);
             }
         });
-
-        applyButton.addListener(SWT.Selection, e -> fireConnectionApply());
-
-        applyRatesButton.addListener(SWT.Selection, e -> {
-            listener.onRatesApply(workerRateSpinner.getSelection(), nodeRateSpinner.getSelection());
-        });
-
-        // Pressing Enter in any single-line text field triggers Apply.
-        // (cmdField is multi-line — Enter inserts a newline there, which
-        // is the right behavior for editing a long command.)
-        SelectionAdapter applyOnEnter = new SelectionAdapter() {
-            @Override
-            public void widgetDefaultSelected(SelectionEvent e) {
-                applyButton.notifyListeners(SWT.Selection, new Event());
-            }
-        };
-        portField.addSelectionListener(applyOnEnter);
-        sshHostField.addSelectionListener(applyOnEnter);
-        jumpHostField.addSelectionListener(applyOnEnter);
-        sshKeyField.addSelectionListener(applyOnEnter);
-
-        // Render the initial preview before any user interaction.
-        updatePreview();
     }
 
-    private static int parsePortOrSentinel(String s) {
+    private static Spinner sshPortSpinner(Composite parent) {
+        Spinner s = new Spinner(parent, SWT.BORDER);
+        s.setMinimum(1);
+        s.setMaximum(65_535);
+        s.setSelection(SessionSpec.DEFAULT_SSH_PORT);
+        return s;
+    }
+
+    private static Spinner rateSpinner(Composite parent, int increment, int pageIncrement, int value) {
+        Spinner s = new Spinner(parent, SWT.BORDER);
+        s.setMinimum(RefreshInterval.MIN_MS);
+        s.setMaximum(RefreshInterval.MAX_MS);
+        s.setIncrement(increment);
+        s.setPageIncrement(pageIncrement);
+        s.setSelection(value);
+        return s;
+    }
+
+    private static int parsePort(String s) {
         try {
             int p = Integer.parseInt(s);
             return (p < 1 || p > 65_535) ? -1 : p;
@@ -304,78 +490,37 @@ public final class SwtSettingsView implements SettingsView {
         }
     }
 
-    // ─── command preview ───────────────────────────────────────────────────
+    private static int comboPort(Combo combo, int fallback) {
+        int p = parsePort(combo.getText().trim());
+        return p < 0 ? fallback : p;
+    }
 
-    private static Composite horizontalRow(Composite parent, int columns) {
+    private static Composite row(Composite parent, int columns) {
         Composite row = new Composite(parent, SWT.NONE);
         row.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
+        row.setLayout(zeroGrid(columns));
+        return row;
+    }
+
+    private static GridLayout zeroGrid(int columns) {
         GridLayout layout = new GridLayout(columns, false);
         layout.marginWidth = 0;
         layout.marginHeight = 0;
         layout.horizontalSpacing = 6;
-        row.setLayout(layout);
-        return row;
+        return layout;
     }
 
-    /**
-     * Attach the listener that receives Apply / Apply-rates events.
-     * Designed to be called once after construction, when the host
-     * application has finished wiring its other components (so the
-     * listener implementation can delegate to them safely). Calling with
-     * {@code null} reverts to a no-op listener.
-     */
-    @Override
-    public void setListener(SettingsView.Listener listener) {
-        this.listener = (listener != null) ? listener : NO_OP_LISTENER;
+    private static GridData fill(int widthHint) {
+        GridData gd = new GridData(SWT.FILL, SWT.CENTER, true, false);
+        gd.widthHint = widthHint;
+        return gd;
     }
 
-    private void updatePreview() {
-        if (overrideButton.getSelection()) {
-            return;
+    private static void setVisible(Control c, boolean visible) {
+        c.setVisible(visible);
+        Object ld = c.getLayoutData();
+        if (ld instanceof GridData gd) {
+            gd.exclude = !visible;
         }
-        int p = parsePortOrSentinel(portField.getText().trim());
-        String sshHost = sshHostField.getText().trim();
-        String jumpHost = jumpHostField.getText().trim();
-        String sshKey = sshKeyField.getText().trim();
-
-        String preview;
-        if (sshHost.isBlank()) {
-            preview = DIRECT_PREVIEW;
-        } else if (p < 0) {
-            preview = INVALID_PORT_PREVIEW;
-        } else {
-            List<String> tpl = SshCommand.buildTemplate(
-                    sshHost,
-                    LOOPBACK,
-                    p,
-                    sshKey.isBlank() ? null : sshKey,
-                    jumpHost.isBlank() ? null : jumpHost);
-            preview = SshCommand.renderTemplate(tpl);
-        }
-        if (!cmdField.getText().equals(preview)) {
-            cmdField.setText(preview);
-        }
-    }
-
-    private void fireConnectionApply() {
-        int port;
-        try {
-            port = Integer.parseInt(portField.getText().trim());
-        } catch (NumberFormatException ex) {
-            listener.onConnectionInvalid("invalid port: '" + portField.getText() + "'");
-            return;
-        }
-        if (port < 1 || port > 65_535) {
-            listener.onConnectionInvalid("invalid port (must be 1–65535)");
-            return;
-        }
-        ConnectionSpec connectionSpec = new ConnectionSpec(
-                port,
-                sshHostField.getText().trim(),
-                jumpHostField.getText().trim(),
-                sshKeyField.getText().trim(),
-                overrideButton.getSelection(),
-                cmdField.getText());
-        listener.onConnectionApply(connectionSpec);
     }
 }
