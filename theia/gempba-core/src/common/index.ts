@@ -22,3 +22,4 @@ export * from './model/structure-key';
 export * from './model/worker-snapshot';
 export * from './model/world-snapshot';
 export * from './policy/node-utilization';
+export * from './ssh/ssh-endpoint';
