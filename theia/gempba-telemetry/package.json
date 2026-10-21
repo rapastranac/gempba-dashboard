@@ -1,0 +1,19 @@
+{
+  "name": "@gempba/telemetry",
+  "version": "2.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "GemPBA telemetry backend: the gempba wire protocol and its mapping to the @gempba/core read-model.",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "dependencies": {
+    "tslib": "^2.8.1"
+  },
+  "scripts": {
+    "clean": "rimraf lib *.tsbuildinfo",
+    "compile": "tsc -b",
+    "test": "mocha \"lib/**/*.spec.js\""
+  }
+}
