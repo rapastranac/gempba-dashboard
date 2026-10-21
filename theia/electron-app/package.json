@@ -4,12 +4,21 @@
   "productName": "GemPBA Dashboard",
   "version": "2.0.0",
   "license": "MIT",
+  "author": "Andres Pastrana",
+  "homepage": "https://rapastranac.github.io/gempba-docs/",
   "main": "lib/backend/electron-main.js",
   "theia": {
     "target": "electron",
     "frontend": {
       "config": {
-        "applicationName": "GemPBA Dashboard"
+        "applicationName": "GemPBA Dashboard",
+        "electron": {
+          "splashScreenOptions": {
+            "content": "resources/gempba-logo.svg",
+            "width": 240,
+            "height": 240
+          }
+        }
       }
     }
   },
