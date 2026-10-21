@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "theia/gempba-core" },
+    { "path": "theia/gempba-shell" }
+  ]
+}
