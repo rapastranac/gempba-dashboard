@@ -14,6 +14,7 @@
     }
   },
   "dependencies": {
+    "@gempba/shell": "2.0.0",
     "@theia/core": "1.76.0",
     "@theia/electron": "1.76.0",
     "@theia/messages": "1.76.0",
