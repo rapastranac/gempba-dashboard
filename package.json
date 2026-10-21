@@ -1,0 +1,39 @@
+{
+  "private": true,
+  "name": "gempba-dashboard",
+  "version": "2.0.0",
+  "license": "MIT",
+  "description": "GemPBA Dashboard — Eclipse Theia Electron app (TypeScript)",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "theia/*"
+  ],
+  "scripts": {
+    "clean": "rimraf \"theia/*/lib\" \"theia/*/*.tsbuildinfo\" && npm --workspace @gempba/electron-app run clean",
+    "compile": "tsc -b",
+    "build": "npm run compile && npm --workspace @gempba/electron-app run build",
+    "rebuild:electron": "npm --workspace @gempba/electron-app run rebuild",
+    "start": "npm --workspace @gempba/electron-app run start",
+    "watch": "npm --workspace @gempba/electron-app run watch",
+    "test": "echo \"(no tests yet)\""
+  },
+  "allowScripts": {
+    "@parcel/watcher": true,
+    "@theia/ffmpeg": true,
+    "@vscode/windows-ca-certs": true,
+    "drivelist": true,
+    "esbuild": true,
+    "keytar": true,
+    "msgpackr-extract": true,
+    "native-keymap": true,
+    "puppeteer": false
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.10.2",
+    "rimraf": "^5.0.10",
+    "typescript": "~5.9.3"
+  }
+}
