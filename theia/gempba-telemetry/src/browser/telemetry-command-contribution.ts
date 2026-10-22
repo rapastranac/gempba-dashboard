@@ -1,7 +1,7 @@
 import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { QuickInputService, QuickPickItem } from '@theia/core/lib/common/quick-pick-service';
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { Config, ConnectionMode, ConnectionState, SessionSpec, TargetSpec } from '@gempba/core';
 import { TelemetryService } from '../common/telemetry-service';
 
@@ -20,8 +20,9 @@ const MODE_LABELS: Record<ConnectionMode, string> = {
 };
 
 /**
- * Drives the stream from the command palette, so it works without any connection UI installed. Connect offers
- * the modes whose tunnel provider is installed; with only LOCAL it connects at once.
+ * Drives the stream from the command palette, so it works without any connection UI installed. Connect opens an
+ * SSH session in one of the installed SSH modes, and is absent when there is none; Listen while disconnected
+ * streams a gempba on this machine, which needs no session.
  */
 @injectable()
 export class TelemetryCommandContribution implements CommandContribution {
@@ -31,16 +32,22 @@ export class TelemetryCommandContribution implements CommandContribution {
     @inject(MessageService) protected readonly messages: MessageService;
 
     protected session = SessionSpec.local();
+    protected sshModes: ConnectionMode[] = [];
     protected lastTargetHost = '';
     protected lastPort = Config.DEFAULT_PORT;
 
+    @postConstruct()
+    protected init(): void {
+        this.telemetry.availableModes().then(modes => this.sshModes = modes.filter(mode => mode !== ConnectionMode.LOCAL), () => undefined);
+    }
+
     registerCommands(registry: CommandRegistry): void {
         registry.registerCommand(TelemetryCommands.CONNECT, {
-            isEnabled: () => this.telemetry.state === ConnectionState.DISCONNECTED,
+            isEnabled: () => this.telemetry.state === ConnectionState.DISCONNECTED && this.sshModes.length > 0,
             execute: () => this.connect()
         });
         registry.registerCommand(TelemetryCommands.LISTEN, {
-            isEnabled: () => this.telemetry.state === ConnectionState.CONNECTED || this.telemetry.state === ConnectionState.LISTENING,
+            isEnabled: () => this.telemetry.state !== ConnectionState.CONNECTING,
             execute: () => this.listen()
         });
         registry.registerCommand(TelemetryCommands.STOP, {
@@ -62,11 +69,11 @@ export class TelemetryCommandContribution implements CommandContribution {
     }
 
     protected async askSession(): Promise<SessionSpec | undefined> {
-        const modes = await this.telemetry.availableModes();
+        const modes = this.sshModes;
         const mode = modes.length === 1 ? modes[0] : (await this.quickInput.showQuickPick<QuickPickItem & { mode: ConnectionMode }>(
             modes.map(candidate => ({ label: MODE_LABELS[candidate], mode: candidate })), { title: 'GemPBA: Connect' }))?.mode;
-        if (mode === undefined || mode === ConnectionMode.LOCAL) {
-            return mode && SessionSpec.local();
+        if (mode === undefined) {
+            return undefined;
         }
         const host = await this.quickInput.input({
             title: `GemPBA: Connect (${MODE_LABELS[mode]})`,
@@ -86,6 +93,9 @@ export class TelemetryCommandContribution implements CommandContribution {
     }
 
     protected async listen(): Promise<void> {
+        if (this.telemetry.state === ConnectionState.DISCONNECTED) {
+            this.session = SessionSpec.local();
+        }
         let targetHost = '';
         if (this.session.mode === ConnectionMode.JUMP) {
             const node = await this.quickInput.input({

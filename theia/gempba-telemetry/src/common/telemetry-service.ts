@@ -18,9 +18,14 @@ export interface TelemetryService {
     readonly onStatus: Event<string>;
 
     availableModes(): Promise<ConnectionMode[]>;
+    /** Opens an SSH session (HOST, JUMP), authenticating once; a local gempba needs none. */
     connect(session: SessionSpec): Promise<void>;
-    /** Starts a new target: the snapshot and node history are cleared first. */
+    /**
+     * Starts a new target over the open session, or on this machine when none is open; the snapshot and node
+     * history are cleared first.
+     */
     listen(target: TargetSpec): Promise<void>;
+    /** Stops streaming; an SSH session stays open, a local stream ends in DISCONNECTED. */
     stop(): Promise<void>;
     disconnect(): Promise<void>;
     pushRates(workerIntervalMs: number, nodeIntervalMs: number): Promise<void>;

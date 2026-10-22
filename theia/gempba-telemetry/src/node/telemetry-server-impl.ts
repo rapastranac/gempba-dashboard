@@ -12,6 +12,8 @@ import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
  * One frontend's telemetry session: opens a tunnel through the provider for the session's mode, streams the
  * target over TCP, maps every frame and notifies the frontend. Every teardown bumps an epoch, so callbacks
  * and pending opens from a superseded session are dropped.
+ * A local gempba needs no session: listening while disconnected streams it directly, and stopping that stream
+ * disconnects. Connect is for the modes that authenticate.
  */
 @injectable()
 export class TelemetryServerImpl implements TelemetryServer {
@@ -26,6 +28,7 @@ export class TelemetryServerImpl implements TelemetryServer {
     protected state = ConnectionState.DISCONNECTED;
     protected epoch = 0;
     protected tunnel: Tunnel | undefined;
+    protected sessionMode: ConnectionMode | undefined;
     protected forward: Forward | undefined;
     protected telemetry: TelemetryClient | undefined;
     protected readonly store = new TelemetryStore();
@@ -67,23 +70,25 @@ export class TelemetryServerImpl implements TelemetryServer {
             return;
         }
         this.tunnel = tunnel;
+        this.sessionMode = session.mode;
         this.setState(ConnectionState.CONNECTED);
         this.status(session.mode === ConnectionMode.LOCAL ? 'ready to listen locally' : `connected to ${session.host}`);
     }
 
+    /** Streams the target over the open session, or straight from this machine when there is none. */
     async listen(target: TargetSpec): Promise<void> {
-        const tunnel = this.tunnel;
-        if (!tunnel) {
-            throw this.fail('connect before listening');
-        }
         this.stopListening();
         const epoch = this.epoch;
+        const tunnel = this.tunnel ?? await this.openLocal();
+        if (epoch !== this.epoch) {
+            return;
+        }
         let forward: Forward;
         try {
             forward = await tunnel.forward(target);
         } catch (error) {
             if (epoch === this.epoch) {
-                this.setState(ConnectionState.CONNECTED);
+                this.endStream();
             }
             throw this.fail(`cannot reach the target: ${messageOf(error)}`);
         }
@@ -104,9 +109,30 @@ export class TelemetryServerImpl implements TelemetryServer {
         if (this.state !== ConnectionState.LISTENING) {
             return;
         }
-        this.stopListening();
-        this.setState(ConnectionState.CONNECTED);
+        this.endStream();
         this.status('stopped listening');
+    }
+
+    /** A local session exists only for its stream; an authenticated one stays open for the next target. */
+    protected endStream(): void {
+        if (this.sessionMode === ConnectionMode.LOCAL) {
+            this.teardown();
+            this.setState(ConnectionState.DISCONNECTED);
+        } else {
+            this.stopListening();
+            this.setState(ConnectionState.CONNECTED);
+        }
+    }
+
+    protected async openLocal(): Promise<Tunnel> {
+        const provider = this.tunnelProviders.getContributions().find(candidate => candidate.mode === ConnectionMode.LOCAL);
+        if (!provider) {
+            throw this.fail('no LOCAL connection support is installed');
+        }
+        const tunnel = await provider.open(SessionSpec.local());
+        this.tunnel = tunnel;
+        this.sessionMode = ConnectionMode.LOCAL;
+        return tunnel;
     }
 
     async disconnect(): Promise<void> {
@@ -175,6 +201,7 @@ export class TelemetryServerImpl implements TelemetryServer {
         this.stopListening();
         this.tunnel?.close();
         this.tunnel = undefined;
+        this.sessionMode = undefined;
     }
 
     protected setState(state: ConnectionState): void {
