@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@gempba/auth": "2.0.0",
+    "@gempba/controls": "2.0.0",
     "@gempba/shell": "2.0.0",
     "@gempba/telemetry": "2.0.0",
     "@theia/core": "1.76.0",

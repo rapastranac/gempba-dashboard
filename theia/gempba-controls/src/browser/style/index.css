@@ -1,0 +1,54 @@
+.gempba-connection {
+    padding: var(--theia-ui-padding) calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-connection-form section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theia-ui-padding);
+    margin-bottom: calc(var(--theia-ui-padding) * 3);
+}
+
+.gempba-connection-form h3 {
+    margin: 0;
+    font-size: var(--theia-ui-font-size1);
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-connection-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.gempba-connection-form input,
+.gempba-connection-form select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.gempba-connection-row {
+    display: flex;
+    gap: var(--theia-ui-padding);
+    align-items: center;
+}
+
+.gempba-connection-row .theia-button {
+    margin-left: 0;
+}
+
+.gempba-connection-problem {
+    color: var(--theia-errorForeground);
+}
+
+.gempba-connection-status {
+    color: var(--theia-descriptionForeground);
+    word-break: break-word;
+}
+
+.gempba-connection-hint {
+    margin: 0;
+    color: var(--theia-descriptionForeground);
+}

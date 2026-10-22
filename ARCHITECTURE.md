@@ -38,12 +38,14 @@ flowchart LR
         subgraph backend["Backend: Node.js"]
             telemetry["@gempba/telemetry<br/>TelemetryServer: TCP client,<br/>wire protocol, mapper, store"]
             authNode["@gempba/auth<br/>SSH session, HOST and JUMP tunnels"]
+            settingsNode["@gempba/controls<br/>SettingsStore: ~/.gempba-dashboard"]
         end
         subgraph frontend["Frontend: the window"]
             service["@gempba/telemetry<br/>TelemetryService, commands, status bar"]
             authUi["@gempba/auth<br/>MFA, passphrase, host-key prompts"]
+            controlsUi["@gempba/controls<br/>Connection view"]
             shellUi["@gempba/shell<br/>branding, hidden IDE parts"]
-            views["grid, cards, controls<br/><i>coming</i>"]
+            views["grid, cards<br/><i>coming</i>"]
         end
         subgraph main["Electron main"]
             shellMain["@gempba/shell<br/>window icon"]
@@ -55,6 +57,8 @@ flowchart LR
     authNode -.->|"prompts over JSON-RPC"| authUi
     telemetry -->|"WorldSnapshot over JSON-RPC"| service
     service -->|onSnapshot| views
+    controlsUi -->|"connect, listen, rates"| service
+    controlsUi -.->|"settings over JSON-RPC"| settingsNode
 ```
 
 - **Electron main** owns native windows. `@gempba/shell` sets the GemPBA icon on them here.
@@ -71,13 +75,16 @@ flowchart TB
     shell["@gempba/shell<br/>Theia extension"]
     telemetry["@gempba/telemetry<br/>the hub"]
     auth["@gempba/auth<br/>a feature"]
+    controls["@gempba/controls<br/>a feature"]
     core["@gempba/core<br/>pure kernel"]
     theia["Theia platform<br/>@theia/core, electron, monaco, preferences, messages"]
     app --> shell
     app --> auth
+    app --> controls
     app --> telemetry
     app --> theia
     auth --> telemetry
+    controls --> telemetry
     shell --> theia
     telemetry --> core
     telemetry --> theia
@@ -89,7 +96,8 @@ flowchart TB
 | [`@gempba/telemetry`](theia/gempba-telemetry) | the hub. Backend: wire protocol, `TelemetryClient` (TCP), `WorldSnapshotMapper`, `TelemetryStore`, `TelemetryServer` (one per window), the `TunnelProvider` contribution point (LOCAL built in), `MockEmitter` (a stand-in gempba center). Frontend: `TelemetryService` and `NodeHistoryService` (the API features inject), the GemPBA commands and status bar entry | `adapters` | yes |
 | [`@gempba/shell`](theia/gempba-shell) | branding (About dialog, title-bar logo, window icon, splash) and hiding the IDE parts Theia brings along | — | yes |
 | [`@gempba/auth`](theia/gempba-auth) | a feature. Backend: `RemoteConnection` (one authenticated SSH session on `ssh2`, HOST and JUMP forwards), the HOST and JUMP `TunnelProvider`s, `KnownHosts` and `HostKeyVerifier` (trust on first use). Frontend: `AuthPromptImpl` (MFA, passphrase and host-key prompts) | `adapters` (`RemoteConnection`), `ui` (`SwtAuthPrompt`) | yes |
-| controls, grid, cards | *coming* (#27–#29): connection bar, dashboard views | `ui` | yes |
+| [`@gempba/controls`](theia/gempba-controls) | a feature. Frontend: the Connection view (session, target, refresh rates), which only drives `TelemetryService`. Backend: `SettingsStore`, the remembered settings in `~/.gempba-dashboard/settings.json` (the Java app's file), and `RememberedSettings` with the recents | `adapters` (`SettingsStore`), `ui` (`SwtSettingsView`) | yes |
+| grid, cards | *coming* (#28–#29): dashboard views | `ui` | yes |
 | [`@gempba/electron-app`](theia/electron-app) | the product: lists the Theia packages and our extensions; built and packaged | `app` | yes |
 
 ### Where the wire format lives
@@ -129,7 +137,7 @@ Every feature is its own Theia extension, and features plug into one hub, `@gemp
 ```mermaid
 flowchart TB
     auth["@gempba/auth<br/>adds HOST, JUMP"]
-    controls["@gempba/controls<br/><i>coming</i>: connection bar"]
+    controls["@gempba/controls<br/>Connection view"]
     grid["@gempba/grid<br/><i>coming</i>: per-host rows"]
     cards["@gempba/cards<br/><i>coming</i>: hierarchy tree"]
     telemetry["@gempba/telemetry, the hub<br/>TelemetryService, commands, TunnelProvider"]
@@ -162,7 +170,7 @@ this.toDispose.push(this.telemetry.onSnapshot(snapshot => this.update(snapshot))
 - **Providers live per window.** Tunnel providers are bound in a `ConnectionContainerModule`, next to that window's `TelemetryServer`, so an SSH provider prompts the window that asked: auth reaches the window's `AuthPrompt` through `bindFrontendService`, and the frontend serves it with `ServiceConnectionProvider.createHandler`. That is the reverse direction of `TelemetryService`: the backend calls the frontend and waits for the user's answer.
 - **Ready for sessions.** `TelemetryService` is the *active* session's stream. Several sessions switched live can come later as a hub change plus a new feature, with no change to the views.
 - **The rules are checked.** [`configs/check-layers.js`](configs/check-layers.js) runs first in `npm test` and fails when a package depends on a `@gempba` package outside its layer: core on nothing, telemetry on core, shell on nothing, a feature on core and telemetry only. Only the app may list features.
-- **Every feature must be removable.** Each feature issue checks that the app builds, boots and works with that package dropped from the app. Without controls, the stream still runs from the command palette: F1 → `GemPBA: Connect…`, then `GemPBA: Listen…`. Without auth, Connect offers LOCAL only.
+- **Every feature must be removable.** Each feature issue checks that the app builds, boots and works with that package dropped from the app. Without controls, the stream still runs from the command palette: F1 → `GemPBA: Listen…` streams a local gempba, and `GemPBA: Connect…` first opens an SSH session. Without auth there is no Connect, only local listening.
 
 These are Theia *extensions*, composed when the app is built, not VS Code plugins loaded at runtime: the plugin runtime would bring back about 30 IDE packages, and plugin views are limited to webviews.
 
@@ -175,8 +183,10 @@ These are Theia *extensions*, composed when the app is built, not VS Code plugin
 - **Output matches the Java app.** `NumberText` reproduces Java's `String.format` rounding (`1.005` → `"1.01"`, where JavaScript's `toFixed` gives `"1.00"`) and groups thousands without depending on the OS locale.
 - **The kernel never touches the OS.** Anything Java read implicitly (environment variables, the OS user name) is passed in: `Config.from(args, env)`, `SshEndpoint.parse(spec, defaultUser)`.
 - **Existing settings keep working.** Enums are string enums (`'JUMP'`) like the existing `settings.json`, and `of()` factories fill in fields that older files lack.
+- **Remembered settings are not Theia preferences.** The Connection view keeps the Java app's `~/.gempba-dashboard/settings.json` (one block per mode, recents capped at ten), served by one application-wide `SettingsServer`, so an existing user's hosts and targets come back pre-filled. The view never connects on its own.
 - **Parsing follows the Java contract.** Unknown wire fields are ignored, missing numbers read as 0, and missing objects or lists stay `undefined`. A topology node without `sockets` falls back to the live frame's socket count, while `sockets: []` means zero sockets.
 - **Utilization is per allocation**: a node's CPU is `clamp(Σ worker CPU ÷ |allocated cores|, 0, 100)`, the user's own work on the user's own cores, excluding other tenants on a shared node.
+- **Only SSH has a session.** Connect pays the authentication (keys, MFA) once and Listen points that session at a gempba, as often as needed. A local gempba has nothing to authenticate, so Listen streams it straight away and Stop ends it, back to disconnected; Connect exists only for HOST and JUMP.
 - **One telemetry session per window.** `TelemetryServer` lives in Theia's per-connection container, so each window has its own and closing the window closes its connection. That container binds a `ContributionProvider` of its own, which hides the application's, so the `TunnelProvider` contribution provider and all tunnel providers are bound inside connection modules.
 - **SSH follows the Java client and OpenSSH.** One session is authenticated once (the explicit key, then the default `~/.ssh` identities, then up to three keyboard-interactive rounds for MFA) and every target is a cheap forward over it. JUMP runs `ssh -N -L` on the login node over a PTY exec channel, so the hop uses the cluster's own node-to-node trust and closing the channel hangs it up. Host keys are checked against the user's own `~/.ssh/known_hosts`: a known key passes, a changed key is refused without asking, and a new host is confirmed once and remembered.
 - **`ssh2` stays pure JavaScript.** Its optional native install scripts (`ssh2`, `cpu-features`) are denied in `allowScripts`, so there is no extra native module to build per OS or package.
@@ -196,7 +206,7 @@ npm test                  # check the layering, compile, then run every package'
 npm run mock              # after a build: a stand-in gempba center on 127.0.0.1:9000
 ```
 
-To see live data without a cluster: run `npm run mock`, start the app, then press F1 and run `GemPBA: Connect…` (pick Local) and `GemPBA: Listen…` (port 9000). The status bar shows the node count. For HOST and JUMP, the Python [gempba-dashboard-mocker](https://github.com/apdistributedsystems/gempba-dashboard-mocker) impersonates a VM or a login node with MFA.
+To see live data without a cluster: run `npm run mock`, start the app, then in the Connection view (the plug icon on the left) pick Local and press Listen (port 9000); the palette's `GemPBA: Listen…` does the same. The status bar shows the node count. For HOST and JUMP, the Python [gempba-dashboard-mocker](https://github.com/apdistributedsystems/gempba-dashboard-mocker) impersonates a VM or a login node with MFA.
 
 - Specs live next to their sources (`*.spec.ts`) and run from the compiled `lib/`. The root [`.mocharc.js`](.mocharc.js) lets an IDE run or debug a single spec file: it builds the package and runs the compiled copy, so breakpoints map back to the TypeScript through source maps.
 - Native modules exist in two builds: `npm rebuild` targets Node.js (tests), `npm run rebuild:electron` targets Electron (the app).

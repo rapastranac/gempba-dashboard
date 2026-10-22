@@ -27,7 +27,7 @@ class RecordingClient implements TelemetryServerClient {
     }
 }
 
-/** A HOST provider whose open the test settles by hand, standing in for a slow SSH login. */
+/** A HOST provider whose open the test settles by hand, standing in for a slow SSH login; its forwards reach the port as is. */
 @injectable()
 class ManualHostProvider implements TunnelProvider {
     readonly mode = ConnectionMode.HOST;
@@ -41,7 +41,7 @@ class ManualHostProvider implements TunnelProvider {
                     reject(outcome);
                     return;
                 }
-                const tunnel: Tunnel = { forward: () => Promise.reject(new Error('unused')), close: () => this.closed.push(tunnel) };
+                const tunnel: Tunnel = { forward: async target => ({ port: target.gempbaPort, close: () => undefined }), close: () => this.closed.push(tunnel) };
                 resolve(tunnel);
             };
         });
@@ -88,9 +88,7 @@ describe('TelemetryServerImpl', () => {
 
     async function listenToMock(): Promise<MockEmitter> {
         emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), workerIntervalMs: 50 });
-        const port = await emitter.listen();
-        await server.connect(SessionSpec.local());
-        await server.listen(TargetSpec.of(undefined, port));
+        await server.listen(TargetSpec.of(undefined, await emitter.listen()));
         return emitter;
     }
 
@@ -110,9 +108,10 @@ describe('TelemetryServerImpl', () => {
         expect(client.states).to.deep.equal([]);
     });
 
-    it('rejects listening before connecting', async () => {
-        const error = await server.listen(TargetSpec.of(undefined, 9000)).catch(e => e);
-        expect(error).to.be.instanceOf(Error);
+    it('listens to a local gempba without a session', async () => {
+        await listenToMock();
+        await eventually(() => client.snapshots.length >= 1);
+        expect(client.states).to.deep.equal([ConnectionState.LISTENING]);
     });
 
     it('streams mapped snapshots from the target', async () => {
@@ -134,21 +133,35 @@ describe('TelemetryServerImpl', () => {
         expect(client.statuses.at(-1)).to.equal('rates pushed (worker=300 ms, node=3000 ms)');
     });
 
-    it('stop keeps the session open and ends the stream', async () => {
+    it('stopping a local stream ends it and disconnects', async () => {
         await listenToMock();
         await eventually(() => client.snapshots.length >= 1);
         await server.stop();
         const received = client.snapshots.length;
         await new Promise(resolve => setTimeout(resolve, 150));
         expect(client.snapshots.length).to.equal(received);
-        expect(client.states.at(-1)).to.equal(ConnectionState.CONNECTED);
+        expect(client.states.at(-1)).to.equal(ConnectionState.DISCONNECTED);
+    });
+
+    it('stopping a stream over an SSH session keeps the session open', async () => {
+        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), workerIntervalMs: 50 });
+        const port = await emitter.listen();
+        const connecting = server.connect(SessionSpec.of({ mode: ConnectionMode.HOST, host: 'me@vm' }));
+        host.settle(undefined);
+        await connecting;
+        await server.listen(TargetSpec.of(undefined, port));
+        await eventually(() => client.snapshots.length >= 1);
+        await server.stop();
+        expect(client.states.slice(-2)).to.deep.equal([ConnectionState.LISTENING, ConnectionState.CONNECTED]);
+        expect(host.closed).to.deep.equal([]);
     });
 
     it('disconnect ends the session', async () => {
         await listenToMock();
         await server.disconnect();
         expect(client.states.at(-1)).to.equal(ConnectionState.DISCONNECTED);
-        expect(await server.listen(TargetSpec.of(undefined, 9000)).catch(e => e)).to.be.instanceOf(Error);
+        await server.stop();
+        expect(client.states.at(-1)).to.equal(ConnectionState.DISCONNECTED);
     });
 
     it('closes a tunnel that opens after the session was abandoned', async () => {

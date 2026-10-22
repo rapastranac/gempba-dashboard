@@ -12,11 +12,11 @@ export const TelemetryServer = Symbol('TelemetryServer');
 export interface TelemetryServer extends RpcServer<TelemetryServerClient> {
     /** The connection modes a tunnel provider is installed for. */
     availableModes(): Promise<ConnectionMode[]>;
-    /** Opens the session (authenticating once for SSH modes); rejects when it cannot. */
+    /** Opens an SSH session, authenticating once; rejects when it cannot. LOCAL needs none. */
     connect(session: SessionSpec): Promise<void>;
-    /** Streams one gempba center over the open session, replacing any previous target. */
+    /** Streams one gempba center over the open session, or on this machine when none is open, replacing any previous target. */
     listen(target: TargetSpec): Promise<void>;
-    /** Stops streaming but keeps the session open. */
+    /** Stops streaming; an SSH session stays open for the next target, a local stream simply ends. */
     stop(): Promise<void>;
     disconnect(): Promise<void>;
     /** Sends the refresh intervals now if streaming, and on every later (re)connect. */
