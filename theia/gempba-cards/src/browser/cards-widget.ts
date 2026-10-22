@@ -1,3 +1,4 @@
+import { CompositeTreeNode } from '@theia/core/lib/browser/tree/tree';
 import { ExpandableTreeNode } from '@theia/core/lib/browser/tree/tree-expansion';
 import { SplitWidget } from '@theia/core/lib/browser/widgets/split-widget';
 import { codicon, Message } from '@theia/core/lib/browser/widgets/widget';
@@ -68,6 +69,37 @@ export class CardsWidget extends SplitWidget {
         this.followHost = host;
         this.expandFollowed = true;
         this.refreshes.request();
+    }
+
+    /** Expands the picked row and every row below it; does nothing when the picked row has no children. */
+    async expandSelected(): Promise<void> {
+        const row = this.pickedRow();
+        if (ExpandableTreeNode.is(row)) {
+            await this.expandBelow(row.id);
+        }
+    }
+
+    /** Folds the tree back to its node rows; a picked row that gets hidden passes the pick to its node. */
+    async collapseAll(): Promise<void> {
+        const root = this.tree.model.root;
+        if (CompositeTreeNode.is(root)) {
+            await this.tree.model.collapseAll(root);
+        }
+    }
+
+    /** Rows are built only when expanded, so each level is read back by id once its parent has expanded. */
+    protected async expandBelow(id: string): Promise<void> {
+        const row = this.tree.model.getNode(id);
+        if (!ExpandableTreeNode.is(row)) {
+            return;
+        }
+        await this.tree.model.expandNode(row);
+        const expanded = this.tree.model.getNode(id);
+        if (CompositeTreeNode.is(expanded)) {
+            for (const child of expanded.children) {
+                await this.expandBelow(child.id);
+            }
+        }
     }
 
     /** Reads the latest snapshot only now, so a hidden view never touches one. */
