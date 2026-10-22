@@ -45,7 +45,8 @@ flowchart LR
             authUi["@gempba/auth<br/>MFA, passphrase, host-key prompts"]
             controlsUi["@gempba/controls<br/>Connection view"]
             shellUi["@gempba/shell<br/>branding, hidden IDE parts"]
-            views["grid, cards<br/><i>coming</i>"]
+            gridUi["@gempba/grid<br/>Grid view: one tile per node"]
+            views["cards<br/><i>coming</i>"]
         end
         subgraph main["Electron main"]
             shellMain["@gempba/shell<br/>window icon"]
@@ -56,6 +57,7 @@ flowchart LR
     authNode -.->|SSH| gempba
     authNode -.->|"prompts over JSON-RPC"| authUi
     telemetry -->|"WorldSnapshot over JSON-RPC"| service
+    service -->|onSnapshot| gridUi
     service -->|onSnapshot| views
     controlsUi -->|"connect, listen, rates"| service
     controlsUi -.->|"settings over JSON-RPC"| settingsNode
@@ -76,15 +78,21 @@ flowchart TB
     telemetry["@gempba/telemetry<br/>the hub"]
     auth["@gempba/auth<br/>a feature"]
     controls["@gempba/controls<br/>a feature"]
+    grid["@gempba/grid<br/>a feature"]
+    ui["@gempba/ui<br/>UI kit"]
     core["@gempba/core<br/>pure kernel"]
     theia["Theia platform<br/>@theia/core, electron, monaco, preferences, messages"]
     app --> shell
     app --> auth
     app --> controls
+    app --> grid
     app --> telemetry
     app --> theia
     auth --> telemetry
     controls --> telemetry
+    grid --> telemetry
+    grid --> ui
+    ui --> theia
     shell --> theia
     telemetry --> core
     telemetry --> theia
@@ -97,7 +105,9 @@ flowchart TB
 | [`@gempba/shell`](theia/gempba-shell) | branding (About dialog, title-bar logo, window icon, splash) and hiding the IDE parts Theia brings along | — | yes |
 | [`@gempba/auth`](theia/gempba-auth) | a feature. Backend: `RemoteConnection` (one authenticated SSH session on `ssh2`, HOST and JUMP forwards), the HOST and JUMP `TunnelProvider`s, `KnownHosts` and `HostKeyVerifier` (trust on first use). Frontend: `AuthPromptImpl` (MFA, passphrase and host-key prompts) | `adapters` (`RemoteConnection`), `ui` (`SwtAuthPrompt`) | yes |
 | [`@gempba/controls`](theia/gempba-controls) | a feature. Frontend: the Connection view (session, target, refresh rates), which only drives `TelemetryService`. Backend: `SettingsStore`, the remembered settings in `~/.gempba-dashboard/settings.json` (the Java app's file), and `RememberedSettings` with the recents | `adapters` (`SettingsStore`), `ui` (`SwtSettingsView`) | yes |
-| grid, cards | *coming* (#28–#29): dashboard views | `ui` | yes |
+| [`@gempba/ui`](theia/gempba-ui) | the UI kit, shared by the views: `Tile`, `TileGrid`, `Sparkline` (SVG, from the pure `SparklineGeometry`), `MeterBar`, and the `gempba.*` theme colors. No data, no features | `ui` (`NodeTile`'s drawing) | yes |
+| [`@gempba/grid`](theia/gempba-grid) | a feature. The Grid view in the main area: one Task Manager style tile per node (utilization now, about two minutes of CPU history, memory), built from the UI kit; `GridTiles` turns a snapshot and its history into formatted tiles | `ui` (`SwtGridView`, `NodeTile`), `GridPresenter` | yes |
+| cards | *coming* (#29): the hierarchy view | `ui` | yes |
 | [`@gempba/electron-app`](theia/electron-app) | the product: lists the Theia packages and our extensions; built and packaged | `app` | yes |
 
 ### Where the wire format lives
@@ -138,14 +148,17 @@ Every feature is its own Theia extension, and features plug into one hub, `@gemp
 flowchart TB
     auth["@gempba/auth<br/>adds HOST, JUMP"]
     controls["@gempba/controls<br/>Connection view"]
-    grid["@gempba/grid<br/><i>coming</i>: per-host rows"]
+    grid["@gempba/grid<br/>one tile per node"]
     cards["@gempba/cards<br/><i>coming</i>: hierarchy tree"]
     telemetry["@gempba/telemetry, the hub<br/>TelemetryService, commands, TunnelProvider"]
+    ui["@gempba/ui, the UI kit<br/>tiles, sparklines, meters, theme colors"]
     core["@gempba/core<br/>read-model and formatters, no Theia"]
     auth --> telemetry
     controls --> telemetry
     grid --> telemetry
+    grid --> ui
     cards --> telemetry
+    cards --> ui
     telemetry --> core
 ```
 
@@ -155,7 +168,7 @@ Arrows mean "depends on"; they only point down. Extensions talk through three Th
 |---|---|---|---|
 | **Service**: an interface plus a DI token, injected with `@inject` | interface + Guice binding | telemetry: `TelemetryService`, `NodeHistoryService` ([`telemetry-service.ts`](theia/gempba-telemetry/src/common/telemetry-service.ts)) | controls, grid, cards |
 | **Contribution point**: a socket the host loops over through a `ContributionProvider` | Eclipse extension point, `ServiceLoader` | telemetry defines `TunnelProvider` ([`tunnel-provider.ts`](theia/gempba-telemetry/src/node/tunnel/tunnel-provider.ts)), with LOCAL built in | auth fills it with HOST and JUMP |
-| **Theia's shared services**: commands, selection, events | listeners, an event bus | Theia core: `CommandRegistry`, `SelectionService` | grid publishes the selected node; cards react |
+| **Theia's shared services**: commands, selection, events | listeners, an event bus | Theia core: `CommandRegistry`, `SelectionService` | grid publishes the picked node as a `NodeSelection` ([`node-selection.ts`](theia/gempba-telemetry/src/common/node-selection.ts)); cards and later views follow it |
 
 A feature's whole coupling to the stream is one injected interface:
 
@@ -169,7 +182,7 @@ this.toDispose.push(this.telemetry.onSnapshot(snapshot => this.update(snapshot))
 - **Auth opens the road; telemetry drives on it.** In HOST and JUMP mode a `TunnelProvider` opens the SSH tunnel and hands telemetry a local port, which the TCP client reads exactly as in LOCAL mode. Views never learn which mode, tunnel or credentials are in use.
 - **Providers live per window.** Tunnel providers are bound in a `ConnectionContainerModule`, next to that window's `TelemetryServer`, so an SSH provider prompts the window that asked: auth reaches the window's `AuthPrompt` through `bindFrontendService`, and the frontend serves it with `ServiceConnectionProvider.createHandler`. That is the reverse direction of `TelemetryService`: the backend calls the frontend and waits for the user's answer.
 - **Ready for sessions.** `TelemetryService` is the *active* session's stream. Several sessions switched live can come later as a hub change plus a new feature, with no change to the views.
-- **The rules are checked.** [`configs/check-layers.js`](configs/check-layers.js) runs first in `npm test` and fails when a package depends on a `@gempba` package outside its layer: core on nothing, telemetry on core, shell on nothing, a feature on core and telemetry only. Only the app may list features.
+- **The rules are checked.** [`configs/check-layers.js`](configs/check-layers.js) runs first in `npm test` and fails when a package depends on a `@gempba` package outside its layer: core on nothing, telemetry on core, shell and the UI kit on nothing, a feature on core, telemetry and the UI kit only. Only the app may list features.
 - **Every feature must be removable.** Each feature issue checks that the app builds, boots and works with that package dropped from the app. Without controls, the stream still runs from the command palette: F1 → `GemPBA: Listen…` streams a local gempba, and `GemPBA: Connect…` first opens an SSH session. Without auth there is no Connect, only local listening.
 
 These are Theia *extensions*, composed when the app is built, not VS Code plugins loaded at runtime: the plugin runtime would bring back about 30 IDE packages, and plugin views are limited to webviews.
@@ -183,6 +196,8 @@ These are Theia *extensions*, composed when the app is built, not VS Code plugin
 - **Output matches the Java app.** `NumberText` reproduces Java's `String.format` rounding (`1.005` → `"1.01"`, where JavaScript's `toFixed` gives `"1.00"`) and groups thousands without depending on the OS locale.
 - **The kernel never touches the OS.** Anything Java read implicitly (environment variables, the OS user name) is passed in: `Config.from(args, env)`, `SshEndpoint.parse(spec, defaultUser)`.
 - **Existing settings keep working.** Enums are string enums (`'JUMP'`) like the existing `settings.json`, and `of()` factories fill in fields that older files lack.
+- **Every color comes from the theme.** The views hard-code no color: the UI kit registers `gempba.*` theme colors (tile background and borders, CPU and memory charts, grid lines), each defaulting to a standard theme color such as `charts.blue` or `editorWidget.background`, and components use them only as `var(--theia-gempba-…)`. Any theme, including a VS Code theme installed as a plugin, restyles the dashboard with no code change, and can override a `gempba.*` color by id.
+- **Reusable visuals live in the UI kit.** Grid, cards and the later detail views share `Tile`, `Sparkline` and `MeterBar` from `@gempba/ui`, which holds no data and depends on no other `@gempba` package. Sparklines are hand-drawn SVG (about a hundred lines with their geometry); a charting library such as uPlot (MIT, no dependencies) is kept for the interactive detail charts.
 - **Remembered settings are not Theia preferences.** The Connection view keeps the Java app's `~/.gempba-dashboard/settings.json` (one block per mode, recents capped at ten), served by one application-wide `SettingsServer`, so an existing user's hosts and targets come back pre-filled. The view never connects on its own.
 - **Parsing follows the Java contract.** Unknown wire fields are ignored, missing numbers read as 0, and missing objects or lists stay `undefined`. A topology node without `sockets` falls back to the live frame's socket count, while `sockets: []` means zero sockets.
 - **Utilization is per allocation**: a node's CPU is `clamp(Σ worker CPU ÷ |allocated cores|, 0, 100)`, the user's own work on the user's own cores, excluding other tenants on a shared node.
@@ -206,7 +221,7 @@ npm test                  # check the layering, compile, then run every package'
 npm run mock              # after a build: a stand-in gempba center on 127.0.0.1:9000
 ```
 
-To see live data without a cluster: run `npm run mock`, start the app, then in the Connection view (the plug icon on the left) pick Local and press Listen (port 9000); the palette's `GemPBA: Listen…` does the same. The status bar shows the node count. For HOST and JUMP, the Python [gempba-dashboard-mocker](https://github.com/apdistributedsystems/gempba-dashboard-mocker) impersonates a VM or a login node with MFA.
+To see live data without a cluster: run `npm run mock`, start the app, then in the Connection view (the plug icon on the left) pick Local and press Listen (port 9000); the palette's `GemPBA: Listen…` does the same. The Grid tab shows one tile per node, and the status bar the node count. For HOST and JUMP, the Python [gempba-dashboard-mocker](https://github.com/apdistributedsystems/gempba-dashboard-mocker) impersonates a VM or a login node with MFA.
 
 - Specs live next to their sources (`*.spec.ts`) and run from the compiled `lib/`. The root [`.mocharc.js`](.mocharc.js) lets an IDE run or debug a single spec file: it builds the package and runs the compiled copy, so breakpoints map back to the TypeScript through source maps.
 - Native modules exist in two builds: `npm rebuild` targets Node.js (tests), `npm run rebuild:electron` targets Electron (the app).
