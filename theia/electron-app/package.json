@@ -3,6 +3,7 @@
   "name": "@gempba/electron-app",
   "productName": "GemPBA Dashboard",
   "version": "2.0.0",
+  "description": "Live dashboard for GemPBA, the parallel branch-and-bound framework: nodes, sockets and workers of a running job.",
   "license": "MIT",
   "author": "Andres Pastrana",
   "homepage": "https://rapastranac.github.io/gempba-docs/",
@@ -37,11 +38,13 @@
   },
   "devDependencies": {
     "@theia/cli": "1.76.0",
-    "electron": "42.8.1"
+    "electron": "42.8.1",
+    "electron-builder": "^26.17.0"
   },
   "scripts": {
     "clean": "theia clean",
     "build": "theia build --mode development",
+    "package": "theia build --mode production && electron-builder --publish never",
     "rebuild": "theia rebuild:electron --cacheRoot ../..",
     "start": "theia start",
     "watch": "theia build --watch --mode development"

@@ -31,18 +31,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: npm
-      - name: Install Linux build prerequisites
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbfile-dev libsecret-1-dev
-      - name: Install
-        run: npm ci
-      - name: Check the dependency tree
-        shell: bash
-        run: npm ls --all > /dev/null
+      - uses: ./.github/actions/setup-node-theia
       - name: Compile
         run: npm run compile
       - name: Test

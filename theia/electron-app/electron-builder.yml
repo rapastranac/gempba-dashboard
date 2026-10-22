@@ -1,0 +1,52 @@
+# Installers for the GemPBA Dashboard, after the Theia IDE's applications/electron/electron-builder.yml.
+# `npm run package` builds the production bundle, then the installers for this OS into dist/.
+appId: io.gempba.dashboard
+productName: GemPBA Dashboard
+executableName: gempba-dashboard
+copyright: Copyright © 2026 Andres Pastrana
+electronVersion: 42.8.1
+# Theia already rebuilt the native modules for Electron (npm run rebuild:electron).
+npmRebuild: false
+nodeGypRebuild: false
+asar: true
+asarUnpack:
+  - "**/lib/backend/native/**"
+
+directories:
+  buildResources: resources
+  output: dist
+
+# The backend is bundled into lib/, so node_modules is not shipped: that also keeps the mock emitter and its
+# fixtures, which only the bundle's tests and `npm run mock` use, out of every installer.
+files:
+  - lib
+  - src-gen
+  - resources/icon.png
+  - resources/gempba-logo.svg
+  - "!**node_modules/**"
+  # Source maps are for debugging the bundle in development; they would more than triple the download.
+  - "!**/*.map"
+
+artifactName: gempba-dashboard-${version}-${os}-${arch}.${ext}
+
+win:
+  target:
+    - nsis
+mac:
+  category: public.app-category.developer-tools
+  darkModeSupport: true
+  target:
+    - dmg
+    - zip
+linux:
+  category: Development
+  maintainer: Andres Pastrana <12089476+rapastranac@users.noreply.github.com>
+  target:
+    - AppImage
+    - deb
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  runAfterFinish: false
