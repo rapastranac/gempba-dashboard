@@ -36,7 +36,7 @@ flowchart LR
     subgraph app["GemPBA Dashboard (Electron app)"]
         direction LR
         subgraph backend["Backend: Node.js"]
-            telemetry["@gempba/telemetry<br/>wire protocol, mapper, store"]
+            telemetry["@gempba/telemetry<br/>TCP client, wire protocol, mapper, store"]
         end
         subgraph frontend["Frontend: the window"]
             shellUi["@gempba/shell<br/>branding, hidden IDE parts"]
@@ -46,12 +46,12 @@ flowchart LR
             shellMain["@gempba/shell<br/>window icon"]
         end
     end
-    gempba -->|TCP| telemetry
+    gempba <-->|"TCP: frames in, control lines out"| telemetry
     telemetry -->|"WorldSnapshot over JSON-RPC (coming, #25)"| views
 ```
 
 - **Electron main** owns native windows. `@gempba/shell` sets the GemPBA icon on them here.
-- **Backend** (Node.js) will own the TCP connection and the SSH tunnel. It parses each telemetry line and maps it to a `WorldSnapshot`.
+- **Backend** (Node.js) owns the TCP connection (and, from #26, the SSH tunnel). It parses each telemetry line, maps it to a `WorldSnapshot`, and writes refresh-rate control lines back on the same socket.
 - **Frontend** (Chromium) draws the UI. It receives `WorldSnapshot`s from the backend over Theia's built-in JSON-RPC messaging, never raw wire frames.
 
 ---
@@ -74,14 +74,14 @@ flowchart TB
 | Package | What it holds | Java equivalent | Uses Theia? |
 |---|---|---|---|
 | [`@gempba/core`](theia/gempba-core) | read-model (`WorldSnapshot` → nodes → sockets → workers), `NodeUtilization`, formatters, connection config, `NodeHistoryStore`, `SshEndpoint` | `core` | no: plain TypeScript, shared by backend and frontend |
-| [`@gempba/telemetry`](theia/gempba-telemetry) | wire protocol, `WorldSnapshotMapper`, `TelemetryStore`; *coming*: TCP client (#24), JSON-RPC service (#25) | `adapters` | not yet (from #25) |
+| [`@gempba/telemetry`](theia/gempba-telemetry) | wire protocol, `TelemetryClient` (TCP), `WorldSnapshotMapper`, `TelemetryStore`, `MockEmitter` (a stand-in gempba center); *coming*: JSON-RPC service (#25) | `adapters` | not yet (from #25) |
 | [`@gempba/shell`](theia/gempba-shell) | branding (About dialog, title-bar logo, window icon, splash) and hiding the IDE parts Theia brings along | — | yes |
 | auth, controls, grid, cards | *coming* (#26–#29): SSH and MFA, connection bar, dashboard views | `ui` | yes |
 | [`@gempba/electron-app`](theia/electron-app) | the product: lists the Theia packages and our extensions; built and packaged | `app` | yes |
 
 ### Where the wire format lives
 
-- The gempba wire format (snake_case JSON) is described in exactly one file: [`theia/gempba-telemetry/src/node/protocol/wire-protocol.ts`](theia/gempba-telemetry/src/node/protocol/wire-protocol.ts). It lives under `src/node`, which only the backend loads.
+- The gempba wire format (snake_case JSON frames in, control lines out) is described in exactly one file: [`theia/gempba-telemetry/src/node/protocol/wire-protocol.ts`](theia/gempba-telemetry/src/node/protocol/wire-protocol.ts). It lives under `src/node`, which only the backend loads.
 - [`WorldSnapshotMapper`](theia/gempba-telemetry/src/node/telemetry/world-snapshot-mapper.ts) is the only place that turns wire types into the camelCase read-model from `@gempba/core`.
 - Only `@gempba/core` types will cross into the frontend.
 
@@ -129,6 +129,7 @@ npm run build             # tsc -b, then theia build
 npm run rebuild:electron  # once after installing: native modules for Electron
 npm start                 # launch the app
 npm test                  # compile, then run every package's specs
+npm run mock              # after a build: a stand-in gempba center on 127.0.0.1:9000
 ```
 
 - Specs live next to their sources (`*.spec.ts`) and run from the compiled `lib/`. The root [`.mocharc.js`](.mocharc.js) lets an IDE run or debug a single spec file: it builds the package and runs the compiled copy, so breakpoints map back to the TypeScript through source maps.
