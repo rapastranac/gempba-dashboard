@@ -1,18 +1,20 @@
+import { open, OpenerService } from '@theia/core/lib/browser/opener-service';
 import { codicon } from '@theia/core/lib/browser/widgets/widget';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
-import { NodeHistoryService, NodeSelection, TelemetryService } from '@gempba/telemetry/lib/common';
+import { NodeHistoryService, NodeLink, NodeSelection, TelemetryService } from '@gempba/telemetry/lib/common';
 import { MeterBar, Sparkline, Tile, TileGrid, VisibleRefresh } from '@gempba/ui/lib/browser';
 import { GridTiles } from '../common/grid-tiles';
 
 const CPU_TOOLTIP = 'CPU utilization of this node\'s gempba allocation (0–100%): your processes\' CPU divided by the cores '
-    + 'allocated to them. Other users\' load on a shared node is excluded. Click to select the node.';
+    + 'allocated to them. Other users\' load on a shared node is excluded. Click to select the node; double-click or press Enter to open it.';
 
 /**
  * One Task Manager style tile per node: its utilization now, its CPU history and its memory. Picking a tile
- * publishes a NodeSelection, and a node selected elsewhere is highlighted here.
+ * publishes a NodeSelection, and a node selected elsewhere is highlighted here. Opening a tile opens its node's
+ * NodeLink, in whichever view registered to open nodes.
  */
 @injectable()
 export class GridWidget extends ReactWidget {
@@ -23,6 +25,7 @@ export class GridWidget extends ReactWidget {
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
     @inject(NodeHistoryService) protected readonly history: NodeHistoryService;
     @inject(SelectionService) protected readonly selection: SelectionService;
+    @inject(OpenerService) protected readonly openers: OpenerService;
 
     @postConstruct()
     protected init(): void {
@@ -51,11 +54,17 @@ export class GridWidget extends ReactWidget {
         const selectedHost = NodeSelection.is(current) ? current.host : undefined;
         return <TileGrid>
             {tiles.map(tile => <Tile key={tile.host} title={tile.host} readout={tile.cpuText} tooltip={CPU_TOOLTIP}
-                selected={tile.host === selectedHost} onSelect={() => this.selection.selection = NodeSelection.of(tile.host)}>
+                selected={tile.host === selectedHost} onSelect={() => this.selection.selection = NodeSelection.of(tile.host)}
+                onOpen={() => this.openNode(tile.host)}>
                 <Sparkline values={tile.cpuHistory} max={100} capacity={GridTiles.HISTORY_CAPACITY} tone='cpu' label={`CPU history of ${tile.host}`} />
                 <span className='gempba-tile-caption'>{tile.memoryText}</span>
                 <MeterBar fraction={tile.memoryFraction} tone='memory' label={`Memory of ${tile.host}`} />
             </Tile>)}
         </TileGrid>;
+    }
+
+    /** Opens the node in whichever view registered for node links; with none, the hub's fallback opens nothing. */
+    protected openNode(host: string): void {
+        open(this.openers, NodeLink.of(host));
     }
 }

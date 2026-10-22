@@ -50,19 +50,25 @@ export interface TileProps {
     readonly tooltip?: string;
     readonly selected?: boolean;
     readonly onSelect?: () => void;
+    /** Opens what the tile stands for: on double-click, or on Enter, which also selects it. */
+    readonly onOpen?: () => void;
     readonly children?: React.ReactNode;
 }
 
-/** A selectable card with a title row; what it shows is up to its children. */
-export function Tile({ title, readout, tooltip, selected, onSelect, children }: TileProps): React.ReactElement {
-    const select = (event: React.KeyboardEvent) => {
-        if (onSelect && (event.key === 'Enter' || event.key === ' ')) {
-            event.preventDefault();
-            onSelect();
+/** A selectable card with a title row; what it shows is up to its children. A click selects it, a double-click opens it. */
+export function Tile({ title, readout, tooltip, selected, onSelect, onOpen, children }: TileProps): React.ReactElement {
+    const onKeyDown = (event: React.KeyboardEvent) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+        }
+        event.preventDefault();
+        onSelect?.();
+        if (event.key === 'Enter') {
+            onOpen?.();
         }
     };
     return <div className={'gempba-tile' + (selected ? ' gempba-tile-selected' : '')} title={tooltip} role='button' tabIndex={0}
-        aria-pressed={selected === true} onClick={onSelect} onKeyDown={select}>
+        aria-pressed={selected === true} onClick={onSelect} onDoubleClick={onOpen} onKeyDown={onKeyDown}>
         <div className='gempba-tile-header'>
             <span className='gempba-tile-title'>{title}</span>
             {readout && <span className='gempba-tile-readout'>{readout}</span>}
