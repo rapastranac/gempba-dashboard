@@ -97,3 +97,60 @@
     height: 100%;
     background: var(--gempba-tone);
 }
+
+.gempba-property-sheet {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.gempba-property-section {
+    padding: calc(var(--theia-ui-padding) * 3) 0 var(--theia-ui-padding);
+    text-align: start;
+    font-size: var(--theia-ui-font-size0);
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-property-label {
+    padding: 2px calc(var(--theia-ui-padding) * 4) 2px 0;
+    text-align: start;
+    vertical-align: baseline;
+    font-weight: normal;
+    white-space: nowrap;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-property-value {
+    padding: 2px 0;
+    width: 100%;
+    vertical-align: baseline;
+    color: var(--theia-foreground);
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-data-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-data-table th,
+.gempba-data-table td {
+    padding: var(--theia-ui-padding) calc(var(--theia-ui-padding) * 3);
+    text-align: start;
+    white-space: nowrap;
+}
+
+.gempba-data-table th {
+    font-weight: 600;
+    border-bottom: 1px solid var(--theia-gempba-tile-border);
+}
+
+.gempba-data-table tbody tr:nth-child(even) {
+    background: var(--theia-gempba-tile-background);
+}
+
+.gempba-data-table .gempba-data-end {
+    text-align: end;
+}
