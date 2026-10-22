@@ -4,7 +4,7 @@ import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import { NodeHistoryService, NodeSelection, TelemetryService } from '@gempba/telemetry/lib/common';
-import { MeterBar, Sparkline, Tile, TileGrid } from '@gempba/ui/lib/browser';
+import { MeterBar, Sparkline, Tile, TileGrid, VisibleRefresh } from '@gempba/ui/lib/browser';
 import { GridTiles } from '../common/grid-tiles';
 
 const CPU_TOOLTIP = 'CPU utilization of this node\'s gempba allocation (0–100%): your processes\' CPU divided by the cores '
@@ -33,9 +33,12 @@ export class GridWidget extends ReactWidget {
         this.title.closable = false;
         this.scrollOptions = {};
         this.addClass('gempba-grid');
-        this.toDispose.push(this.telemetry.onSnapshot(() => this.update()));
-        this.toDispose.push(this.telemetry.onStateChange(() => this.update()));
-        this.toDispose.push(this.selection.onSelectionChanged(() => this.update()));
+        // Snapshots arrive several times a second; a hidden Grid (a background tab, a minimized window) draws nothing until it is shown.
+        const refresh = new VisibleRefresh(this, () => this.update());
+        this.toDispose.push(refresh);
+        this.toDispose.push(this.telemetry.onSnapshot(() => refresh.request()));
+        this.toDispose.push(this.telemetry.onStateChange(() => refresh.request()));
+        this.toDispose.push(this.selection.onSelectionChanged(() => refresh.request()));
         this.update();
     }
 
