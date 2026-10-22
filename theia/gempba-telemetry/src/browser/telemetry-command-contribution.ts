@@ -1,19 +1,28 @@
 import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
 import { MessageService } from '@theia/core/lib/common/message-service';
-import { QuickInputService } from '@theia/core/lib/common/quick-pick-service';
+import { QuickInputService, QuickPickItem } from '@theia/core/lib/common/quick-pick-service';
 import { inject, injectable } from '@theia/core/shared/inversify';
-import { Config, ConnectionState, SessionSpec, TargetSpec } from '@gempba/core';
+import { Config, ConnectionMode, ConnectionState, SessionSpec, TargetSpec } from '@gempba/core';
 import { TelemetryService } from '../common/telemetry-service';
 
 export namespace TelemetryCommands {
     const CATEGORY = 'GemPBA';
-    export const CONNECT_LOCAL: Command = { id: 'gempba.connectLocal', category: CATEGORY, label: 'Connect (Local)' };
+    export const CONNECT: Command = { id: 'gempba.connect', category: CATEGORY, label: 'Connect…' };
     export const LISTEN: Command = { id: 'gempba.listen', category: CATEGORY, label: 'Listen…' };
     export const STOP: Command = { id: 'gempba.stop', category: CATEGORY, label: 'Stop Listening' };
     export const DISCONNECT: Command = { id: 'gempba.disconnect', category: CATEGORY, label: 'Disconnect' };
 }
 
-/** Drives the stream from the command palette, so it works without any connection UI installed. */
+const MODE_LABELS: Record<ConnectionMode, string> = {
+    [ConnectionMode.LOCAL]: 'Local: gempba on this machine',
+    [ConnectionMode.HOST]: 'Host: a VM over SSH',
+    [ConnectionMode.JUMP]: 'Jump host: a compute node through a login node'
+};
+
+/**
+ * Drives the stream from the command palette, so it works without any connection UI installed. Connect offers
+ * the modes whose tunnel provider is installed; with only LOCAL it connects at once.
+ */
 @injectable()
 export class TelemetryCommandContribution implements CommandContribution {
 
@@ -21,12 +30,14 @@ export class TelemetryCommandContribution implements CommandContribution {
     @inject(QuickInputService) protected readonly quickInput: QuickInputService;
     @inject(MessageService) protected readonly messages: MessageService;
 
+    protected session = SessionSpec.local();
+    protected lastTargetHost = '';
     protected lastPort = Config.DEFAULT_PORT;
 
     registerCommands(registry: CommandRegistry): void {
-        registry.registerCommand(TelemetryCommands.CONNECT_LOCAL, {
+        registry.registerCommand(TelemetryCommands.CONNECT, {
             isEnabled: () => this.telemetry.state === ConnectionState.DISCONNECTED,
-            execute: () => this.run(this.telemetry.connect(SessionSpec.local()))
+            execute: () => this.connect()
         });
         registry.registerCommand(TelemetryCommands.LISTEN, {
             isEnabled: () => this.telemetry.state === ConnectionState.CONNECTED || this.telemetry.state === ConnectionState.LISTENING,
@@ -42,7 +53,52 @@ export class TelemetryCommandContribution implements CommandContribution {
         });
     }
 
+    protected async connect(): Promise<void> {
+        const session = await this.askSession();
+        if (session) {
+            this.session = session;
+            await this.run(this.telemetry.connect(session));
+        }
+    }
+
+    protected async askSession(): Promise<SessionSpec | undefined> {
+        const modes = await this.telemetry.availableModes();
+        const mode = modes.length === 1 ? modes[0] : (await this.quickInput.showQuickPick<QuickPickItem & { mode: ConnectionMode }>(
+            modes.map(candidate => ({ label: MODE_LABELS[candidate], mode: candidate })), { title: 'GemPBA: Connect' }))?.mode;
+        if (mode === undefined || mode === ConnectionMode.LOCAL) {
+            return mode && SessionSpec.local();
+        }
+        const host = await this.quickInput.input({
+            title: `GemPBA: Connect (${MODE_LABELS[mode]})`,
+            prompt: mode === ConnectionMode.JUMP ? 'Login node as user@host[:port]' : 'VM as user@host[:port]',
+            value: this.session.mode === mode ? this.session.host : '',
+            validateInput: async input => input.trim() === '' ? 'Enter the SSH host' : undefined
+        });
+        if (host === undefined) {
+            return undefined;
+        }
+        const sshKey = await this.quickInput.input({
+            title: `GemPBA: Connect (${MODE_LABELS[mode]})`,
+            prompt: 'Private key file; leave empty to use your default keys in ~/.ssh',
+            value: this.session.mode === mode ? this.session.sshKey : ''
+        });
+        return sshKey === undefined ? undefined : SessionSpec.of({ mode, host: host.trim(), sshKey: sshKey.trim() });
+    }
+
     protected async listen(): Promise<void> {
+        let targetHost = '';
+        if (this.session.mode === ConnectionMode.JUMP) {
+            const node = await this.quickInput.input({
+                title: 'GemPBA: Listen',
+                prompt: 'Compute node running gempba, as seen from the login node',
+                value: this.lastTargetHost,
+                validateInput: async input => input.trim() === '' ? 'Enter the compute node' : undefined
+            });
+            if (node === undefined) {
+                return;
+            }
+            targetHost = this.lastTargetHost = node.trim();
+        }
         const value = await this.quickInput.input({
             title: 'GemPBA: Listen',
             prompt: 'Port the gempba center listens on',
@@ -53,7 +109,7 @@ export class TelemetryCommandContribution implements CommandContribution {
             return;
         }
         this.lastPort = Number(value);
-        await this.run(this.telemetry.listen(TargetSpec.of(undefined, this.lastPort)));
+        await this.run(this.telemetry.listen(TargetSpec.of(targetHost, this.lastPort)));
     }
 
     protected async run(action: Promise<void>): Promise<void> {
