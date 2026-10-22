@@ -5,6 +5,7 @@
     { "path": "theia/gempba-controls" },
     { "path": "theia/gempba-core" },
     { "path": "theia/gempba-shell" },
-    { "path": "theia/gempba-telemetry" }
+    { "path": "theia/gempba-telemetry" },
+    { "path": "theia/gempba-ui" }
   ]
 }

@@ -3,15 +3,17 @@ const path = require('path');
 
 /**
  * Which @gempba packages each package may depend on. Any package not listed is a feature: it may use only the
- * kernel and the telemetry hub, never another feature. The app is the composition root and may list anything.
+ * kernel, the telemetry hub and the UI kit, never another feature. The app is the composition root and may list
+ * anything.
  */
 const ALLOWED = {
     '@gempba/core': [],
     '@gempba/telemetry': ['@gempba/core'],
     '@gempba/shell': [],
+    '@gempba/ui': [],
     '@gempba/electron-app': '*'
 };
-const FEATURE_ALLOWED = ['@gempba/core', '@gempba/telemetry'];
+const FEATURE_ALLOWED = ['@gempba/core', '@gempba/telemetry', '@gempba/ui'];
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
 
 /**

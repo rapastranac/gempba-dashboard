@@ -1,0 +1,99 @@
+/* Colors come only from theme variables: the gempba.* tokens (see ui-colors.ts) and Theia's own. */
+
+.gempba-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: calc(var(--theia-ui-padding) * 3);
+    padding: calc(var(--theia-ui-padding) * 3);
+}
+
+.gempba-tile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theia-ui-padding);
+    padding: calc(var(--theia-ui-padding) * 3);
+    border: 1px solid var(--theia-gempba-tile-border);
+    border-radius: calc(var(--theia-ui-padding) * 2);
+    background: var(--theia-gempba-tile-background);
+    color: var(--theia-gempba-tile-foreground);
+    cursor: pointer;
+    outline: none;
+}
+
+.gempba-tile:hover {
+    border-color: var(--theia-gempba-tile-hoverBorder);
+}
+
+.gempba-tile:focus-visible,
+.gempba-tile-selected {
+    border-color: var(--theia-gempba-tile-selectedBorder);
+    box-shadow: 0 0 0 1px var(--theia-gempba-tile-selectedBorder);
+}
+
+.gempba-tile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--theia-ui-padding);
+}
+
+.gempba-tile-title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gempba-tile-readout {
+    font-size: calc(var(--theia-ui-font-size1) * 1.5);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-tile-caption {
+    color: var(--theia-gempba-tile-secondaryForeground);
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-tone-cpu {
+    --gempba-tone: var(--theia-gempba-chart-cpu);
+}
+
+.gempba-tone-memory {
+    --gempba-tone: var(--theia-gempba-chart-memory);
+}
+
+.gempba-sparkline {
+    display: block;
+    width: 100%;
+    height: 72px;
+    border: 1px solid var(--theia-gempba-chart-grid);
+}
+
+.gempba-sparkline-gridline {
+    stroke: var(--theia-gempba-chart-grid);
+    stroke-width: 1px;
+}
+
+.gempba-sparkline-area {
+    fill: var(--gempba-tone);
+    fill-opacity: 0.2;
+}
+
+.gempba-sparkline-line {
+    fill: none;
+    stroke: var(--gempba-tone);
+    stroke-width: 1.5px;
+}
+
+.gempba-meter {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--theia-gempba-chart-grid);
+    overflow: hidden;
+}
+
+.gempba-meter-fill {
+    height: 100%;
+    background: var(--gempba-tone);
+}
