@@ -1,243 +1,137 @@
 # Architecture
 
-GemPBA Dashboard is an SWT desktop client for the GemPBA parallel
-branch-and-bound framework's telemetry stream. It is built as **MVP (Supervising
-Presenter) over a Hexagonal, Ports-and-Adapters core**, packaged as a **Maven
-multi-module reactor whose module graph compile-enforces the dependency rule**.
+GemPBA Dashboard is a desktop app that shows live telemetry from the [GemPBA](https://github.com/rapastranac/gempba) parallel framework. It is built on the [Eclipse Theia](https://theia-ide.org) platform (1.76.0) and runs as an Electron app written in TypeScript.
 
-The single sentence that captures the design:
+The rule that shaped the design, carried over from the original Java/SWT version:
 
-> The UI renders an immutable domain read-model; the wire format never reaches
-> it — and *cannot*, because the compiler won't let it.
+> The UI renders an immutable read-model; the wire format never reaches it.
 
----
+In this version the rule is enforced by package boundaries and, once the backend service lands (#25), by a process boundary: the wire format is parsed in the backend process, and only the clean read-model is sent to the window.
 
-## The modules (the dependency graph *is* the enforcement)
-
-```mermaid
-flowchart TB
-    app["<b>app</b><br/>composition root · SWT"]
-    ui["<b>ui</b><br/>render-only views · SWT"]
-    adapters["<b>adapters</b><br/>protocol · IO · Jackson"]
-    core["<b>core</b><br/>domain · ports · pure logic"]
-
-    app --> ui
-    app --> adapters
-    app --> core
-    ui --> core
-    adapters --> core
-
-    classDef mod fill:#eef4fb,stroke:#5a7fa6,stroke-width:1px,color:#16304f;
-    classDef foundation fill:#e9f3ea,stroke:#5a8a5f,stroke-width:1.5px,color:#1f3d22;
-    class app,ui,adapters mod;
-    class core foundation;
-```
-
-Read it top-down: `app` wires everything; `ui` and `adapters` are siblings that
-**never reference each other**; every arrow points inward to `core`, which
-depends on nothing. The edge that is *deliberately missing* — **`ui → adapters`**
-— is the whole rule: with no path to the `adapters` module, a `ui` class cannot
-import the wire `protocol` that lives there. The compiler proves it below.
-
-Each module's Maven artifactId is just its bare name (`io.gempba:core`,
-`:adapters`, `:ui`, `:app`) — the umbrella is already the parent
-`io.gempba:gempba-dashboard`.
-
-| Module | Depends on | May use | Holds |
-|--------|-----------|---------|-------|
-| **core** | *(nothing)* | JDK only | domain read-model (`model`), value objects (`config`), pure policies (`policy`), formatting (`format`), view contracts (`view`), presenters (`presenter`), threading port (`concurrent`), pure SSH command (`ssh`), history buffer (`history`) |
-| **adapters** | core | + Jackson | wire DTOs + parser (`protocol`), telemetry client (`client`), SSH tunnel IO (`adapter.ssh`), connection controller (`connection`), `protocol → WorldSnapshot` mapper + store (`telemetry`) |
-| **ui** | core | + SWT | the SWT render-only views: card hierarchy, tile grid, dialogs, settings strip |
-| **app** | core, adapters, ui | + SWT | `Main`, the composition root, the `DashboardCoordinator` frame pipeline, `SwtUiExecutor`, icons |
-
-The edges that **don't** exist are the load-bearing ones:
-
-- **`ui` does not depend on `adapters`.** The wire `protocol` DTOs live in
-  `adapters`, so a `ui` class cannot import them — there is no path on its
-  compile classpath. This is the central rule, and it is enforced by `javac`,
-  not by convention or a linter.
-- **`adapters` does not depend on SWT.** The connection controller marshals its
-  callbacks onto the UI thread through the `core` `UiExecutor` *port*, whose SWT
-  implementation (`SwtUiExecutor`) is supplied by `app`. That indirection is
-  what lets the controller live in the toolkit-free adapter layer.
-- **`core` depends on nothing.** No SWT, no Jackson, no `java.net`. Everything
-  points inward to it.
-
-### Proof of enforcement
-
-```
-$ mvn -pl ui dependency:tree
-io.gempba:ui
-+- io.gempba:core:compile
-+- org.eclipse.platform:org.eclipse.swt…:compile
-\- (test only) junit, assertj           ← no jackson, no adapters
-
-# add `import io.gempba.dashboard.protocol.BroadcastEnvelope;` to any ui class:
-$ mvn -pl ui compile
-[ERROR] package io.gempba.dashboard.protocol does not exist
-[INFO] BUILD FAILURE
-```
+> This document grows with the migration (umbrella issue #20). Sections marked *coming* describe planned work.
 
 ---
 
-## The MVP seam
+## Node and TypeScript in Java terms
 
-The pattern is **MVP, Supervising-Presenter flavor**, with one consistent
-vocabulary (so "View" never means two things):
+| Java world | This project |
+|---|---|
+| Maven, `pom.xml` | npm, `package.json` |
+| Multi-module reactor | npm workspaces: every folder under `theia/` is one package |
+| `~/.m2` jars | `node_modules/`, downloaded prebuilt |
+| `javac` | `tsc`: TypeScript compiles to JavaScript; `tsc -b` builds the packages in dependency order (`tsconfig.json` `references`) |
+| JUnit, AssertJ | mocha, chai |
+| Spring, Guice (dependency injection) | inversify, Theia's DI container |
+| JVM | Electron, which bundles Node.js (backend) and Chromium (the window) |
 
-- **Model** — immutable read-model records, suffix `*Snapshot` (`core/model`).
-- **View** — the SWT widgets (`ui`) behind view contracts (`core/view`).
-  "View" means *only* UI.
-- **Presenter** — one per tab (`core/presenter`), SWT-free → unit-testable.
-- **Coordinator** — `DashboardCoordinator` (`app`): the thin orchestrator that
-  owns the session and fans each frame to the presenters.
+---
 
-Everything the UI shows is derived from one immutable value, the
-**`WorldSnapshot`** (`core/model`): a frame's worth of state as a tree of
-`NodeSnapshot → SocketSnapshot → WorkerSnapshot`/`CoreUsageSnapshot`, plus a
-`StructureKey`. It holds **raw magnitudes only** — no formatted strings, no SWT,
-and no `protocol` type.
+## How the app runs
+
+An Electron app is three cooperating processes. Our packages each contribute to one or more of them, on top of the shared kernel and the Theia platform.
 
 ```mermaid
 flowchart LR
-    json["wire JSON<br/><i>(gempba)</i>"]
-    env["BroadcastEnvelope<br/><i>adapters/protocol</i>"]
-    mapper["WorldSnapshotMapper<br/><i>adapters · pure fn</i>"]
-    model["WorldSnapshot<br/><i>core/model</i>"]
-    views["SWT views<br/><i>ui · render-only</i>"]
-
-    json --> env --> mapper --> model --> views
-
-    classDef wire fill:#fbeee9,stroke:#a6705a,color:#4f2a16;
-    classDef core fill:#e9f3ea,stroke:#5a8a5f,color:#1f3d22;
-    classDef view fill:#eef4fb,stroke:#5a7fa6,color:#16304f;
-    class json,env,mapper wire;
-    class model core;
-    class views view;
+    gempba["gempba center<br/><i>TCP, one JSON line per tick</i>"]
+    subgraph app["GemPBA Dashboard (Electron app)"]
+        direction LR
+        subgraph backend["Backend: Node.js"]
+            telemetry["@gempba/telemetry<br/>wire protocol, mapper, store"]
+        end
+        subgraph frontend["Frontend: the window"]
+            shellUi["@gempba/shell<br/>branding, hidden IDE parts"]
+            views["grid, cards, controls<br/><i>coming</i>"]
+        end
+        subgraph main["Electron main"]
+            shellMain["@gempba/shell<br/>window icon"]
+        end
+    end
+    gempba -->|TCP| telemetry
+    telemetry -->|"WorldSnapshot over JSON-RPC (coming, #25)"| views
 ```
 
-- **The mapper is the only translator.** `WorldSnapshotMapper` is a pure
-  function `BroadcastEnvelope → WorldSnapshot`. It consolidates what used to be
-  scattered across the SWT cards — the three-pass index/join of node frames,
-  topology, and identities; the node-header precedence rules; the
-  `allowed_cpu_ids ∩ socket cpu_ids` core-usage join; and the per-allocation CPU
-  metric. Being pure, it is unit-tested in isolation (it has no SWT to stand up).
-- **Views are render-only (Supervising Presenter).** Each view contract
-  (`GridView`, `CardsView`, …) has exactly one SWT implementation, named by
-  convention `Swt*` (matching `SwtUiExecutor`):
-  `SwtGridView.render(seriesByHost)`, `SwtCardsView.render(WorldSnapshot)`,
-  `SwtDetailView.update(WorldSnapshot)`. Each is told what to show and formats
-  trivial values itself; it pulls nothing. The two renderable tab views share
-  the generic contract `view.View<T>` (`render(T)` + `clear()`); the detail
-  window renders `snapshot.forHost(host)`, a pure read-model narrowing that
-  replaced the old wire-level envelope filtering.
-- **Presenters own orchestration, SWT-free.** `Presenter` (`update` + `clear`)
-  is the generic frame-consumer contract; a generic `TabPresenter<T>` layers the
-  tab lifecycle on top (the active flag, "fold data every frame but repaint only
-  when active", tear-down), so each concrete tab presenter is just its
-  projection: `GridPresenter extends TabPresenter<Map<host,NodeSeries>>` owns
-  the history buffer and projects per-host series (which is what removed the old
-  reach-in where the grid widget pulled from the store); `CardsPresenter extends
-  TabPresenter<WorldSnapshot>` is the identity projection. `DetailWindowsPresenter`
-  owns the live detail windows and implements the slim `Presenter` contract
-  directly (always-on, no tab lifecycle). Holding no SWT, they're unit-tested
-  with fake views.
-- **The coordinator is the thin "global controller".** `DashboardCoordinator`
-  (`app`) owns the frame pipeline (coalescer, mapping, history + detail-windows
-  every frame, render-active-tab-only) and the session lifecycle (tab switch,
-  reset), driving the presenters polymorphically through the `Presenter` contract
-  — it never touches a widget. `DashboardApp` is just the composition root that
-  builds the graph and runs the loop.
-
-### Ports
-
-| Port (core) | Implementation | Why |
-|-------------|----------------|-----|
-| `concurrent.UiExecutor` | `app.SwtUiExecutor` (`Display.asyncExec`) | keeps `Display` out of the connection controller, so `connection` is SWT-free |
-| `view.GridView`/`CardsView`/`DetailView`/`StatusView`/`SettingsView` (the tab views extend `view.View<T>`) | `ui.SwtGridView`/`SwtCardsView`/`SwtDetailView`/`SwtStatusView`/`SwtSettingsView` | view contracts the presenters and coordinator drive without naming a widget |
-| `presenter.Presenter` (`update`/`clear`; tabs add the lifecycle via `TabPresenter<T>`) | `GridPresenter`, `CardsPresenter`, `DetailWindowsPresenter` | the extensible backbone the coordinator fans each frame to; a new tab = one `TabPresenter<T>` subclass, a new always-on presenter = one `Presenter` |
-| `ssh.SshCommand` (pure) | `adapter.ssh.SshTunnel` (IO) delegates to it | the settings strip previews the command from `core`; spawning stays in `adapters` |
+- **Electron main** owns native windows. `@gempba/shell` sets the GemPBA icon on them here.
+- **Backend** (Node.js) will own the TCP connection and the SSH tunnel. It parses each telemetry line and maps it to a `WorldSnapshot`.
+- **Frontend** (Chromium) draws the UI. It receives `WorldSnapshot`s from the backend over Theia's built-in JSON-RPC messaging, never raw wire frames.
 
 ---
 
-## Live data flow
+## Packages
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant C as TelemetryClient<br/>(worker thread)
-    participant K as ConnectionController
-    participant S as DashboardCoordinator<br/>(+ FrameCoalescer)
-    participant T as TelemetryStore
-    participant P as presenters + detail windows
-
-    C->>C: read JSON → BroadcastEnvelope
-    C->>K: onFrame(envelope)
-    Note over K: UiExecutor.execute(…)<br/>epoch + closed guards
-    K-->>S: submit(envelope) on UI thread
-    Note over S: coalesce ~30 fps<br/>(bursts → latest frame)
-    S->>T: ingest(frame)
-    T-->>S: WorldSnapshot<br/>(+ last-good topology cache)
-    S->>P: detail.update + presenter.update (every frame)
-    Note over P: each presenter folds data state —<br/>only the active tab repaints
+flowchart TB
+    app["@gempba/electron-app<br/>the product"]
+    shell["@gempba/shell<br/>Theia extension"]
+    telemetry["@gempba/telemetry<br/>joins the app in #25"]
+    core["@gempba/core<br/>pure kernel"]
+    theia["Theia platform<br/>@theia/core, electron, monaco, preferences, messages"]
+    app --> shell
+    app --> theia
+    shell --> theia
+    telemetry --> core
 ```
 
-1. `TelemetryClient` (adapters, worker thread) reads JSON, parses to
-   `BroadcastEnvelope`, calls `FrameListener.onFrame`.
-2. `ConnectionController` (adapters) hops the callback onto the UI thread via the
-   `UiExecutor` port, guarded by an epoch counter (so a torn-down connection's
-   late frames are dropped) and a closed flag.
-3. `DashboardCoordinator` (app) receives frames on the UI thread and feeds them
-   to a `FrameCoalescer` (~30 fps): bursts collapse to the latest frame, so the
-   dashboard never renders faster than the eye resolves.
-4. Each surviving frame is mapped once by `TelemetryStore.ingest` (which also
-   caches the last-good topology, so a stray null-topology frame can't orphan the
-   model), then handed to every open detail window and to **every** presenter's
-   `update` — **every frame, regardless of tab**. Each presenter folds its data
-   state (the grid folds the `NodeHistoryStore` sparkline buffer) but only the
-   **active** tab's presenter repaints.
+| Package | What it holds | Java equivalent | Uses Theia? |
+|---|---|---|---|
+| [`@gempba/core`](theia/gempba-core) | read-model (`WorldSnapshot` → nodes → sockets → workers), `NodeUtilization`, formatters, connection config, `NodeHistoryStore`, `SshEndpoint` | `core` | no: plain TypeScript, shared by backend and frontend |
+| [`@gempba/telemetry`](theia/gempba-telemetry) | wire protocol, `WorldSnapshotMapper`, `TelemetryStore`; *coming*: TCP client (#24), JSON-RPC service (#25) | `adapters` | not yet (from #25) |
+| [`@gempba/shell`](theia/gempba-shell) | branding (About dialog, title-bar logo, window icon, splash) and hiding the IDE parts Theia brings along | — | yes |
+| auth, controls, grid, cards | *coming* (#26–#29): SSH and MFA, connection bar, dashboard views | `ui` | yes |
+| [`@gempba/electron-app`](theia/electron-app) | the product: lists the Theia packages and our extensions; built and packaged | `app` | yes |
+
+### Where the wire format lives
+
+- The gempba wire format (snake_case JSON) is described in exactly one file: [`theia/gempba-telemetry/src/node/protocol/wire-protocol.ts`](theia/gempba-telemetry/src/node/protocol/wire-protocol.ts). It lives under `src/node`, which only the backend loads.
+- [`WorldSnapshotMapper`](theia/gempba-telemetry/src/node/telemetry/world-snapshot-mapper.ts) is the only place that turns wire types into the camelCase read-model from `@gempba/core`.
+- Only `@gempba/core` types will cross into the frontend.
 
 ---
 
-## Notable decisions
+## Where you can see Theia
 
-- **Per-allocation CPU — "your cores, your work."** The tile graph is
-  `clamp(Σ rank cpu ÷ |⋃ allocated cores|, 0, 100)`: the user's own processes'
-  CPU over the cores they were allocated, excluding other tenants on a shared
-  node. The clamp is a pure `core` policy (`NodeUtilization`); gathering its
-  inputs is the mapper's join. (Acceptance scenarios live in
-  `WorldSnapshotMapperTest`; the arithmetic in `NodeUtilizationTest`.)
-- **Relayout elision via `StructureKey`.** A frame whose `host|socket|worker`
-  signature equals the previous one added or removed no cards, so the expensive
-  scrolled-content remeasure is skipped. The signature is computed once by the
-  mapper and rides on the model.
-- **Visibility-gated rendering.** Collapsed or off-screen cards skip their
-  per-frame text updates and repaint from cache the moment they're revealed —
-  keeping scroll smooth under a fast telemetry cadence.
-- **Diff-before-paint.** Labels and headers are only rewritten when their text
-  actually changed, eliding the native repaint (and flicker) for the common case
-  of unchanged counters.
+1. [`theia/electron-app/package.json`](theia/electron-app/package.json): its dependencies are `@theia/*` packages, it declares `"theia": { "target": "electron" }`, and its scripts call the Theia CLI (`theia build`, `theia start`). The product has no code of its own; Theia generates the startup code from this file.
+2. `node_modules/@theia/`: the platform itself, downloaded prebuilt. We never compile it.
+3. [`theia/gempba-shell/package.json`](theia/gempba-shell/package.json): the `"theiaExtensions"` entry tells Theia which module to load in the frontend and which in Electron main. This is what makes a package a Theia extension.
+4. [`shell-frontend-module.ts`](theia/gempba-shell/src/browser/shell-frontend-module.ts): a `ContainerModule` (think Guice module) that registers *contributions*. Theia collects every extension's contributions at startup.
+5. `theia/electron-app/src-gen/` (generated by `theia build`, not committed): the startup code importing each extension's modules.
+
+### How an extension plugs in
+
+```ts
+// theia/gempba-shell/src/browser/shell-frontend-module.ts (excerpt)
+export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
+    bind(FilterContribution).to(ShellFilterContribution).inSingletonScope();  // hide Outline and Problems
+    bind(MenuContribution).to(ShellMenuContribution).inSingletonScope();      // remove Selection and Go menus
+    rebind(AboutDialog).to(GemPbaAboutDialog).inSingletonScope();             // replace Theia's About dialog
+});
+```
 
 ---
 
-## Build & run
+## Key decisions
+
+- **The smallest Theia set that boots.** `@theia/core` alone fails dependency injection: the command palette lives in `@theia/monaco`, the settings providers in `@theia/preferences`. The app uses `core`, `electron`, `monaco`, `preferences` and `messages`. What those drag in that a dashboard doesn't need is hidden by `@gempba/shell` with `FilterContribution` (matched by class, since class names are minified in production builds) and menu unregistration.
+- **The read-model is plain data.** It will travel over JSON-RPC, where class methods don't survive, so each Java record became a readonly interface plus a same-named namespace for its methods (`WorldSnapshot.forHost(snapshot, host)`). `StructureKey` is a sorted array rather than a `Set`. Stateful helpers that never cross processes (`NodeHistoryStore`, `TelemetryStore`) stay classes.
+- **Output matches the Java app.** `NumberText` reproduces Java's `String.format` rounding (`1.005` → `"1.01"`, where JavaScript's `toFixed` gives `"1.00"`) and groups thousands without depending on the OS locale.
+- **The kernel never touches the OS.** Anything Java read implicitly (environment variables, the OS user name) is passed in: `Config.from(args, env)`, `SshEndpoint.parse(spec, defaultUser)`.
+- **Existing settings keep working.** Enums are string enums (`'JUMP'`) like the existing `settings.json`, and `of()` factories fill in fields that older files lack.
+- **Parsing follows the Java contract.** Unknown wire fields are ignored, missing numbers read as 0, and missing objects or lists stay `undefined`. A topology node without `sockets` falls back to the live frame's socket count, while `sockets: []` means zero sockets.
+- **Utilization is per allocation**: a node's CPU is `clamp(Σ worker CPU ÷ |allocated cores|, 0, 100)`, the user's own work on the user's own cores, excluding other tenants on a shared node.
+- **Dead Java code was not ported**: `ConnectionSpec`, and `SshCommand`, which only served the never-used child-process tunnel. Both remain in git history.
+
+---
+
+## Build, run and test
 
 ```
-mvn -B test                       # build + test the whole reactor
-mvn -B install -DskipTests        # install the modules locally, then…
-mvn -B -pl app exec:java          # …launch the dashboard
+npm ci                    # install (Node 22)
+npm run build             # tsc -b, then theia build
+npm run rebuild:electron  # once after installing: native modules for Electron
+npm start                 # launch the app
+npm test                  # compile, then run every package's specs
 ```
 
-SWT's per-platform native artifact is selected automatically by an OS-activated
-Maven profile (Windows / Linux x86_64 + aarch64 / macOS x86_64 + aarch64).
-
-## Tests
-
-118 tests, all in `core` and `adapters` — exactly the modules with logic worth
-asserting. The `ui` and `app` modules are deliberately thin (render-only views and
-composition) and carry no unit tests; they are exercised by launching the app.
-The pure mapper, the per-allocation policy, the SSH command authoring, the
-history buffer, the JSON protocol — and now the **presenters** (`GridPresenter`,
-`CardsPresenter`, `DetailWindowsPresenter`, driven against fake views) — are each
-tested in isolation. That last group is the dividend of MVP: the orchestration
-that used to live in untestable SWT lambdas is now SWT-free and asserted.
+- Specs live next to their sources (`*.spec.ts`) and run from the compiled `lib/`. The root [`.mocharc.js`](.mocharc.js) lets an IDE run or debug a single spec file: it builds the package and runs the compiled copy, so breakpoints map back to the TypeScript through source maps.
+- Native modules exist in two builds: `npm rebuild` targets Node.js (tests), `npm run rebuild:electron` targets Electron (the app).
+- npm only runs the install scripts listed under `allowScripts` in the root `package.json`.
+- CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) installs, compiles, tests and builds on Linux, Windows and macOS. Installers and releases come with #30.
