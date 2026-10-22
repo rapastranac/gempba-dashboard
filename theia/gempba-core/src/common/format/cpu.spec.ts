@@ -22,9 +22,8 @@ describe('Cpu', () => {
         expect(Cpu.effectiveCores(9.1, 4)).to.equal('9.1 cores (oversubscribed)');
     });
 
-    it('core row shows access and usage', () => {
-        expect(Cpu.coreRow(3, 87.3, 8, 8))
-            .to.equal('Worker 3:  87.3 % CPU  ·  can use all 8 cores  ·  currently using ≈ 0.87 cores');
-        expect(Cpu.coreRow(5, 50, 4, 8)).to.contain('can use 4 of 8 cores');
+    it('core usage shows access and usage', () => {
+        expect(Cpu.coreUsage(87.3, 8, 8)).to.equal('87.3 % CPU · can use all 8 cores · currently using ≈ 0.87 cores');
+        expect(Cpu.coreUsage(50, 4, 8)).to.contain('can use 4 of 8 cores');
     });
 });
