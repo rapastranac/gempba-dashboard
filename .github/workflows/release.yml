@@ -1,0 +1,102 @@
+name: Release
+
+# Builds the installers on each OS, boots every packaged app, and on a v* tag attaches the installers to the GitHub
+# Release. A manual run builds and checks them without publishing, and so does a pull request that changes the
+# packaging, so packaging is tested whenever it changes and costs no minutes otherwise. Unsigned: Windows shows
+# "Unknown publisher" and macOS Gatekeeper asks the user to allow the app once.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/actions/setup-node-theia/**
+      - configs/smoke-test.js
+      - theia/electron-app/electron-builder.yml
+      - theia/electron-app/package.json
+      - theia/electron-app/resources/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    name: package (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+            unpacked: linux-unpacked
+          - target: windows-x64
+            runner: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
+            unpacked: win-unpacked
+          - target: macos-arm64
+            runner: ${{ vars.RUNNER_MACOS || 'macos-26' }}
+            unpacked: mac-arm64
+          - target: macos-x64
+            runner: ${{ vars.RUNNER_MACOS_INTEL || 'macos-15-intel' }}
+            unpacked: mac
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Match the tag to the app version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(node -p "require('./theia/electron-app/package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the app version $version"
+            exit 1
+          fi
+      - uses: ./.github/actions/setup-node-theia
+      # Native modules are compiled on each OS against Electron's ABI, so every runner packages its own OS only.
+      - name: Package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run package
+      - name: Boot the packaged app
+        run: |
+          dir="theia/electron-app/dist/${{ matrix.unpacked }}"
+          case "$RUNNER_OS" in
+            Linux) xvfb-run -a node configs/smoke-test.js "$dir/gempba-dashboard" ;;
+            Windows) node configs/smoke-test.js "$dir/gempba-dashboard.exe" ;;
+            macOS) node configs/smoke-test.js "$(ls -d "$dir"/*.app)/Contents/MacOS/"* ;;
+          esac
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gempba-dashboard-${{ matrix.target }}
+          path: |
+            theia/electron-app/dist/*.exe
+            theia/electron-app/dist/*.dmg
+            theia/electron-app/dist/*.zip
+            theia/electron-app/dist/*.AppImage
+            theia/electron-app/dist/*.deb
+          if-no-files-found: error
+
+  # One job publishes, so the four uploads do not race to create the release.
+  publish:
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
