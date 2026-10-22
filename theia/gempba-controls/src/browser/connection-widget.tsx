@@ -149,10 +149,12 @@ export class ConnectionWidget extends ReactWidget {
             <section>
                 <h3>Refresh rates</h3>
                 <label>Worker (ms)
-                    <input className='theia-input' type='number' min={RefreshInterval.MIN_MS} max={RefreshInterval.MAX_MS} step={RATE_STEP_MS} value={this.form.workerIntervalMs} onChange={e => this.edit('workerIntervalMs', e.target.value)} />
+                    <input className='theia-input' type='number' min={RefreshInterval.MIN_MS} max={RefreshInterval.MAX_MS} step={RATE_STEP_MS}
+                        value={this.form.workerIntervalMs} onChange={e => this.edit('workerIntervalMs', e.target.value)} />
                 </label>
                 <label>Node (ms)
-                    <input className='theia-input' type='number' min={RefreshInterval.MIN_MS} max={RefreshInterval.MAX_MS} step={RATE_STEP_MS} value={this.form.nodeIntervalMs} onChange={e => this.edit('nodeIntervalMs', e.target.value)} />
+                    <input className='theia-input' type='number' min={RefreshInterval.MIN_MS} max={RefreshInterval.MAX_MS} step={RATE_STEP_MS}
+                        value={this.form.nodeIntervalMs} onChange={e => this.edit('nodeIntervalMs', e.target.value)} />
                 </label>
                 <div className='gempba-connection-row'>
                     <button className='theia-button secondary' onClick={() => this.applyRates()}>Apply rates</button>
