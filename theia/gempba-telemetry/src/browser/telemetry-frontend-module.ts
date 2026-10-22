@@ -1,10 +1,14 @@
+import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { ServiceConnectionProvider } from '@theia/core/lib/browser/messaging/service-connection-provider';
+import { CommandContribution } from '@theia/core/lib/common/command';
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { NodeHistoryStore } from '@gempba/core';
 import { TELEMETRY_SERVICE_PATH, TelemetryServer } from '../common/telemetry-protocol';
 import { NodeHistoryService, TelemetryService } from '../common/telemetry-service';
+import { TelemetryCommandContribution } from './telemetry-command-contribution';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
 import { TelemetryServiceImpl } from './telemetry-service-impl';
+import { TelemetryStatusBarContribution } from './telemetry-status-bar-contribution';
 
 export default new ContainerModule(bind => {
     bind(TelemetryServerClientImpl).toSelf().inSingletonScope();
@@ -16,4 +20,7 @@ export default new ContainerModule(bind => {
     bind(NodeHistoryService).toService(NodeHistoryStore);
     bind(TelemetryServiceImpl).toSelf().inSingletonScope();
     bind(TelemetryService).toService(TelemetryServiceImpl);
+
+    bind(CommandContribution).to(TelemetryCommandContribution).inSingletonScope();
+    bind(FrontendApplicationContribution).to(TelemetryStatusBarContribution).inSingletonScope();
 });
