@@ -46,10 +46,10 @@ flowchart LR
             controlsUi["@gempba/controls<br/>Connection view"]
             shellUi["@gempba/shell<br/>branding, hidden IDE parts"]
             gridUi["@gempba/grid<br/>Grid view: one tile per node"]
-            views["cards<br/><i>coming</i>"]
+            cardsUi["@gempba/cards<br/>Cards view: tree and details"]
         end
         subgraph main["Electron main"]
-            shellMain["@gempba/shell<br/>window icon"]
+            shellMain["@gempba/shell<br/>window icon, background throttling"]
         end
     end
     gempba <-->|"TCP: frames in, control lines out"| telemetry
@@ -58,12 +58,12 @@ flowchart LR
     authNode -.->|"prompts over JSON-RPC"| authUi
     telemetry -->|"WorldSnapshot over JSON-RPC"| service
     service -->|onSnapshot| gridUi
-    service -->|onSnapshot| views
+    service -->|onSnapshot| cardsUi
     controlsUi -->|"connect, listen, rates"| service
     controlsUi -.->|"settings over JSON-RPC"| settingsNode
 ```
 
-- **Electron main** owns native windows. `@gempba/shell` sets the GemPBA icon on them here.
+- **Electron main** owns native windows. `@gempba/shell` sets the GemPBA icon on them here, and turns Chromium's background throttling back on once the frontend is ready, so a minimized window counts as hidden.
 - **Backend** (Node.js) owns the TCP connection and, in HOST and JUMP mode, the SSH session that tunnels it. Each window gets its own `TelemetryServer`, which parses each telemetry line, maps it to a `WorldSnapshot`, and writes refresh-rate control lines back on the same socket.
 - **Frontend** (Chromium) draws the UI. `TelemetryService` receives `WorldSnapshot`s from the backend over Theia's built-in JSON-RPC messaging, never raw wire frames, and hands them to the views.
 
@@ -79,6 +79,7 @@ flowchart TB
     auth["@gempba/auth<br/>a feature"]
     controls["@gempba/controls<br/>a feature"]
     grid["@gempba/grid<br/>a feature"]
+    cards["@gempba/cards<br/>a feature"]
     ui["@gempba/ui<br/>UI kit"]
     core["@gempba/core<br/>pure kernel"]
     theia["Theia platform<br/>@theia/core, electron, monaco, preferences, messages"]
@@ -86,12 +87,15 @@ flowchart TB
     app --> auth
     app --> controls
     app --> grid
+    app --> cards
     app --> telemetry
     app --> theia
     auth --> telemetry
     controls --> telemetry
     grid --> telemetry
     grid --> ui
+    cards --> telemetry
+    cards --> ui
     ui --> theia
     shell --> theia
     telemetry --> core
@@ -102,12 +106,12 @@ flowchart TB
 |---|---|---|---|
 | [`@gempba/core`](theia/gempba-core) | read-model (`WorldSnapshot` → nodes → sockets → workers), `NodeUtilization`, formatters, connection config, `NodeHistoryStore`, `SshEndpoint` | `core` | no: plain TypeScript, shared by backend and frontend |
 | [`@gempba/telemetry`](theia/gempba-telemetry) | the hub. Backend: wire protocol, `TelemetryClient` (TCP), `WorldSnapshotMapper`, `TelemetryStore`, `TelemetryServer` (one per window), the `TunnelProvider` contribution point (LOCAL built in), `MockEmitter` (a stand-in gempba center). Frontend: `TelemetryService` and `NodeHistoryService` (the API features inject), the GemPBA commands and status bar entry | `adapters` | yes |
-| [`@gempba/shell`](theia/gempba-shell) | branding (About dialog, title-bar logo, window icon, splash) and hiding the IDE parts Theia brings along | — | yes |
+| [`@gempba/shell`](theia/gempba-shell) | branding (About dialog, title-bar logo, window icon, splash), hiding the IDE parts Theia brings along, and letting a minimized window count as hidden | — | yes |
 | [`@gempba/auth`](theia/gempba-auth) | a feature. Backend: `RemoteConnection` (one authenticated SSH session on `ssh2`, HOST and JUMP forwards), the HOST and JUMP `TunnelProvider`s, `KnownHosts` and `HostKeyVerifier` (trust on first use). Frontend: `AuthPromptImpl` (MFA, passphrase and host-key prompts) | `adapters` (`RemoteConnection`), `ui` (`SwtAuthPrompt`) | yes |
 | [`@gempba/controls`](theia/gempba-controls) | a feature. Frontend: the Connection view (session, target, refresh rates), which only drives `TelemetryService`. Backend: `SettingsStore`, the remembered settings in `~/.gempba-dashboard/settings.json` (the Java app's file), and `RememberedSettings` with the recents | `adapters` (`SettingsStore`), `ui` (`SwtSettingsView`) | yes |
-| [`@gempba/ui`](theia/gempba-ui) | the UI kit, shared by the views: `Tile`, `TileGrid`, `Sparkline` (SVG, from the pure `SparklineGeometry`), `MeterBar`, and the `gempba.*` theme colors. No data, no features | `ui` (`NodeTile`'s drawing) | yes |
+| [`@gempba/ui`](theia/gempba-ui) | the UI kit, shared by the views: `Tile`, `TileGrid`, `Sparkline` (SVG, from the pure `SparklineGeometry`), `MeterBar`, `PropertySheet` (label and value rows under section headings), `DataTable`, `VisibleRefresh` (refresh only while visible), and the `gempba.*` theme colors. No data, no features | `ui` (`NodeTile`'s drawing) | yes |
 | [`@gempba/grid`](theia/gempba-grid) | a feature. The Grid view in the main area: one Task Manager style tile per node (utilization now, about two minutes of CPU history, memory), built from the UI kit; `GridTiles` turns a snapshot and its history into formatted tiles | `ui` (`SwtGridView`, `NodeTile`), `GridPresenter` | yes |
-| cards | *coming* (#29): the hierarchy view | `ui` | yes |
+| [`@gempba/cards`](theia/gempba-cards) | a feature. The Cards view in the main area, master and detail in Theia's own `SplitWidget`: on the left the Node → Socket → Worker hierarchy in Theia's own `TreeWidget` (`CardsTree` builds rows lazily), on the right the picked row's details (`CardsText` words them like the Java cards: a worker's counters, a socket's core usage), and a dialog listing a worker's outgoing peers | `ui` (`SwtCardsView`, `NodeCard`, `SocketCard`, `CoresCard`, `WorkerCard`), `CardsPresenter` | yes |
 | [`@gempba/electron-app`](theia/electron-app) | the product: lists the Theia packages and our extensions; built and packaged | `app` | yes |
 
 ### Where the wire format lives
@@ -149,7 +153,7 @@ flowchart TB
     auth["@gempba/auth<br/>adds HOST, JUMP"]
     controls["@gempba/controls<br/>Connection view"]
     grid["@gempba/grid<br/>one tile per node"]
-    cards["@gempba/cards<br/><i>coming</i>: hierarchy tree"]
+    cards["@gempba/cards<br/>tree and details"]
     telemetry["@gempba/telemetry, the hub<br/>TelemetryService, commands, TunnelProvider"]
     ui["@gempba/ui, the UI kit<br/>tiles, sparklines, meters, theme colors"]
     core["@gempba/core<br/>read-model and formatters, no Theia"]
@@ -168,7 +172,7 @@ Arrows mean "depends on"; they only point down. Extensions talk through three Th
 |---|---|---|---|
 | **Service**: an interface plus a DI token, injected with `@inject` | interface + Guice binding | telemetry: `TelemetryService`, `NodeHistoryService` ([`telemetry-service.ts`](theia/gempba-telemetry/src/common/telemetry-service.ts)) | controls, grid, cards |
 | **Contribution point**: a socket the host loops over through a `ContributionProvider` | Eclipse extension point, `ServiceLoader` | telemetry defines `TunnelProvider` ([`tunnel-provider.ts`](theia/gempba-telemetry/src/node/tunnel/tunnel-provider.ts)), with LOCAL built in | auth fills it with HOST and JUMP |
-| **Theia's shared services**: commands, selection, events | listeners, an event bus | Theia core: `CommandRegistry`, `SelectionService` | grid publishes the picked node as a `NodeSelection` ([`node-selection.ts`](theia/gempba-telemetry/src/common/node-selection.ts)); cards and later views follow it |
+| **Theia's shared services**: commands, selection, events | listeners, an event bus | Theia core: `CommandRegistry`, `SelectionService` | grid and cards publish the picked node as a `NodeSelection` ([`node-selection.ts`](theia/gempba-telemetry/src/common/node-selection.ts)) and follow each other's; later views can join without importing either |
 
 A feature's whole coupling to the stream is one injected interface:
 
@@ -197,6 +201,9 @@ These are Theia *extensions*, composed when the app is built, not VS Code plugin
 - **The kernel never touches the OS.** Anything Java read implicitly (environment variables, the OS user name) is passed in: `Config.from(args, env)`, `SshEndpoint.parse(spec, defaultUser)`.
 - **Existing settings keep working.** Enums are string enums (`'JUMP'`) like the existing `settings.json`, and `of()` factories fill in fields that older files lack.
 - **Every color comes from the theme.** The views hard-code no color: the UI kit registers `gempba.*` theme colors (tile background and borders, CPU and memory charts, grid lines), each defaulting to a standard theme color such as `charts.blue` or `editorWidget.background`, and components use them only as `var(--theia-gempba-…)`. Any theme, including a VS Code theme installed as a plugin, restyles the dashboard with no code change, and can override a `gempba.*` color by id.
+- **Hidden views do no work.** Snapshots arrive several times a second. Each view refreshes through the UI kit's `VisibleRefresh`: while it is hidden (a background tab, a collapsed panel, a minimized window) a snapshot only marks it stale, and it catches up once when shown, reading the latest snapshot then. Measured in the app: the view in front updates, the one behind makes no DOM changes at all, and neither does anything while the window is minimized. The node history keeps folding while hidden, so a graph is continuous when shown again. It holds the 120 samples a graph draws per node, so memory stays flat however long the app runs.
+- **A minimized window is hidden, like a background tab.** Theia turns Chromium's background throttling off so that a window started minimized still finishes loading, which also keeps the page reporting itself visible when minimized. `@gempba/shell` turns it back on once the frontend reports it is ready (and off while it reloads), so the standard Page Visibility API works and `VisibleRefresh` uses it. Without the shell the app still works; a minimized window just keeps drawing.
+- **Stock Theia first.** The Cards view is Theia's own `SplitWidget` holding Theia's own `TreeWidget`, which draws only the rows on screen; the Cards tree builds a row's children only when it is expanded, so the collapsed parts of a large cluster cost nothing. Rows keep their ids, so expansion and selection survive every refresh. The tree is for finding a node, socket or worker; what it holds shows in the details pane beside it, so long lists of counters never crowd the tree. As in the Java cards, the first node opens with its sentinel's socket and the sentinel worker picked. The outgoing-peers list is a stock Theia dialog. Custom visuals are used where Theia has nothing, as for the Grid's tiles.
 - **Reusable visuals live in the UI kit.** Grid, cards and the later detail views share `Tile`, `Sparkline` and `MeterBar` from `@gempba/ui`, which holds no data and depends on no other `@gempba` package. Sparklines are hand-drawn SVG (about a hundred lines with their geometry); a charting library such as uPlot (MIT, no dependencies) is kept for the interactive detail charts.
 - **Remembered settings are not Theia preferences.** The Connection view keeps the Java app's `~/.gempba-dashboard/settings.json` (one block per mode, recents capped at ten), served by one application-wide `SettingsServer`, so an existing user's hosts and targets come back pre-filled. The view never connects on its own.
 - **Parsing follows the Java contract.** Unknown wire fields are ignored, missing numbers read as 0, and missing objects or lists stay `undefined`. A topology node without `sockets` falls back to the live frame's socket count, while `sockets: []` means zero sockets.
@@ -221,7 +228,7 @@ npm test                  # check the layering, compile, then run every package'
 npm run mock              # after a build: a stand-in gempba center on 127.0.0.1:9000
 ```
 
-To see live data without a cluster: run `npm run mock`, start the app, then in the Connection view (the plug icon on the left) pick Local and press Listen (port 9000); the palette's `GemPBA: Listen…` does the same. The Grid tab shows one tile per node, and the status bar the node count. For HOST and JUMP, the Python [gempba-dashboard-mocker](https://github.com/apdistributedsystems/gempba-dashboard-mocker) impersonates a VM or a login node with MFA.
+To see live data without a cluster: run `npm run mock`, start the app, then in the Connection view (the plug icon on the left) pick Local and press Listen (port 9000); the palette's `GemPBA: Listen…` does the same. The Grid tab shows one tile per node, the Cards tab the node, socket and worker tree with the picked row's details, and the status bar the node count. For HOST and JUMP, the Python [gempba-dashboard-mocker](https://github.com/apdistributedsystems/gempba-dashboard-mocker) impersonates a VM or a login node with MFA.
 
 - Specs live next to their sources (`*.spec.ts`) and run from the compiled `lib/`. The root [`.mocharc.js`](.mocharc.js) lets an IDE run or debug a single spec file: it builds the package and runs the compiled copy, so breakpoints map back to the TypeScript through source maps.
 - Native modules exist in two builds: `npm rebuild` targets Node.js (tests), `npm run rebuild:electron` targets Electron (the app).
