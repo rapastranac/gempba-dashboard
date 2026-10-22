@@ -93,8 +93,12 @@ describe('CardsText', () => {
     });
 
     it('lists outgoing peers busiest first, with the node each runs on', () => {
-        const sender = worker({ peers: [{ peerWorkerId: 4, bytes: 2048, count: 3 }, { peerWorkerId: 9, bytes: 1024 ** 2, count: 1200 }, { peerWorkerId: 7, bytes: 10, count: 3 }] });
-        const world = { nodes: [node({ host: 'alpha', sockets: [socket()] }), node({ host: 'beta', sockets: [socket({ workers: [worker({ workerId: 9 })] })] })] } as unknown as WorldSnapshot;
+        const sender = worker({
+            peers: [{ peerWorkerId: 4, bytes: 2048, count: 3 }, { peerWorkerId: 9, bytes: 1024 ** 2, count: 1200 }, { peerWorkerId: 7, bytes: 10, count: 3 }]
+        });
+        const world = {
+            nodes: [node({ host: 'alpha', sockets: [socket()] }), node({ host: 'beta', sockets: [socket({ workers: [worker({ workerId: 9 })] })] })]
+        } as unknown as WorldSnapshot;
         expect(CardsText.peerRows(sender, world)).to.deep.equal([
             { peer: 'Worker 9', host: 'beta', tasks: '1,200', bytes: '1.0 MB' },
             { peer: 'Worker 4', host: 'alpha', tasks: '3', bytes: '2.0 KB' },
