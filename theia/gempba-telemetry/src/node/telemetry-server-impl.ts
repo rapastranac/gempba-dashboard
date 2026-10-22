@@ -1,4 +1,5 @@
 import { ContributionProvider } from '@theia/core/lib/common/contribution-provider';
+import { Disposable } from '@theia/core/lib/common/disposable';
 import { inject, injectable, named } from '@theia/core/shared/inversify';
 import { ConnectionMode, ConnectionState, RefreshInterval, SessionSpec, TargetSpec } from '@gempba/core';
 import { TelemetryServer, TelemetryServerClient } from '../common/telemetry-protocol';
@@ -13,7 +14,8 @@ import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
  * target over TCP, maps every frame and notifies the frontend. Every teardown bumps an epoch, so callbacks
  * and pending opens from a superseded session are dropped.
  * A local gempba needs no session: listening while disconnected streams it directly, and stopping that stream
- * disconnects. Connect is for the modes that authenticate.
+ * disconnects. Connect is for the modes that authenticate. An SSH session that drops on its own cannot recover
+ * without authenticating again, so it disconnects and says so instead of retrying the stream.
  */
 @injectable()
 export class TelemetryServerImpl implements TelemetryServer {
@@ -28,7 +30,9 @@ export class TelemetryServerImpl implements TelemetryServer {
     protected state = ConnectionState.DISCONNECTED;
     protected epoch = 0;
     protected tunnel: Tunnel | undefined;
+    protected tunnelWatch: Disposable | undefined;
     protected sessionMode: ConnectionMode | undefined;
+    protected sessionHost: string | undefined;
     protected forward: Forward | undefined;
     protected telemetry: TelemetryClient | undefined;
     protected readonly store = new TelemetryStore();
@@ -69,8 +73,7 @@ export class TelemetryServerImpl implements TelemetryServer {
             tunnel.close();
             return;
         }
-        this.tunnel = tunnel;
-        this.sessionMode = session.mode;
+        this.adopt(tunnel, session);
         this.setState(ConnectionState.CONNECTED);
         this.status(session.mode === ConnectionMode.LOCAL ? 'ready to listen locally' : `connected to ${session.host}`);
     }
@@ -129,10 +132,29 @@ export class TelemetryServerImpl implements TelemetryServer {
         if (!provider) {
             throw this.fail('no LOCAL connection support is installed');
         }
-        const tunnel = await provider.open(SessionSpec.local());
-        this.tunnel = tunnel;
-        this.sessionMode = ConnectionMode.LOCAL;
+        const session = SessionSpec.local();
+        const tunnel = await provider.open(session);
+        this.adopt(tunnel, session);
         return tunnel;
+    }
+
+    /** Makes the tunnel the current session's, watching for it to end on its own. */
+    protected adopt(tunnel: Tunnel, session: SessionSpec): void {
+        this.tunnel = tunnel;
+        this.sessionMode = session.mode;
+        this.sessionHost = session.host;
+        this.tunnelWatch = tunnel.onClose(cause => this.sessionDropped(tunnel, cause));
+    }
+
+    /** Nothing can stream over a dropped session until the user connects, and authenticates, again. */
+    protected sessionDropped(tunnel: Tunnel, cause: Error | undefined): void {
+        if (tunnel !== this.tunnel) {
+            return;
+        }
+        const host = this.sessionHost;
+        this.teardown();
+        this.setState(ConnectionState.DISCONNECTED);
+        this.status(`SSH session to ${host} closed (${cause ? cause.message : 'the server ended it'}); connect again`);
     }
 
     async disconnect(): Promise<void> {
@@ -199,9 +221,12 @@ export class TelemetryServerImpl implements TelemetryServer {
 
     protected teardown(): void {
         this.stopListening();
+        this.tunnelWatch?.dispose();
+        this.tunnelWatch = undefined;
         this.tunnel?.close();
         this.tunnel = undefined;
         this.sessionMode = undefined;
+        this.sessionHost = undefined;
     }
 
     protected setState(state: ConnectionState): void {

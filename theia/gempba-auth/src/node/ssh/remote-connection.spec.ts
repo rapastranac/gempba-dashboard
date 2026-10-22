@@ -163,6 +163,35 @@ describe('RemoteConnection', function (): void {
         expect(refused).to.equal(true);
     });
 
+    it('reports a session the server closes, and closes the forwards over it', async () => {
+        const port = await serve();
+        const host = await connect(ConnectionMode.HOST, port);
+        const forward = await host.openForward(TargetSpec.of(undefined, 9000));
+        const reported = new Promise<string>(resolve => host.onClose(cause => resolve(cause ? cause.message : 'no error')));
+        await server!.close();
+        server = undefined;
+        expect(await reported).to.be.a('string');
+        const refused = await new Promise<boolean>(resolve => {
+            const socket = net.createConnection({ host: '127.0.0.1', port: forward.port });
+            socket.on('connect', () => {
+                socket.destroy();
+                resolve(false);
+            });
+            socket.on('error', () => resolve(true));
+        });
+        expect(refused).to.equal(true);
+    });
+
+    it('does not report a session it closes itself', async () => {
+        const port = await serve();
+        const host = await connect(ConnectionMode.HOST, port);
+        let reported = false;
+        host.onClose(() => reported = true);
+        host.close();
+        await new Promise(resolve => setTimeout(resolve, 300));
+        expect(reported).to.equal(false);
+    });
+
     it('refuses a changed host key without asking', async () => {
         const port = await serve();
         const otherKey = utils.parseKey(TestSshServer.generateKeyPair().public) as ParsedKey;

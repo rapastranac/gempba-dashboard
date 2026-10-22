@@ -1,3 +1,4 @@
+import { Event } from '@theia/core/lib/common/event';
 import { ConnectionMode, SessionSpec, TargetSpec } from '@gempba/core';
 
 /**
@@ -15,6 +16,11 @@ export interface TunnelProvider {
 
 /** An open session; forwarding to another target never re-authenticates. */
 export interface Tunnel {
+    /**
+     * Fires once if the session ends on its own (a dropped network, the server closing it, a keepalive timeout), with
+     * the cause when one is known; never after {@link close}. Nothing streams over it again until it is reopened.
+     */
+    readonly onClose: Event<Error | undefined>;
     forward(target: TargetSpec): Promise<Forward>;
     close(): void;
 }

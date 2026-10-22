@@ -2,6 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
+import { Emitter, Event } from '@theia/core/lib/common/event';
 import { ConnectionMode, SessionSpec, SshEndpoint, TargetSpec } from '@gempba/core';
 import { Forward } from '@gempba/telemetry/lib/node/tunnel/tunnel-provider';
 import { AnyAuthMethod, AuthenticationType, Client, ClientChannel, KeyboardInteractiveCallback, ParsedKey, Prompt, utils } from 'ssh2';
@@ -43,6 +44,10 @@ export class RemoteConnection {
     static readonly SAFE_HOST = /^[A-Za-z0-9._-]+$/;
 
     protected readonly forwards = new Set<LocalForward>();
+    protected readonly onCloseEmitter = new Emitter<Error | undefined>();
+    /** Fires once when the session ends without {@link close}, with the last error the client reported, if any. */
+    readonly onClose: Event<Error | undefined> = this.onCloseEmitter.event;
+    protected closing = false;
 
     protected constructor(protected readonly client: Client, protected readonly mode: ConnectionMode, protected readonly options: RemoteConnectionOptions,
         protected readonly hostLabel: string) { }
@@ -67,8 +72,9 @@ export class RemoteConnection {
             };
             client.once('ready', () => {
                 client.removeListener('error', fail);
-                client.on('error', () => undefined);
-                resolve(new RemoteConnection(client, session.mode, options, endpoint.host));
+                const connection = new RemoteConnection(client, session.mode, options, endpoint.host);
+                connection.watchSession();
+                resolve(connection);
             });
             client.once('error', fail);
             client.connect({
@@ -99,8 +105,25 @@ export class RemoteConnection {
 
     /** Ends the session and every forward still open over it, as closing an SSH session does. */
     close(): void {
+        this.closing = true;
         [...this.forwards].forEach(forward => forward.close());
         this.client.end();
+    }
+
+    /**
+     * Reports a session that ends on its own: the server closing it, a dropped network, or ssh2's keepalive giving up.
+     * Its forwards can no longer reach anything, so they close too.
+     */
+    protected watchSession(): void {
+        let lastError: Error | undefined;
+        this.client.on('error', error => lastError = error);
+        this.client.once('close', () => {
+            [...this.forwards].forEach(forward => forward.close());
+            if (!this.closing) {
+                this.onCloseEmitter.fire(lastError);
+            }
+            this.onCloseEmitter.dispose();
+        });
     }
 
     protected async openLocal(dstPort: number, hop?: ClientChannel): Promise<LocalForward> {

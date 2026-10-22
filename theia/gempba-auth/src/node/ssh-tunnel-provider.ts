@@ -24,6 +24,7 @@ export abstract class SshTunnelProvider implements TunnelProvider {
             defaultUser: defaultUser()
         });
         return {
+            onClose: connection.onClose,
             forward: target => connection.openForward(target),
             close: () => connection.close()
         };
