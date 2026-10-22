@@ -66,17 +66,16 @@ describe('TelemetryServerImpl', () => {
     let emitter: MockEmitter | undefined;
 
     beforeEach(() => {
-        const application = new Container();
-        application.bind(TunnelProvider).to(LocalTunnelProvider).inSingletonScope();
-        application.bind(ManualHostProvider).toSelf().inSingletonScope();
-        application.bind(TunnelProvider).toService(ManualHostProvider);
         // Like Theia's per-window connection container, which binds a ContributionProvider of its own.
-        const connection = application.createChild();
+        const connection = new Container().createChild();
         bindContributionProvider(connection, Symbol('ConnectionHandler'));
         bindContributionProvider(connection, TunnelProvider);
+        connection.bind(TunnelProvider).to(LocalTunnelProvider).inSingletonScope();
+        connection.bind(ManualHostProvider).toSelf().inSingletonScope();
+        connection.bind(TunnelProvider).toService(ManualHostProvider);
         connection.bind(TelemetryServerImpl).toSelf().inSingletonScope();
         server = connection.get(TelemetryServerImpl);
-        host = application.get(ManualHostProvider);
+        host = connection.get(ManualHostProvider);
         client = new RecordingClient();
         server.setClient(client);
     });

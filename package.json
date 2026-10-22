@@ -24,12 +24,14 @@
     "@parcel/watcher": true,
     "@theia/ffmpeg": true,
     "@vscode/windows-ca-certs": true,
+    "cpu-features": false,
     "drivelist": true,
     "esbuild": true,
     "keytar": true,
     "msgpackr-extract": true,
     "native-keymap": true,
-    "puppeteer": false
+    "puppeteer": false,
+    "ssh2": false
   },
   "devDependencies": {
     "@types/chai": "^4.3.20",

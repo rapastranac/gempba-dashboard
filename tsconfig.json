@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "theia/gempba-auth" },
     { "path": "theia/gempba-core" },
     { "path": "theia/gempba-shell" },
     { "path": "theia/gempba-telemetry" }
