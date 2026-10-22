@@ -17,7 +17,8 @@
     "rebuild:electron": "npm --workspace @gempba/electron-app run rebuild",
     "start": "npm --workspace @gempba/electron-app run start",
     "watch": "npm --workspace @gempba/electron-app run watch",
-    "test": "npm run compile && npm run test --workspaces --if-present"
+    "test": "npm run compile && npm run test --workspaces --if-present",
+    "mock": "npm run mock -w @gempba/telemetry --"
   },
   "allowScripts": {
     "@parcel/watcher": true,

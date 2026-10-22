@@ -5,6 +5,7 @@
   "license": "MIT",
   "description": "GemPBA telemetry backend: the gempba wire protocol and its mapping to the @gempba/core read-model.",
   "files": [
+    "fixtures",
     "lib",
     "src"
   ],
@@ -15,6 +16,7 @@
   "scripts": {
     "clean": "rimraf lib *.tsbuildinfo",
     "compile": "tsc -b",
-    "test": "mocha \"lib/**/*.spec.js\""
+    "test": "mocha \"lib/**/*.spec.js\"",
+    "mock": "node lib/node/mock/mock-emitter-main.js"
   }
 }

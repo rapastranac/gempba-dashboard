@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { BroadcastEnvelope, WorkerFrame, WorkerIdentity } from './wire-protocol';
+import { BroadcastEnvelope, ControlKind, ControlLine, WorkerFrame, WorkerIdentity } from './wire-protocol';
 
 const CANONICAL_ENVELOPE = `{
   "version": 1,
@@ -129,5 +129,34 @@ describe('wire protocol', () => {
         }`));
         expect(frame.worker_id).to.equal(5);
         expect(frame.edges_out).to.be.empty;
+    });
+});
+
+describe('ControlLine', () => {
+
+    it('formats one newline-terminated JSON line per message', () => {
+        expect(ControlLine.format(ControlKind.SetWorkerIntervalMs, 2500)).to.equal('{"kind":"set_worker_interval_ms","value":2500}\n');
+        expect(ControlLine.format(ControlKind.SetNodeIntervalMs, 1000)).to.equal('{"kind":"set_node_interval_ms","value":1000}\n');
+    });
+
+    it('does not pre-clamp the value; gempba clamps it', () => {
+        expect(ControlLine.parse(ControlLine.format(ControlKind.SetWorkerIntervalMs, 10)))
+            .to.deep.equal({ kind: ControlKind.SetWorkerIntervalMs, value: 10 });
+    });
+
+    it('parses a line with surrounding whitespace', () => {
+        expect(ControlLine.parse('{ "kind": " set_node_interval_ms ", "value": 750 }\r'))
+            .to.deep.equal({ kind: ControlKind.SetNodeIntervalMs, value: 750 });
+    });
+
+    it('reads anything malformed or unknown as undefined', () => {
+        const lines = [
+            'not json', '[]', '{"kind":"set_rate","value":1}', '{"kind":"set_worker_interval_ms"}',
+            '{"kind":"set_worker_interval_ms","value":"500"}', '{"kind":"set_worker_interval_ms","value":-1}',
+            '{"kind":"set_worker_interval_ms","value":2.5}', '{"kind":"set_worker_interval_ms","value":true}'
+        ];
+        for (const line of lines) {
+            expect(ControlLine.parse(line), line).to.equal(undefined);
+        }
     });
 });
