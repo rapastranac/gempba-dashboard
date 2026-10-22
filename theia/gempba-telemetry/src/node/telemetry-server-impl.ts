@@ -1,0 +1,199 @@
+import { ContributionProvider } from '@theia/core/lib/common/contribution-provider';
+import { inject, injectable, named } from '@theia/core/shared/inversify';
+import { ConnectionMode, ConnectionState, RefreshInterval, SessionSpec, TargetSpec } from '@gempba/core';
+import { TelemetryServer, TelemetryServerClient } from '../common/telemetry-protocol';
+import { FrameListener } from './client/frame-listener';
+import { TelemetryClient } from './client/telemetry-client';
+import { ControlKind } from './protocol/wire-protocol';
+import { TelemetryStore } from './telemetry/telemetry-store';
+import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
+
+/**
+ * One frontend's telemetry session: opens a tunnel through the provider for the session's mode, streams the
+ * target over TCP, maps every frame and notifies the frontend. Every teardown bumps an epoch, so callbacks
+ * and pending opens from a superseded session are dropped.
+ */
+@injectable()
+export class TelemetryServerImpl implements TelemetryServer {
+
+    /** gempba's center TCP server binds loopback only; a tunnel's local end is loopback too. */
+    static readonly LOOPBACK = '127.0.0.1';
+
+    @inject(ContributionProvider) @named(TunnelProvider)
+    protected readonly tunnelProviders: ContributionProvider<TunnelProvider>;
+
+    protected client: TelemetryServerClient | undefined;
+    protected state = ConnectionState.DISCONNECTED;
+    protected epoch = 0;
+    protected tunnel: Tunnel | undefined;
+    protected forward: Forward | undefined;
+    protected telemetry: TelemetryClient | undefined;
+    protected readonly store = new TelemetryStore();
+    protected workerIntervalMs = RefreshInterval.DEFAULT_WORKER_MS;
+    protected nodeIntervalMs = RefreshInterval.DEFAULT_NODE_MS;
+
+    setClient(client: TelemetryServerClient | undefined): void {
+        this.client = client;
+    }
+
+    getClient(): TelemetryServerClient | undefined {
+        return this.client;
+    }
+
+    async availableModes(): Promise<ConnectionMode[]> {
+        return this.tunnelProviders.getContributions().map(provider => provider.mode);
+    }
+
+    async connect(session: SessionSpec): Promise<void> {
+        this.teardown();
+        const provider = this.tunnelProviders.getContributions().find(candidate => candidate.mode === session.mode);
+        if (!provider) {
+            this.setState(ConnectionState.DISCONNECTED);
+            throw this.fail(`no ${session.mode} connection support is installed`);
+        }
+        const epoch = this.epoch;
+        this.setState(ConnectionState.CONNECTING);
+        let tunnel: Tunnel;
+        try {
+            tunnel = await provider.open(session);
+        } catch (error) {
+            if (epoch === this.epoch) {
+                this.setState(ConnectionState.DISCONNECTED);
+            }
+            throw this.fail(`connection failed: ${messageOf(error)}`);
+        }
+        if (epoch !== this.epoch) {
+            tunnel.close();
+            return;
+        }
+        this.tunnel = tunnel;
+        this.setState(ConnectionState.CONNECTED);
+        this.status(session.mode === ConnectionMode.LOCAL ? 'ready to listen locally' : `connected to ${session.host}`);
+    }
+
+    async listen(target: TargetSpec): Promise<void> {
+        const tunnel = this.tunnel;
+        if (!tunnel) {
+            throw this.fail('connect before listening');
+        }
+        this.stopListening();
+        const epoch = this.epoch;
+        let forward: Forward;
+        try {
+            forward = await tunnel.forward(target);
+        } catch (error) {
+            if (epoch === this.epoch) {
+                this.setState(ConnectionState.CONNECTED);
+            }
+            throw this.fail(`cannot reach the target: ${messageOf(error)}`);
+        }
+        if (epoch !== this.epoch) {
+            forward.close();
+            return;
+        }
+        this.forward = forward;
+        this.store.reset();
+        const address = `${TelemetryServerImpl.LOOPBACK}:${forward.port}`;
+        this.telemetry = new TelemetryClient(TelemetryServerImpl.LOOPBACK, forward.port, this.frameListener(epoch, address));
+        this.setState(ConnectionState.LISTENING);
+        this.status(`connecting to ${address}…`);
+        this.telemetry.start();
+    }
+
+    async stop(): Promise<void> {
+        if (this.state !== ConnectionState.LISTENING) {
+            return;
+        }
+        this.stopListening();
+        this.setState(ConnectionState.CONNECTED);
+        this.status('stopped listening');
+    }
+
+    async disconnect(): Promise<void> {
+        const wasConnected = this.state !== ConnectionState.DISCONNECTED;
+        this.teardown();
+        if (wasConnected) {
+            this.setState(ConnectionState.DISCONNECTED);
+            this.status('disconnected');
+        }
+    }
+
+    async pushRates(workerIntervalMs: number, nodeIntervalMs: number): Promise<void> {
+        this.workerIntervalMs = workerIntervalMs;
+        this.nodeIntervalMs = nodeIntervalMs;
+        const rates = `worker=${workerIntervalMs} ms, node=${nodeIntervalMs} ms`;
+        if (!this.telemetry) {
+            this.status(`rates saved (${rates}); they are sent on the next connect`);
+        } else if (this.sendRates(this.telemetry)) {
+            this.status(`rates pushed (${rates})`);
+        } else {
+            this.status('rates not sent, the connection is down; they are sent on reconnect');
+        }
+    }
+
+    dispose(): void {
+        this.teardown();
+        this.client = undefined;
+    }
+
+    protected frameListener(epoch: number, address: string): FrameListener {
+        return {
+            onConnected: () => {
+                if (epoch === this.epoch && this.telemetry) {
+                    this.sendRates(this.telemetry);
+                    this.status(`connected to ${address}`);
+                }
+            },
+            onFrame: frame => {
+                if (epoch === this.epoch) {
+                    this.client?.onSnapshot(this.store.ingest(frame));
+                }
+            },
+            onDisconnected: cause => {
+                if (epoch === this.epoch) {
+                    this.status(`disconnected from ${address} (${cause ? cause.message : 'peer closed'}); retrying…`);
+                }
+            }
+        };
+    }
+
+    protected sendRates(telemetry: TelemetryClient): boolean {
+        const worker = telemetry.sendControl(ControlKind.SetWorkerIntervalMs, this.workerIntervalMs);
+        const node = telemetry.sendControl(ControlKind.SetNodeIntervalMs, this.nodeIntervalMs);
+        return worker && node;
+    }
+
+    protected stopListening(): void {
+        this.epoch++;
+        this.telemetry?.close();
+        this.telemetry = undefined;
+        this.forward?.close();
+        this.forward = undefined;
+    }
+
+    protected teardown(): void {
+        this.stopListening();
+        this.tunnel?.close();
+        this.tunnel = undefined;
+    }
+
+    protected setState(state: ConnectionState): void {
+        if (this.state !== state) {
+            this.state = state;
+            this.client?.onStateChange(state);
+        }
+    }
+
+    protected status(text: string): void {
+        this.client?.onStatus(text);
+    }
+
+    protected fail(text: string): Error {
+        this.status(text);
+        return new Error(text);
+    }
+}
+
+function messageOf(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}

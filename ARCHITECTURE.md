@@ -6,7 +6,7 @@ The rule that shaped the design, carried over from the original Java/SWT version
 
 > The UI renders an immutable read-model; the wire format never reaches it.
 
-In this version the rule is enforced by package boundaries and, once the backend service lands (#25), by a process boundary: the wire format is parsed in the backend process, and only the clean read-model is sent to the window.
+In this version the rule is enforced by package boundaries and by a process boundary: the wire format is parsed in the backend process, and only the clean read-model is sent to the window.
 
 > This document grows with the migration (umbrella issue #20). Sections marked *coming* describe planned work.
 
@@ -36,9 +36,10 @@ flowchart LR
     subgraph app["GemPBA Dashboard (Electron app)"]
         direction LR
         subgraph backend["Backend: Node.js"]
-            telemetry["@gempba/telemetry<br/>TCP client, wire protocol, mapper, store"]
+            telemetry["@gempba/telemetry<br/>TelemetryServer: TCP client,<br/>wire protocol, mapper, store"]
         end
         subgraph frontend["Frontend: the window"]
+            service["@gempba/telemetry<br/>TelemetryService, commands, status bar"]
             shellUi["@gempba/shell<br/>branding, hidden IDE parts"]
             views["grid, cards, controls<br/><i>coming</i>"]
         end
@@ -47,12 +48,13 @@ flowchart LR
         end
     end
     gempba <-->|"TCP: frames in, control lines out"| telemetry
-    telemetry -->|"WorldSnapshot over JSON-RPC (coming, #25)"| views
+    telemetry -->|"WorldSnapshot over JSON-RPC"| service
+    service -->|onSnapshot| views
 ```
 
 - **Electron main** owns native windows. `@gempba/shell` sets the GemPBA icon on them here.
-- **Backend** (Node.js) owns the TCP connection (and, from #26, the SSH tunnel). It parses each telemetry line, maps it to a `WorldSnapshot`, and writes refresh-rate control lines back on the same socket.
-- **Frontend** (Chromium) draws the UI. It receives `WorldSnapshot`s from the backend over Theia's built-in JSON-RPC messaging, never raw wire frames.
+- **Backend** (Node.js) owns the TCP connection (and, from #26, the SSH tunnel). Each window gets its own `TelemetryServer`, which parses each telemetry line, maps it to a `WorldSnapshot`, and writes refresh-rate control lines back on the same socket.
+- **Frontend** (Chromium) draws the UI. `TelemetryService` receives `WorldSnapshot`s from the backend over Theia's built-in JSON-RPC messaging, never raw wire frames, and hands them to the views.
 
 ---
 
@@ -62,19 +64,21 @@ flowchart LR
 flowchart TB
     app["@gempba/electron-app<br/>the product"]
     shell["@gempba/shell<br/>Theia extension"]
-    telemetry["@gempba/telemetry<br/>joins the app in #25"]
+    telemetry["@gempba/telemetry<br/>the hub"]
     core["@gempba/core<br/>pure kernel"]
     theia["Theia platform<br/>@theia/core, electron, monaco, preferences, messages"]
     app --> shell
+    app --> telemetry
     app --> theia
     shell --> theia
     telemetry --> core
+    telemetry --> theia
 ```
 
 | Package | What it holds | Java equivalent | Uses Theia? |
 |---|---|---|---|
 | [`@gempba/core`](theia/gempba-core) | read-model (`WorldSnapshot` → nodes → sockets → workers), `NodeUtilization`, formatters, connection config, `NodeHistoryStore`, `SshEndpoint` | `core` | no: plain TypeScript, shared by backend and frontend |
-| [`@gempba/telemetry`](theia/gempba-telemetry) | wire protocol, `TelemetryClient` (TCP), `WorldSnapshotMapper`, `TelemetryStore`, `MockEmitter` (a stand-in gempba center); *coming*: JSON-RPC service (#25) | `adapters` | not yet (from #25) |
+| [`@gempba/telemetry`](theia/gempba-telemetry) | the hub. Backend: wire protocol, `TelemetryClient` (TCP), `WorldSnapshotMapper`, `TelemetryStore`, `TelemetryServer` (one per window), the `TunnelProvider` contribution point (LOCAL built in), `MockEmitter` (a stand-in gempba center). Frontend: `TelemetryService` and `NodeHistoryService` (the API features inject), the GemPBA commands and status bar entry | `adapters` | yes |
 | [`@gempba/shell`](theia/gempba-shell) | branding (About dialog, title-bar logo, window icon, splash) and hiding the IDE parts Theia brings along | — | yes |
 | auth, controls, grid, cards | *coming* (#26–#29): SSH and MFA, connection bar, dashboard views | `ui` | yes |
 | [`@gempba/electron-app`](theia/electron-app) | the product: lists the Theia packages and our extensions; built and packaged | `app` | yes |
@@ -83,7 +87,7 @@ flowchart TB
 
 - The gempba wire format (snake_case JSON frames in, control lines out) is described in exactly one file: [`theia/gempba-telemetry/src/node/protocol/wire-protocol.ts`](theia/gempba-telemetry/src/node/protocol/wire-protocol.ts). It lives under `src/node`, which only the backend loads.
 - [`WorldSnapshotMapper`](theia/gempba-telemetry/src/node/telemetry/world-snapshot-mapper.ts) is the only place that turns wire types into the camelCase read-model from `@gempba/core`.
-- Only `@gempba/core` types will cross into the frontend.
+- Only `@gempba/core` types cross into the frontend: the JSON-RPC contract in [`telemetry-protocol.ts`](theia/gempba-telemetry/src/common/telemetry-protocol.ts) carries `WorldSnapshot`s, connection states and status text.
 
 ---
 
@@ -94,6 +98,7 @@ flowchart TB
 3. [`theia/gempba-shell/package.json`](theia/gempba-shell/package.json): the `"theiaExtensions"` entry tells Theia which module to load in the frontend and which in Electron main. This is what makes a package a Theia extension.
 4. [`shell-frontend-module.ts`](theia/gempba-shell/src/browser/shell-frontend-module.ts): a `ContainerModule` (think Guice module) that registers *contributions*. Theia collects every extension's contributions at startup.
 5. `theia/electron-app/src-gen/` (generated by `theia build`, not committed): the startup code importing each extension's modules.
+6. [`telemetry-backend-module.ts`](theia/gempba-telemetry/src/node/telemetry-backend-module.ts) and [`telemetry-frontend-module.ts`](theia/gempba-telemetry/src/browser/telemetry-frontend-module.ts): one service split across two processes. The backend registers `TelemetryServer` per window with `ConnectionContainerModule` and `bindBackendService`; the frontend gets a proxy to it from `ServiceConnectionProvider.createProxy`, and every call or notification travels as a JSON-RPC message.
 
 ### How an extension plugs in
 
@@ -108,15 +113,62 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
 
 ---
 
+## How extensions connect
+
+Every feature is its own Theia extension, and features plug into one hub, `@gempba/telemetry`, never into each other. Adding or removing a feature means touching that package plus one line in [`theia/electron-app/package.json`](theia/electron-app/package.json), the product's list of extensions (like a Maven `<modules>` list).
+
+```mermaid
+flowchart TB
+    auth["@gempba/auth<br/><i>coming</i>: adds HOST, JUMP"]
+    controls["@gempba/controls<br/><i>coming</i>: connection bar"]
+    grid["@gempba/grid<br/><i>coming</i>: per-host rows"]
+    cards["@gempba/cards<br/><i>coming</i>: hierarchy tree"]
+    telemetry["@gempba/telemetry, the hub<br/>TelemetryService, commands, TunnelProvider"]
+    core["@gempba/core<br/>read-model and formatters, no Theia"]
+    auth --> telemetry
+    controls --> telemetry
+    grid --> telemetry
+    cards --> telemetry
+    telemetry --> core
+```
+
+Arrows mean "depends on"; they only point down. Extensions talk through three Theia mechanisms:
+
+| Mechanism | Java analogy | Provided by | Used by |
+|---|---|---|---|
+| **Service**: an interface plus a DI token, injected with `@inject` | interface + Guice binding | telemetry: `TelemetryService`, `NodeHistoryService` ([`telemetry-service.ts`](theia/gempba-telemetry/src/common/telemetry-service.ts)) | controls, grid, cards |
+| **Contribution point**: a socket the host loops over through a `ContributionProvider` | Eclipse extension point, `ServiceLoader` | telemetry defines `TunnelProvider` ([`tunnel-provider.ts`](theia/gempba-telemetry/src/node/tunnel/tunnel-provider.ts)), with LOCAL built in | auth fills it with HOST and JUMP |
+| **Theia's shared services**: commands, selection, events | listeners, an event bus | Theia core: `CommandRegistry`, `SelectionService` | grid publishes the selected node; cards react |
+
+A feature's whole coupling to the stream is one injected interface:
+
+```ts
+// a view in a feature package (sketch)
+@inject(TelemetryService) protected readonly telemetry: TelemetryService;
+
+this.toDispose.push(this.telemetry.onSnapshot(snapshot => this.update(snapshot)));
+```
+
+- **Auth opens the road; telemetry drives on it.** In HOST and JUMP mode a `TunnelProvider` opens the SSH tunnel and hands telemetry a local port, which the TCP client reads exactly as in LOCAL mode. Views never learn which mode, tunnel or credentials are in use.
+- **Ready for sessions.** `TelemetryService` is the *active* session's stream. Several sessions switched live can come later as a hub change plus a new feature, with no change to the views.
+- **The rules are checked.** [`configs/check-layers.js`](configs/check-layers.js) runs first in `npm test` and fails when a package depends on a `@gempba` package outside its layer: core on nothing, telemetry on core, shell on nothing, a feature on core and telemetry only. Only the app may list features.
+- **Every feature must be removable.** Each feature issue checks that the app builds, boots and works with that package dropped from the app. Without controls, the stream still runs from the command palette: F1 → `GemPBA: Connect (Local)`, then `GemPBA: Listen…`.
+
+These are Theia *extensions*, composed when the app is built, not VS Code plugins loaded at runtime: the plugin runtime would bring back about 30 IDE packages, and plugin views are limited to webviews.
+
+---
+
 ## Key decisions
 
 - **The smallest Theia set that boots.** `@theia/core` alone fails dependency injection: the command palette lives in `@theia/monaco`, the settings providers in `@theia/preferences`. The app uses `core`, `electron`, `monaco`, `preferences` and `messages`. What those drag in that a dashboard doesn't need is hidden by `@gempba/shell` with `FilterContribution` (matched by class, since class names are minified in production builds) and menu unregistration.
-- **The read-model is plain data.** It will travel over JSON-RPC, where class methods don't survive, so each Java record became a readonly interface plus a same-named namespace for its methods (`WorldSnapshot.forHost(snapshot, host)`). `StructureKey` is a sorted array rather than a `Set`. Stateful helpers that never cross processes (`NodeHistoryStore`, `TelemetryStore`) stay classes.
+- **The read-model is plain data.** It travels over JSON-RPC, where class methods don't survive, so each Java record became a readonly interface plus a same-named namespace for its methods (`WorldSnapshot.forHost(snapshot, host)`). `StructureKey` is a sorted array rather than a `Set`. Stateful helpers that never cross processes (`NodeHistoryStore`, `TelemetryStore`) stay classes.
 - **Output matches the Java app.** `NumberText` reproduces Java's `String.format` rounding (`1.005` → `"1.01"`, where JavaScript's `toFixed` gives `"1.00"`) and groups thousands without depending on the OS locale.
 - **The kernel never touches the OS.** Anything Java read implicitly (environment variables, the OS user name) is passed in: `Config.from(args, env)`, `SshEndpoint.parse(spec, defaultUser)`.
 - **Existing settings keep working.** Enums are string enums (`'JUMP'`) like the existing `settings.json`, and `of()` factories fill in fields that older files lack.
 - **Parsing follows the Java contract.** Unknown wire fields are ignored, missing numbers read as 0, and missing objects or lists stay `undefined`. A topology node without `sockets` falls back to the live frame's socket count, while `sockets: []` means zero sockets.
 - **Utilization is per allocation**: a node's CPU is `clamp(Σ worker CPU ÷ |allocated cores|, 0, 100)`, the user's own work on the user's own cores, excluding other tenants on a shared node.
+- **One telemetry session per window.** `TelemetryServer` lives in Theia's per-connection container, so each window has its own and closing the window closes its connection. That container binds a `ContributionProvider` of its own, which hides the application's, so the `TunnelProvider` provider is bound inside the connection module; providers that other extensions bind in the application container are still found.
+- **Connections drop stale work by epoch.** Every stop, disconnect or new target bumps an epoch; callbacks and late tunnel opens from an older epoch are discarded, as in the Java `ConnectionController`. The refresh intervals are sticky and re-sent on every (re)connect.
 - **Dead Java code was not ported**: `ConnectionSpec`, and `SshCommand`, which only served the never-used child-process tunnel. Both remain in git history.
 
 ---
@@ -128,9 +180,11 @@ npm ci                    # install (Node 22)
 npm run build             # tsc -b, then theia build
 npm run rebuild:electron  # once after installing: native modules for Electron
 npm start                 # launch the app
-npm test                  # compile, then run every package's specs
+npm test                  # check the layering, compile, then run every package's specs
 npm run mock              # after a build: a stand-in gempba center on 127.0.0.1:9000
 ```
+
+To see live data without a cluster: run `npm run mock`, start the app, then press F1 and run `GemPBA: Connect (Local)` and `GemPBA: Listen…` (port 9000). The status bar shows the node count.
 
 - Specs live next to their sources (`*.spec.ts`) and run from the compiled `lib/`. The root [`.mocharc.js`](.mocharc.js) lets an IDE run or debug a single spec file: it builds the package and runs the compiled copy, so breakpoints map back to the TypeScript through source maps.
 - Native modules exist in two builds: `npm rebuild` targets Node.js (tests), `npm run rebuild:electron` targets Electron (the app).
