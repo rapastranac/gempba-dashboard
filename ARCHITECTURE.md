@@ -225,7 +225,8 @@ npm ci                    # install (Node 22)
 npm run build             # tsc -b, then theia build
 npm run rebuild:electron  # once after installing: native modules for Electron
 npm start                 # launch the app
-npm test                  # check the layering, compile, then run every package's specs
+npm test                  # check the layering, lint, compile, then run every package's specs
+npm run lint              # the code style alone; npx eslint --fix . repairs most of it
 npm run mock              # after a build: a stand-in gempba center on 127.0.0.1:9000
 ```
 
@@ -234,4 +235,5 @@ To see live data without a cluster: run `npm run mock`, start the app, then in t
 - Specs live next to their sources (`*.spec.ts`) and run from the compiled `lib/`. The root [`.mocharc.js`](.mocharc.js) lets an IDE run or debug a single spec file: it builds the package and runs the compiled copy, so breakpoints map back to the TypeScript through source maps.
 - Native modules exist in two builds: `npm rebuild` targets Node.js (tests), `npm run rebuild:electron` targets Electron (the app).
 - npm only runs the install scripts listed under `allowScripts` in the root `package.json`.
+- Code style: [`eslint.config.mjs`](eslint.config.mjs) holds the rules, after Theia's own (single quotes, semicolons, braces on every block, lines up to 180), and [`.editorconfig`](.editorconfig) the indentation and line endings. `npm test`, and so CI, fails on any violation. WebStorm needs no setup: it reads the `ij_` keys in `.editorconfig`, so its Reformat Code produces this style, and it shows ESLint's findings in the editor. Nothing under `.idea` is committed.
 - CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) installs, compiles, tests and builds on Linux, Windows and macOS. Installers and releases come with #30.
