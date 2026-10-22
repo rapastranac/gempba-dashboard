@@ -75,3 +75,36 @@ export function Tile({ title, readout, tooltip, selected, onSelect, children }: 
 export function TileGrid({ children }: { readonly children?: React.ReactNode }): React.ReactElement {
     return <div className='gempba-tile-grid'>{children}</div>;
 }
+
+export interface PropertySection {
+    readonly title: string;
+    readonly rows: ReadonlyArray<{ readonly label: string; readonly value: React.ReactNode }>;
+}
+
+/** Label and value rows under section headings, like a properties view. */
+export function PropertySheet({ sections }: { readonly sections: readonly PropertySection[] }): React.ReactElement {
+    return <table className='gempba-property-sheet'>
+        {sections.map(section => <tbody key={section.title}>
+            <tr><th className='gempba-property-section' colSpan={2} scope='colgroup'>{section.title}</th></tr>
+            {section.rows.map(row => <tr key={row.label}>
+                <th className='gempba-property-label' scope='row'>{row.label}</th>
+                <td className='gempba-property-value'>{row.value}</td>
+            </tr>)}
+        </tbody>)}
+    </table>;
+}
+
+export interface DataColumn {
+    readonly label: string;
+    /** `end` for numbers, so their digits line up. */
+    readonly align?: 'start' | 'end';
+}
+
+/** A plain table with a header row; each row holds one text per column. */
+export function DataTable({ columns, rows }: { readonly columns: readonly DataColumn[]; readonly rows: ReadonlyArray<readonly string[]> }): React.ReactElement {
+    const align = (index: number) => columns[index]?.align === 'end' ? 'gempba-data-end' : undefined;
+    return <table className='gempba-data-table'>
+        <thead><tr>{columns.map((column, index) => <th key={column.label} className={align(index)} scope='col'>{column.label}</th>)}</tr></thead>
+        <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, index) => <td key={index} className={align(index)}>{cell}</td>)}</tr>)}</tbody>
+    </table>;
+}

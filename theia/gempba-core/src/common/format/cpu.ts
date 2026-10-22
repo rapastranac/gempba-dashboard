@@ -23,13 +23,13 @@ export namespace Cpu {
         return `CPUs ${chunks.join(', ')}`;
     }
 
-    /** e.g. `Worker 3:  87.3 % CPU  ·  can use 4 of 8 cores  ·  currently using ≈ 0.87 cores`. */
-    export function coreRow(workerId: number, cpuPct: number, accessibleHere: number, socketCores: number): string {
+    /** How a worker uses a socket's cores, e.g. `87.3 % CPU · can use 4 of 8 cores · currently using ≈ 0.87 cores`. */
+    export function coreUsage(cpuPct: number, accessibleHere: number, socketCores: number): string {
         const access = accessibleHere === socketCores
             ? `can use all ${socketCores} cores`
             : `can use ${accessibleHere} of ${socketCores} cores`;
         const usage = `currently using ≈ ${effectiveCores(cpuPct / 100, accessibleHere)}`;
-        return `Worker ${workerId}:  ${NumberText.fixed(cpuPct, 1)} % CPU  ·  ${access}  ·  ${usage}`;
+        return `${NumberText.fixed(cpuPct, 1)} % CPU · ${access} · ${usage}`;
     }
 
     /** `idle`, `0.87 cores`, `1.4 core`, `2.1 cores`, or `9.1 cores (oversubscribed)`. */
