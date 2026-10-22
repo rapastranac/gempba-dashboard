@@ -1,9 +1,9 @@
 /**
- * The gempba telemetry wire contract: one {@link BroadcastEnvelope} per newline-terminated JSON line.
- * Field names stay snake_case as on the wire; only the WorldSnapshotMapper translates them into the
- * camelCase read-model. Parsing mirrors the Java/Jackson contract: unknown fields are ignored, missing
- * numbers read as 0, and missing objects or lists stay undefined (a missing topology node `sockets`
- * means something different from an empty one).
+ * The gempba telemetry wire contract: one {@link BroadcastEnvelope} per newline-terminated JSON line,
+ * and {@link ControlLine}s written back on the same socket. Field names stay snake_case as on the wire;
+ * only the WorldSnapshotMapper translates them into the camelCase read-model. Parsing mirrors the
+ * Java/Jackson contract: unknown fields are ignored, missing numbers read as 0, and missing objects or
+ * lists stay undefined (a missing topology node `sockets` means something different from an empty one).
  */
 
 export interface BroadcastEnvelope {
@@ -291,5 +291,40 @@ export namespace DiskStats {
     export function fromJson(value: unknown): DiskStats {
         const json = objectOf(value);
         return { read_bytes: num(json.read_bytes), write_bytes: num(json.write_bytes) };
+    }
+}
+
+/** The control messages the dashboard writes back on the telemetry socket; gempba clamps the value itself. */
+export enum ControlKind {
+    SetWorkerIntervalMs = 'set_worker_interval_ms',
+    SetNodeIntervalMs = 'set_node_interval_ms'
+}
+
+/** One `{"kind":…,"value":…}` control line; the value is an unsigned integer in milliseconds. */
+export interface ControlLine {
+    readonly kind: ControlKind;
+    readonly value: number;
+}
+
+export namespace ControlLine {
+    export function format(kind: ControlKind, value: number): string {
+        return JSON.stringify({ kind, value: Math.round(value) }) + '\n';
+    }
+
+    /** Mirrors gempba's forgiving parser: anything malformed or unknown reads as undefined. */
+    export function parse(line: string): ControlLine | undefined {
+        let value: unknown;
+        try {
+            value = JSON.parse(line);
+        } catch {
+            return undefined;
+        }
+        const json = objectOf(value);
+        const kind = Object.values(ControlKind).find(candidate => candidate === str(json.kind)?.trim());
+        const ms = json.value;
+        if (!kind || typeof ms !== 'number' || !Number.isInteger(ms) || ms < 0) {
+            return undefined;
+        }
+        return { kind, value: ms };
     }
 }
