@@ -1,6 +1,7 @@
 import '../../src/browser/style/index.css';
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { OpenHandler } from '@theia/core/lib/browser/opener-service';
+import { TabBarToolbarContribution } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
 import { bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { createTreeContainer } from '@theia/core/lib/browser/tree/tree-container';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager';
@@ -37,6 +38,7 @@ export default new ContainerModule(bind => {
     })).inSingletonScope();
     bindViewContribution(bind, CardsViewContribution);
     bind(FrontendApplicationContribution).toService(CardsViewContribution);
+    bind(TabBarToolbarContribution).toService(CardsViewContribution);
     bind(CardsNodeOpener).toSelf().inSingletonScope();
     bind(OpenHandler).toService(CardsNodeOpener);
 });
