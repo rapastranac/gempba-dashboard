@@ -7,12 +7,14 @@ import { LocalTunnelProvider } from './tunnel/local-tunnel-provider';
 import { TunnelProvider } from './tunnel/tunnel-provider';
 
 /**
- * One TelemetryServerImpl per frontend connection, disposed when that window goes away. The connection container
- * binds a ContributionProvider of its own, hiding the application's, so the TunnelProvider one is bound here; it
- * still collects the providers other extensions bind in the application container.
+ * One TelemetryServerImpl per frontend connection, disposed when that window goes away. Tunnel providers are bound
+ * per connection too, here or in another extension's connection module, so an SSH provider can prompt the window
+ * that asked to connect.
  */
 const telemetryConnectionModule = ConnectionContainerModule.create(({ bind, bindBackendService }) => {
     bindContributionProvider(bind, TunnelProvider);
+    bind(LocalTunnelProvider).toSelf().inSingletonScope();
+    bind(TunnelProvider).toService(LocalTunnelProvider);
     bind(TelemetryServerImpl).toSelf().inSingletonScope();
     bind(TelemetryServer).toService(TelemetryServerImpl);
     bindBackendService<TelemetryServer, TelemetryServerClient>(TELEMETRY_SERVICE_PATH, TelemetryServer, (server, client) => {
@@ -23,7 +25,5 @@ const telemetryConnectionModule = ConnectionContainerModule.create(({ bind, bind
 });
 
 export default new ContainerModule(bind => {
-    bind(LocalTunnelProvider).toSelf().inSingletonScope();
-    bind(TunnelProvider).toService(LocalTunnelProvider);
     bind(ConnectionContainerModule).toConstantValue(telemetryConnectionModule);
 });
