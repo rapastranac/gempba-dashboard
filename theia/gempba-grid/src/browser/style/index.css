@@ -1,0 +1,8 @@
+.gempba-grid {
+    overflow-y: auto;
+}
+
+.gempba-grid-empty {
+    padding: calc(var(--theia-ui-padding) * 3);
+    color: var(--theia-descriptionForeground);
+}
