@@ -1,3 +1,4 @@
+import { ExpandableTreeNode } from '@theia/core/lib/browser/tree/tree-expansion';
 import { SplitWidget } from '@theia/core/lib/browser/widgets/split-widget';
 import { codicon, Message } from '@theia/core/lib/browser/widgets/widget';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
@@ -12,7 +13,8 @@ import { CardsTreeWidget } from './cards-tree-widget';
  * The Cards view: Theia's split widget with the node, socket and worker tree on the left and the picked row's
  * details on the right. It follows the node picked in any view and publishes the node of the row picked here.
  * When nothing is picked yet it picks the first node's sentinel worker, as the Java cards opened it. Hidden (a
- * background tab, or a minimized window) it does no work, and only expanded rows are ever built.
+ * background tab, or a minimized window) it does no work, and only expanded rows are ever built. A node opened
+ * from another view (see {@link revealNode}) is picked and expanded.
  */
 export class CardsWidget extends SplitWidget {
 
@@ -23,8 +25,11 @@ export class CardsWidget extends SplitWidget {
     protected snapshot: WorldSnapshot | undefined;
     /** The node picked elsewhere, applied once its row exists. */
     protected followHost: string | undefined;
+    /** Whether the followed node is also expanded, as when it was opened rather than only picked. */
+    protected expandFollowed = false;
     /** Whether a row was ever picked, by the user, by another view, or by default. */
     protected picked = false;
+    protected readonly refreshes: VisibleRefresh;
 
     constructor(
         protected readonly tree: CardsTreeWidget,
@@ -44,7 +49,7 @@ export class CardsWidget extends SplitWidget {
         this.addPane(details);
         this.setRelativeSizes([2, 3]);
 
-        const refresh = new VisibleRefresh(this, () => this.refresh());
+        const refresh = this.refreshes = new VisibleRefresh(this, () => this.refresh());
         this.toDispose.push(refresh);
         this.toDispose.push(telemetry.onSnapshot(() => refresh.request()));
         this.toDispose.push(telemetry.onStateChange(() => refresh.request()));
@@ -56,6 +61,13 @@ export class CardsWidget extends SplitWidget {
         }));
         this.toDispose.push(tree.model.onSelectionChanged(() => this.onPicked()));
         refresh.request();
+    }
+
+    /** Picks and expands a node's row, showing its details, once the row exists. */
+    revealNode(host: string): void {
+        this.followHost = host;
+        this.expandFollowed = true;
+        this.refreshes.request();
     }
 
     /** Reads the latest snapshot only now, so a hidden view never touches one. */
@@ -76,6 +88,10 @@ export class CardsWidget extends SplitWidget {
                 this.followHost = undefined;
                 this.picked = true;
                 this.tree.model.selectNode(row);
+                if (this.expandFollowed && ExpandableTreeNode.is(row)) {
+                    this.tree.model.expandNode(row);
+                }
+                this.expandFollowed = false;
             }
             return;
         }
