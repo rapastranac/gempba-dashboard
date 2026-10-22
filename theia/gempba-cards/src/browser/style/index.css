@@ -1,0 +1,49 @@
+/* Colors come only from theme variables. */
+
+.gempba-cards-empty {
+    padding: calc(var(--theia-ui-padding) * 3);
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-cards-icon {
+    margin-right: var(--theia-ui-padding);
+}
+
+.gempba-cards-details {
+    padding: calc(var(--theia-ui-padding) * 3) calc(var(--theia-ui-padding) * 4);
+}
+
+.gempba-cards-details-title {
+    display: flex;
+    align-items: center;
+    font-size: var(--theia-ui-font-size2);
+    font-weight: 600;
+}
+
+.gempba-cards-details-subtitle {
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-cards-peers {
+    display: inline-flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-cards-peers .theia-button {
+    margin: 0;
+    min-width: 0;
+    padding: 0 calc(var(--theia-ui-padding) * 2);
+    line-height: calc(var(--theia-content-line-height) - 4px);
+}
+
+.gempba-peers-table {
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.gempba-peers-total {
+    padding-top: calc(var(--theia-ui-padding) * 2);
+    color: var(--theia-descriptionForeground);
+}
