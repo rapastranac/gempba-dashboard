@@ -1,0 +1,24 @@
+{
+  "name": "smoke-theme",
+  "publisher": "gempba",
+  "displayName": "GemPBA Smoke Theme",
+  "description": "A minimal color theme the smoke test deploys, to prove that plugins load and register their themes in a packaged app.",
+  "version": "1.0.0",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.50.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "id": "gempba-smoke-theme",
+        "label": "GemPBA Smoke Theme",
+        "uiTheme": "vs-dark",
+        "path": "./themes/smoke-theme.json"
+      }
+    ]
+  }
+}

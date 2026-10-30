@@ -27,10 +27,11 @@ export namespace UiPreferences {
         'notification.timeout'
     ];
 
-    export function isShown(key: string): boolean {
+    /** Whether the Settings page shows `key`; `contributedPrefixes` are the ones ShellContributions add. */
+    export function isShown(key: string, contributedPrefixes: readonly string[] = []): boolean {
         if (HIDDEN_PREFIXES.some(prefix => key.startsWith(prefix))) {
             return false;
         }
-        return SHOWN.includes(key) || SHOWN_PREFIXES.some(prefix => key.startsWith(prefix));
+        return SHOWN.includes(key) || [...SHOWN_PREFIXES, ...contributedPrefixes].some(prefix => key.startsWith(prefix));
     }
 }

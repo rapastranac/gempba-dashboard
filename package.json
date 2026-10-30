@@ -33,6 +33,7 @@
     "keytar": true,
     "msgpackr-extract": true,
     "native-keymap": true,
+    "node-pty": true,
     "puppeteer": false,
     "ssh2": false
   },

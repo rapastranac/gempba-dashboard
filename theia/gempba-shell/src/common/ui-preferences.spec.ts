@@ -20,6 +20,12 @@ describe('UiPreferences', () => {
         }
     });
 
+    it('also shows the prefixes a contribution adds, but never the hidden window settings', () => {
+        expect(UiPreferences.isShown('extensions.onlyShowVerifiedExtensions', ['extensions.'])).to.equal(true);
+        expect(UiPreferences.isShown('extensions.onlyShowVerifiedExtensions')).to.equal(false);
+        expect(UiPreferences.isShown('window.secondaryWindowPlacement', ['window.'])).to.equal(false);
+    });
+
     it('opens on UI settings only', () => {
         expect(UiPreferences.COMMONLY_USED.filter(key => !UiPreferences.isShown(key))).to.deep.equal([]);
     });
