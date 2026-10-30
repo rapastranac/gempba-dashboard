@@ -334,8 +334,114 @@
     gap: calc(var(--theia-ui-padding) * 2);
 }
 
+/* Instruments: gauges, heat strips, the live indicator and the rate readout. */
+
+.gempba-gauge {
+    position: relative;
+    flex: none;
+}
+
+.gempba-gauge svg {
+    display: block;
+}
+
+.gempba-gauge-track,
+.gempba-gauge-value {
+    fill: none;
+    stroke-linecap: round;
+}
+
+.gempba-gauge-track {
+    stroke: var(--theia-gempba-gauge-track);
+}
+
+.gempba-gauge-value {
+    stroke: var(--gempba-tone);
+    transition: stroke-dashoffset var(--gempba-motion-duration) ease-out, opacity var(--gempba-motion-duration) ease-out;
+}
+
+.gempba-gauge-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--theia-ui-font-size2);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--theia-gempba-hero-foreground);
+}
+
+.gempba-heat-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12px, 1fr));
+    gap: 2px;
+}
+
+.gempba-heat-cell {
+    height: 14px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--theia-gempba-heat-high) var(--gempba-heat-mix), var(--theia-gempba-heat-low));
+}
+
+.gempba-heat-over {
+    outline: 1px solid var(--theia-gempba-heat-high);
+    outline-offset: 1px;
+}
+
+.gempba-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--theia-ui-font-size0);
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.gempba-live-live .gempba-live-dot {
+    background: var(--theia-gempba-live-active);
+    animation: gempba-live-pulse 1.6s ease-in-out infinite;
+}
+
+.gempba-live-stale .gempba-live-dot {
+    background: var(--theia-gempba-live-stale);
+}
+
+.gempba-live-off .gempba-live-dot {
+    background: var(--theia-gempba-live-off);
+}
+
+@keyframes gempba-live-pulse {
+    50% {
+        opacity: 0.35;
+    }
+}
+
+.gempba-rate {
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-rate-observed {
+    margin-left: 6px;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-rate-differs .gempba-rate-observed {
+    color: var(--theia-gempba-live-stale);
+}
+
 @media (prefers-reduced-motion: reduce) {
-    .gempba-meter-fill {
+    .gempba-meter-fill,
+    .gempba-gauge-value {
         transition: none;
+    }
+
+    .gempba-live-live .gempba-live-dot {
+        animation: none;
     }
 }
