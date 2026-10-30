@@ -15,6 +15,7 @@
   ],
   "dependencies": {
     "@gempba/shell": "2.0.0",
+    "@gempba/ui": "2.0.0",
     "@theia/ai-core": "1.76.0",
     "@theia/ai-mcp": "1.76.0",
     "@theia/core": "1.76.0",
@@ -32,7 +33,6 @@
   },
   "scripts": {
     "clean": "rimraf lib *.tsbuildinfo",
-    "compile": "tsc -b",
-    "test": "mocha \"lib/**/*.spec.js\""
+    "compile": "tsc -b"
   }
 }

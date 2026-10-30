@@ -36,8 +36,8 @@ describe('check-layers', () => {
         ]);
     });
 
-    it('lets plugin support build on the shell, and on no other GemPBA package', () => {
-        const plugins = { name: '@gempba/plugins', dependencies: { '@gempba/shell': '2.0.0', '@gempba/telemetry': '2.0.0' } };
+    it('lets plugin support build on the shell and the UI kit, and on no other GemPBA package', () => {
+        const plugins = { name: '@gempba/plugins', dependencies: { '@gempba/shell': '2.0.0', '@gempba/ui': '2.0.0', '@gempba/telemetry': '2.0.0' } };
         expect(findViolations([plugins])).to.deep.equal(['@gempba/plugins must not depend on @gempba/telemetry (dependencies)']);
     });
 

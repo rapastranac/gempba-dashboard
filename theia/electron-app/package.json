@@ -13,6 +13,11 @@
     "frontend": {
       "config": {
         "applicationName": "GemPBA Dashboard",
+        "defaultTheme": {
+          "light": "gempba-light",
+          "dark": "gempba-dark"
+        },
+        "preferences": {},
         "electron": {
           "splashScreenOptions": {
             "content": "resources/gempba-logo.svg",

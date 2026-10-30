@@ -5,8 +5,8 @@ import { PreferenceService } from '@theia/core/lib/common/preferences/preference
 import { inject, injectable, named } from '@theia/core/shared/inversify';
 import { PluginIdentifiers } from '@theia/plugin-ext/lib/common/plugin-identifiers';
 import { HostedPluginSupport } from '@theia/plugin-ext/lib/hosted/browser/hosted-plugin';
-import { StaleThemes } from '../common/stale-themes';
-import { StaleThemeAwareThemingService } from './stale-theme-aware-theming-service';
+import { CacheAwareThemingService } from '@gempba/ui/lib/browser/cache-aware-theming-service';
+import { StaleThemes } from '@gempba/ui/lib/common/stale-themes';
 
 /** The setting holding the color theme; Theia does not export its key. */
 const COLOR_THEME = 'workbench.colorTheme';
@@ -20,7 +20,7 @@ const COLOR_THEME = 'workbench.colorTheme';
 export class StaleThemeCleanup implements FrontendApplicationContribution {
 
     @inject(HostedPluginSupport) protected readonly pluginSupport: HostedPluginSupport;
-    @inject(StaleThemeAwareThemingService) protected readonly theming: StaleThemeAwareThemingService;
+    @inject(CacheAwareThemingService) protected readonly theming: CacheAwareThemingService;
     @inject(PreferenceService) protected readonly preferences: PreferenceService;
     @inject(ILogger) @named('gempba:StaleThemeCleanup') protected readonly logger: ILogger;
 
