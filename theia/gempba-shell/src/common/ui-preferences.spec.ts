@@ -20,6 +20,13 @@ describe('UiPreferences', () => {
         }
     });
 
+    it('shows every GemPBA setting', () => {
+        for (const key of ['gempba.telemetry.workerIntervalMs', 'gempba.telemetry.nodeIntervalMs', 'gempba.later.setting']) {
+            expect(UiPreferences.isShown(key), key).to.equal(true);
+        }
+        expect(UiPreferences.isShown('gempbax.setting')).to.equal(false);
+    });
+
     it('also shows the prefixes a contribution adds, but never the hidden window settings', () => {
         expect(UiPreferences.isShown('extensions.onlyShowVerifiedExtensions', ['extensions.'])).to.equal(true);
         expect(UiPreferences.isShown('extensions.onlyShowVerifiedExtensions')).to.equal(false);
