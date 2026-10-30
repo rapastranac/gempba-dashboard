@@ -13,11 +13,22 @@ export namespace TelemetryCommands {
     export const LISTEN: Command = { id: 'gempba.listen', category: CATEGORY, label: 'Listen…' };
     export const STOP: Command = { id: 'gempba.stop', category: CATEGORY, label: 'Stop Listening' };
     export const DISCONNECT: Command = { id: 'gempba.disconnect', category: CATEGORY, label: 'Disconnect' };
+    export const SET_WORKER_RATE: Command = { id: 'gempba.setWorkerRate', category: CATEGORY, label: 'Set Worker Refresh Rate…' };
+    export const SET_NODE_RATE: Command = { id: 'gempba.setNodeRate', category: CATEGORY, label: 'Set Node Refresh Rate…' };
 }
 
 export namespace TelemetryMenus {
     /** The File menu's first group: the connection commands now, and the session commands (site manager, new session) later. */
     export const SESSION = [...CommonMenus.FILE, '0_session'];
+    /**
+     * The live controls, opened from a live view's tab and from the status bar entry. A new control is one command and
+     * one menu item here, with no change to the views.
+     */
+    export const CONTROLS = ['gempba-telemetry-controls'];
+    export const RATES = [...CONTROLS, '1_rates'];
+    export const WORKER_RATES = [...RATES, 'worker'];
+    export const NODE_RATES = [...RATES, 'node'];
+    export const STREAM = [...CONTROLS, '2_stream'];
 }
 
 const MODE_LABELS: Record<ConnectionMode, string> = {
@@ -71,6 +82,8 @@ export class TelemetryCommandContribution implements CommandContribution, MenuCo
     registerMenus(menus: MenuModelRegistry): void {
         [TelemetryCommands.CONNECT, TelemetryCommands.LISTEN, TelemetryCommands.STOP, TelemetryCommands.DISCONNECT]
             .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.SESSION, { commandId: command.id, order: String(index) }));
+        [TelemetryCommands.STOP, TelemetryCommands.DISCONNECT]
+            .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.STREAM, { commandId: command.id, order: String(index) }));
     }
 
     protected async connect(): Promise<void> {

@@ -9,6 +9,7 @@ import { NodeHistoryStore, WorkerHistoryStore } from '@gempba/core';
 import { TELEMETRY_SERVICE_PATH, TelemetryServer } from '../common/telemetry-protocol';
 import { NodeHistoryService, TelemetryService, WorkerHistoryService } from '../common/telemetry-service';
 import { NodeLinkFallbackOpener } from './node-link-fallback-opener';
+import { RateControlsContribution } from './rate-controls-contribution';
 import { PreferenceRateSettings, RatePreferences, RateSettings } from './rate-settings';
 import { TelemetryCommandContribution } from './telemetry-command-contribution';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
@@ -33,6 +34,9 @@ export default new ContainerModule(bind => {
     bind(TelemetryCommandContribution).toSelf().inSingletonScope();
     bind(CommandContribution).toService(TelemetryCommandContribution);
     bind(MenuContribution).toService(TelemetryCommandContribution);
+    bind(RateControlsContribution).toSelf().inSingletonScope();
+    bind(CommandContribution).toService(RateControlsContribution);
+    bind(MenuContribution).toService(RateControlsContribution);
     bind(FrontendApplicationContribution).to(TelemetryStatusBarContribution).inSingletonScope();
     bind(OpenHandler).to(NodeLinkFallbackOpener).inSingletonScope();
 });
