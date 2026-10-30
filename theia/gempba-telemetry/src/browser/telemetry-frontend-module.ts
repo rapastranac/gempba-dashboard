@@ -1,6 +1,9 @@
+import '../../src/browser/style/index.css';
+
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { ServiceConnectionProvider } from '@theia/core/lib/browser/messaging/service-connection-provider';
 import { OpenHandler } from '@theia/core/lib/browser/opener-service';
+import { TabBarToolbarContribution } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
 import { CommandContribution } from '@theia/core/lib/common/command';
 import { MenuContribution } from '@theia/core/lib/common/menu';
 import { PreferenceContribution } from '@theia/core/lib/common/preferences/preference-schema';
@@ -9,6 +12,7 @@ import { NodeHistoryStore, WorkerHistoryStore } from '@gempba/core';
 import { TELEMETRY_SERVICE_PATH, TelemetryServer } from '../common/telemetry-protocol';
 import { NodeHistoryService, TelemetryService, WorkerHistoryService } from '../common/telemetry-service';
 import { NodeLinkFallbackOpener } from './node-link-fallback-opener';
+import { RateChipContribution } from './rate-chip-contribution';
 import { RateControlsContribution } from './rate-controls-contribution';
 import { PreferenceRateSettings, RatePreferences, RateSettings } from './rate-settings';
 import { TelemetryCommandContribution } from './telemetry-command-contribution';
@@ -37,6 +41,7 @@ export default new ContainerModule(bind => {
     bind(RateControlsContribution).toSelf().inSingletonScope();
     bind(CommandContribution).toService(RateControlsContribution);
     bind(MenuContribution).toService(RateControlsContribution);
+    bind(TabBarToolbarContribution).to(RateChipContribution).inSingletonScope();
     bind(FrontendApplicationContribution).to(TelemetryStatusBarContribution).inSingletonScope();
     bind(OpenHandler).to(NodeLinkFallbackOpener).inSingletonScope();
 });

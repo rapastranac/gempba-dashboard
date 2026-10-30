@@ -1,0 +1,14 @@
+/* The refresh rate chip on a live view's tab: a pulse, the rate and a chevron, like a small dropdown button. */
+.lm-TabBar-toolbar .item > div.gempba-rate-chip {
+    display: flex;
+    align-items: center;
+    column-gap: 2px;
+    padding: 0 4px;
+    border-radius: 3px;
+    font-size: var(--theia-ui-font-size0);
+    white-space: nowrap;
+}
+
+.lm-TabBar-toolbar .item > div.gempba-rate-chip:hover {
+    background-color: var(--theia-toolbar-hoverBackground);
+}
