@@ -4,6 +4,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
+import { LiveTelemetryView } from '@gempba/telemetry/lib/browser';
 import { NodeHistoryService, NodeLink, NodeSelection, TelemetryService } from '@gempba/telemetry/lib/common';
 import { MeterBar, Sparkline, Tile, TileGrid, VisibleRefresh } from '@gempba/ui/lib/browser';
 import { GridTiles } from '../common/grid-tiles';
@@ -36,6 +37,7 @@ export class GridWidget extends ReactWidget {
         this.title.closable = false;
         this.scrollOptions = {};
         this.addClass('gempba-grid');
+        LiveTelemetryView.mark(this);
         // Snapshots arrive several times a second; a hidden Grid (a background tab, a minimized window) draws nothing until it is shown.
         const refresh = new VisibleRefresh(this, () => this.update());
         this.toDispose.push(refresh);

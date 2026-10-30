@@ -4,6 +4,7 @@ import { SplitWidget } from '@theia/core/lib/browser/widgets/split-widget';
 import { codicon, Message } from '@theia/core/lib/browser/widgets/widget';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { WorldSnapshot } from '@gempba/core';
+import { LiveTelemetryView } from '@gempba/telemetry/lib/browser';
 import { NodeSelection, TelemetryService } from '@gempba/telemetry/lib/common';
 import { VisibleRefresh } from '@gempba/ui/lib/browser';
 import { CardsDetailsWidget } from './cards-details-widget';
@@ -46,6 +47,7 @@ export class CardsWidget extends SplitWidget {
         this.title.iconClass = codicon('list-tree');
         this.title.closable = false;
         this.addClass('gempba-cards');
+        LiveTelemetryView.mark(this);
         this.addPane(tree);
         this.addPane(details);
         this.setRelativeSizes([2, 3]);
