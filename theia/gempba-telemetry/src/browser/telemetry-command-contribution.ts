@@ -1,4 +1,6 @@
+import { CommonMenus } from '@theia/core/lib/browser/common-menus';
 import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
+import { MenuContribution, MenuModelRegistry } from '@theia/core/lib/common/menu';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { QuickInputService, QuickPickItem } from '@theia/core/lib/common/quick-pick-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
@@ -13,6 +15,11 @@ export namespace TelemetryCommands {
     export const DISCONNECT: Command = { id: 'gempba.disconnect', category: CATEGORY, label: 'Disconnect' };
 }
 
+export namespace TelemetryMenus {
+    /** The File menu's first group: the connection commands now, and the session commands (site manager, new session) later. */
+    export const SESSION = [...CommonMenus.FILE, '0_session'];
+}
+
 const MODE_LABELS: Record<ConnectionMode, string> = {
     [ConnectionMode.LOCAL]: 'Local: gempba on this machine',
     [ConnectionMode.HOST]: 'Host: a VM over SSH',
@@ -20,12 +27,12 @@ const MODE_LABELS: Record<ConnectionMode, string> = {
 };
 
 /**
- * Drives the stream from the command palette, so it works without any connection UI installed. Connect opens an
- * SSH session in one of the installed SSH modes, and is absent when there is none; Listen while disconnected
- * streams a gempba on this machine, which needs no session.
+ * Drives the stream from the File menu and the command palette, so it works without any connection UI installed.
+ * Connect opens an SSH session in one of the installed SSH modes, and is absent when there is none; Listen while
+ * disconnected streams a gempba on this machine, which needs no session.
  */
 @injectable()
-export class TelemetryCommandContribution implements CommandContribution {
+export class TelemetryCommandContribution implements CommandContribution, MenuContribution {
 
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
     @inject(QuickInputService) protected readonly quickInput: QuickInputService;
@@ -43,6 +50,7 @@ export class TelemetryCommandContribution implements CommandContribution {
 
     registerCommands(registry: CommandRegistry): void {
         registry.registerCommand(TelemetryCommands.CONNECT, {
+            isVisible: () => this.sshModes.length > 0,
             isEnabled: () => this.telemetry.state === ConnectionState.DISCONNECTED && this.sshModes.length > 0,
             execute: () => this.connect()
         });
@@ -58,6 +66,11 @@ export class TelemetryCommandContribution implements CommandContribution {
             isEnabled: () => this.telemetry.state !== ConnectionState.DISCONNECTED,
             execute: () => this.run(this.telemetry.disconnect())
         });
+    }
+
+    registerMenus(menus: MenuModelRegistry): void {
+        [TelemetryCommands.CONNECT, TelemetryCommands.LISTEN, TelemetryCommands.STOP, TelemetryCommands.DISCONNECT]
+            .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.SESSION, { commandId: command.id, order: String(index) }));
     }
 
     protected async connect(): Promise<void> {
