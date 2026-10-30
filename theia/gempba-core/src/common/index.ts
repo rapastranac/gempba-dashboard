@@ -26,5 +26,6 @@ export * from './model/socket-snapshot';
 export * from './model/structure-key';
 export * from './model/worker-snapshot';
 export * from './model/world-snapshot';
+export * from './policy/core-heat';
 export * from './policy/node-utilization';
 export * from './ssh/ssh-endpoint';
