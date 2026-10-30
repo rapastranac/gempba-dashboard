@@ -121,6 +121,12 @@ describe('WorldSnapshotMapper', () => {
         expect(node.sentinelWorkerId).to.equal(10);
     });
 
+    it('keeps the sentinel\'s clock from the node frame', () => {
+        const base = twoSocketEnvelope();
+        expect(firstNode({ ...base, nodes: [{ ...base.nodes![0], sentinel_local_ms: 77_000 }] }).sentinelLocalMillis).to.equal(77_000);
+        expect(firstNode({ ...base, nodes: undefined }).sentinelLocalMillis).to.equal(0);
+    });
+
     it('prefers cgroup memory over host memory when present', () => {
         const topology = {
             nodes: [topologyNode('n0', 10, 4, 8, 64 * GiB, [10], [socket(0, 'Xeon', 2, 4, [0, 1, 2, 3])])],

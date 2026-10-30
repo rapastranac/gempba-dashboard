@@ -23,7 +23,7 @@ function socket(overrides: Partial<SocketSnapshot> = {}): SocketSnapshot {
 function node(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
     return {
         host: 'alpha', socketCount: 2, physicalCores: 8, logicalCores: 16, hasLiveMemory: true, memTotalBytes: 16 * GiB,
-        memUsedBytes: 4 * GiB, sentinelWorkerId: 0, nodeUtilPct: 50, sockets: [], ...overrides
+        memUsedBytes: 4 * GiB, sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct: 50, sockets: [], ...overrides
     };
 }
 

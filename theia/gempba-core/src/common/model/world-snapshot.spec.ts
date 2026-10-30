@@ -23,7 +23,7 @@ function socket(socketId: number, ...workerIds: number[]): SocketSnapshot {
 function node(host: string, ...sockets: SocketSnapshot[]): NodeSnapshot {
     return {
         host, socketCount: sockets.length, physicalCores: 0, logicalCores: 0, hasLiveMemory: false,
-        memTotalBytes: 0, memUsedBytes: 0, sentinelWorkerId: 0, nodeUtilPct: 0, sockets
+        memTotalBytes: 0, memUsedBytes: 0, sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct: 0, sockets
     };
 }
 

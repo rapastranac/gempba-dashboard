@@ -21,7 +21,7 @@ function socket(socketId: number, cpuIds: number[], ...workers: WorkerSnapshot[]
 function node(...sockets: SocketSnapshot[]): NodeSnapshot {
     return {
         host: 'h', socketCount: sockets.length, physicalCores: 0, logicalCores: 0, hasLiveMemory: false, memTotalBytes: 0, memUsedBytes: 0,
-        sentinelWorkerId: 0, nodeUtilPct: 0, sockets
+        sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct: 0, sockets
     };
 }
 

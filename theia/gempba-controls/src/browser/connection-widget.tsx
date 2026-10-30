@@ -5,10 +5,11 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog/file-dialog-service';
-import { ConnectionMode, ConnectionState, DashboardSettings, RefreshInterval, SessionSpec, TargetSpec } from '@gempba/core';
+import { ConnectionMode, ConnectionState, DashboardSettings, RefreshInterval, RefreshRates, SessionSpec, TargetSpec } from '@gempba/core';
 import { TelemetryService } from '@gempba/telemetry/lib/common';
 import { RememberedSettings } from '../common/remembered-settings';
 import { SettingsServer } from '../common/settings-protocol';
+import { RememberedRatesMove } from './remembered-rates-move';
 
 /** The arrows of a rate field move by this much; gempba itself takes any value between its bounds. */
 const RATE_STEP_MS = 50;
@@ -30,10 +31,10 @@ interface Form {
 }
 
 /**
- * The connection controls: the session (mode, host, key), the target (compute node, port) and the refresh rates,
- * pre-filled from the remembered settings and never connecting on its own. Only the SSH modes have a session to
- * connect; a local gempba is listened to directly. It only drives TelemetryService, so the palette commands keep
- * working without it.
+ * The connection controls: the session (mode, host, key) and the target (compute node, port), pre-filled from the
+ * remembered settings and never connecting on its own, and the refresh rates, which the hub keeps as settings. Only
+ * the SSH modes have a session to connect; a local gempba is listened to directly. It only drives TelemetryService,
+ * so the palette commands keep working without it.
  */
 @injectable()
 export class ConnectionWidget extends ReactWidget {
@@ -45,13 +46,15 @@ export class ConnectionWidget extends ReactWidget {
     @inject(SettingsServer) protected readonly settingsServer: SettingsServer;
     @inject(FileDialogService) protected readonly fileDialog: FileDialogService;
     @inject(MessageService) protected readonly messages: MessageService;
+    @inject(RememberedRatesMove) protected readonly ratesMove: RememberedRatesMove;
 
     protected settings = DashboardSettings.defaults();
     protected modes: ConnectionMode[] = [ConnectionMode.LOCAL];
     protected mode = ConnectionMode.LOCAL;
     /** The mode of the session this view opened; the target fields follow it. */
     protected sessionMode = ConnectionMode.LOCAL;
-    protected form: Form = this.formOf(this.settings, this.mode);
+    /** Field initializers run before injection, so the rates start at their defaults until the remembered settings are restored. */
+    protected form: Form = this.formOf(this.settings, this.mode, RefreshRates.defaults());
     protected problem = '';
 
     @postConstruct()
@@ -64,19 +67,21 @@ export class ConnectionWidget extends ReactWidget {
         this.addClass('gempba-connection');
         this.toDispose.push(this.telemetry.onStateChange(() => this.update()));
         this.toDispose.push(this.telemetry.onStatus(() => this.update()));
+        this.toDispose.push(this.telemetry.onRatesChange(rates => this.showRates(rates)));
         this.restore();
     }
 
     protected async restore(): Promise<void> {
+        await this.ratesMove.moved();
         const [settings, modes] = await Promise.all([this.settingsServer.load(), this.telemetry.availableModes()]);
         this.settings = settings;
         this.modes = modes;
         this.mode = this.sessionMode = modes.includes(settings.lastMode) ? settings.lastMode : ConnectionMode.LOCAL;
-        this.form = this.formOf(settings, this.mode);
+        this.form = this.formOf(settings, this.mode, this.telemetry.rates);
         this.update();
     }
 
-    protected formOf(settings: DashboardSettings, mode: ConnectionMode): Form {
+    protected formOf(settings: DashboardSettings, mode: ConnectionMode, rates: RefreshRates): Form {
         const session = RememberedSettings.sessionOf(settings, mode);
         const target = RememberedSettings.targetOf(settings, mode);
         return {
@@ -85,9 +90,15 @@ export class ConnectionWidget extends ReactWidget {
             sshKey: session.sshKey,
             targetHost: target.targetHost,
             gempbaPort: String(target.gempbaPort),
-            workerIntervalMs: String(settings.workerIntervalMs),
-            nodeIntervalMs: String(settings.nodeIntervalMs)
+            workerIntervalMs: String(rates.workerIntervalMs),
+            nodeIntervalMs: String(rates.nodeIntervalMs)
         };
+    }
+
+    /** Rates changed anywhere (a view's controls, the Settings page, another window) replace the ones typed here. */
+    protected showRates(rates: RefreshRates): void {
+        this.form = { ...this.form, workerIntervalMs: String(rates.workerIntervalMs), nodeIntervalMs: String(rates.nodeIntervalMs) };
+        this.update();
     }
 
     protected render(): React.ReactNode {
@@ -175,7 +186,7 @@ export class ConnectionWidget extends ReactWidget {
 
     protected changeMode(mode: ConnectionMode): void {
         this.mode = mode;
-        this.form = { ...this.formOf(this.settings, mode), workerIntervalMs: this.form.workerIntervalMs, nodeIntervalMs: this.form.nodeIntervalMs };
+        this.form = { ...this.formOf(this.settings, mode, this.telemetry.rates), workerIntervalMs: this.form.workerIntervalMs, nodeIntervalMs: this.form.nodeIntervalMs };
         this.problem = '';
         this.update();
     }
@@ -201,7 +212,7 @@ export class ConnectionWidget extends ReactWidget {
         const session = SessionSpec.of({ mode: this.mode, host: this.form.host.trim(), sshPort, sshKey: this.form.sshKey.trim() });
         this.sessionMode = this.mode;
         await this.remember(RememberedSettings.withSession(this.settings, session));
-        await this.run(this.telemetry.pushRates(this.settings.workerIntervalMs, this.settings.nodeIntervalMs).then(() => this.telemetry.connect(session)));
+        await this.run(this.telemetry.connect(session));
     }
 
     protected async listen(): Promise<void> {
@@ -217,19 +228,16 @@ export class ConnectionWidget extends ReactWidget {
         const target = TargetSpec.of(jump ? this.form.targetHost.trim() : undefined, gempbaPort);
         const remembered = RememberedSettings.withTarget(this.settings, this.sessionMode, target);
         await this.remember(local ? RememberedSettings.withSession(remembered, SessionSpec.local()) : remembered);
-        // Without a Connect, the remembered rates go out just before the stream starts.
-        const rates = local ? this.telemetry.pushRates(this.settings.workerIntervalMs, this.settings.nodeIntervalMs) : Promise.resolve();
-        await this.run(rates.then(() => this.telemetry.listen(target)));
+        await this.run(this.telemetry.listen(target));
     }
 
     protected async applyRates(): Promise<void> {
-        const worker = Number(this.form.workerIntervalMs);
-        const node = Number(this.form.nodeIntervalMs);
-        if (!Number.isInteger(worker) || !Number.isInteger(node) || worker < 1 || node < 1) {
-            return this.complain('Enter the rates as whole milliseconds; gempba keeps them between 50 and 600000.');
+        const workerIntervalMs = RefreshInterval.parse(this.form.workerIntervalMs);
+        const nodeIntervalMs = RefreshInterval.parse(this.form.nodeIntervalMs);
+        if (workerIntervalMs === undefined || nodeIntervalMs === undefined) {
+            return this.complain(`Enter each rate in whole milliseconds, between ${RefreshInterval.MIN_MS} and ${RefreshInterval.MAX_MS}.`);
         }
-        await this.remember(RememberedSettings.withRates(this.settings, worker, node));
-        await this.run(this.telemetry.pushRates(worker, node));
+        await this.run(this.telemetry.setRates({ workerIntervalMs, nodeIntervalMs }));
     }
 
     protected async remember(settings: DashboardSettings): Promise<void> {

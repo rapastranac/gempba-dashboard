@@ -11,6 +11,8 @@ export interface NodeSnapshot {
     readonly memTotalBytes: number;
     readonly memUsedBytes: number;
     readonly sentinelWorkerId: number;
+    /** The sentinel's own monotonic clock when it took the latest node frame, 0 without one; only differences mean anything. */
+    readonly sentinelLocalMillis: number;
     /** Per-allocation CPU utilization, already clamped to 0..100. */
     readonly nodeUtilPct: number;
     /** Ascending socket-id order. */

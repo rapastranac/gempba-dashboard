@@ -1,8 +1,11 @@
 import { Emitter } from '@theia/core/lib/common/event';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
-import { ConnectionMode, ConnectionState, NodeHistoryStore, SessionSpec, TargetSpec, WorkerHistoryStore, WorldSnapshot } from '@gempba/core';
+import {
+    ConnectionMode, ConnectionState, FrameCadence, NodeHistoryStore, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, WorldSnapshot
+} from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { TelemetryService } from '../common/telemetry-service';
+import { RateSettings } from './rate-settings';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
 
 @injectable()
@@ -12,17 +15,22 @@ export class TelemetryServiceImpl implements TelemetryService {
     @inject(TelemetryServerClientImpl) protected readonly receiver: TelemetryServerClientImpl;
     @inject(NodeHistoryStore) protected readonly nodeHistory: NodeHistoryStore;
     @inject(WorkerHistoryStore) protected readonly workerHistory: WorkerHistoryStore;
+    @inject(RateSettings) protected readonly rateSettings: RateSettings;
 
     protected readonly onSnapshotEmitter = new Emitter<WorldSnapshot>();
     protected readonly onStateChangeEmitter = new Emitter<ConnectionState>();
     protected readonly onStatusEmitter = new Emitter<string>();
+    protected readonly onRatesChangeEmitter = new Emitter<RefreshRates>();
     readonly onSnapshot = this.onSnapshotEmitter.event;
     readonly onStateChange = this.onStateChangeEmitter.event;
     readonly onStatus = this.onStatusEmitter.event;
+    readonly onRatesChange = this.onRatesChangeEmitter.event;
 
     protected currentState = ConnectionState.DISCONNECTED;
     protected latestSnapshot: WorldSnapshot | undefined;
     protected latestStatus = '';
+    protected readonly workerCadence = new FrameCadence();
+    protected readonly nodeCadence = new FrameCadence();
 
     get state(): ConnectionState {
         return this.currentState;
@@ -36,11 +44,20 @@ export class TelemetryServiceImpl implements TelemetryService {
         return this.latestStatus;
     }
 
+    get rates(): RefreshRates {
+        return this.rateSettings.rates;
+    }
+
+    get observedRates(): Partial<RefreshRates> {
+        return { workerIntervalMs: this.workerCadence.medianMs(), nodeIntervalMs: this.nodeCadence.medianMs() };
+    }
+
     @postConstruct()
     protected init(): void {
         this.receiver.snapshots(snapshot => {
             this.nodeHistory.update(snapshot);
             this.workerHistory.update(snapshot);
+            this.observe(snapshot);
             this.latestSnapshot = snapshot;
             this.onSnapshotEmitter.fire(snapshot);
         });
@@ -52,20 +69,29 @@ export class TelemetryServiceImpl implements TelemetryService {
             this.latestStatus = text;
             this.onStatusEmitter.fire(text);
         });
+        this.rateSettings.onChange(rates => {
+            this.onRatesChangeEmitter.fire(rates);
+            // a failed send leaves the rates in the backend, which sends them on the next connect
+            this.sendRates().catch(() => undefined);
+        });
     }
 
     availableModes(): Promise<ConnectionMode[]> {
         return this.server.availableModes();
     }
 
-    connect(session: SessionSpec): Promise<void> {
+    async connect(session: SessionSpec): Promise<void> {
+        await this.sendRates();
         return this.server.connect(session);
     }
 
-    listen(target: TargetSpec): Promise<void> {
+    async listen(target: TargetSpec): Promise<void> {
         this.nodeHistory.clear();
         this.workerHistory.clear();
+        this.workerCadence.clear();
+        this.nodeCadence.clear();
         this.latestSnapshot = undefined;
+        await this.sendRates();
         return this.server.listen(target);
     }
 
@@ -77,7 +103,27 @@ export class TelemetryServiceImpl implements TelemetryService {
         return this.server.disconnect();
     }
 
-    pushRates(workerIntervalMs: number, nodeIntervalMs: number): Promise<void> {
-        return this.server.pushRates(workerIntervalMs, nodeIntervalMs);
+    setRates(rates: Partial<RefreshRates>): Promise<void> {
+        return this.rateSettings.set(rates);
+    }
+
+    /** Hands the backend the rates as set, which it sends to gempba now if a stream is open, and on every (re)connect. */
+    protected async sendRates(): Promise<void> {
+        await this.rateSettings.ready;
+        const rates = this.rateSettings.rates;
+        await this.server.pushRates(rates.workerIntervalMs, rates.nodeIntervalMs);
+    }
+
+    protected observe(snapshot: WorldSnapshot): void {
+        for (const node of snapshot.nodes) {
+            if (node.hasLiveMemory) {
+                this.nodeCadence.record(node.host, node.sentinelLocalMillis, node.sentinelLocalMillis);
+            }
+            for (const socket of node.sockets) {
+                for (const worker of socket.workers) {
+                    this.workerCadence.record(String(worker.workerId), worker.seqNo, worker.localMillis);
+                }
+            }
+        }
     }
 }

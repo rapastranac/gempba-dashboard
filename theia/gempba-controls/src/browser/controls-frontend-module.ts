@@ -7,6 +7,7 @@ import { ContainerModule } from '@theia/core/shared/inversify';
 import { SETTINGS_SERVICE_PATH, SettingsServer } from '../common/settings-protocol';
 import { ConnectionViewContribution } from './connection-view-contribution';
 import { ConnectionWidget } from './connection-widget';
+import { RememberedRatesMove } from './remembered-rates-move';
 
 export default new ContainerModule(bind => {
     bind(SettingsServer).toDynamicValue(ctx => ServiceConnectionProvider.createProxy<SettingsServer>(ctx.container, SETTINGS_SERVICE_PATH)).inSingletonScope();
@@ -17,4 +18,6 @@ export default new ContainerModule(bind => {
     })).inSingletonScope();
     bindViewContribution(bind, ConnectionViewContribution);
     bind(FrontendApplicationContribution).toService(ConnectionViewContribution);
+    bind(RememberedRatesMove).toSelf().inSingletonScope();
+    bind(FrontendApplicationContribution).toService(RememberedRatesMove);
 });
