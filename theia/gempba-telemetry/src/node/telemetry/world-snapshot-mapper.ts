@@ -40,7 +40,7 @@ export namespace WorldSnapshotMapper {
             }
 
             getOrCreate(getOrCreate(workersByHostBySocket, host, () => new Map()), socketId, () => [])
-                .push(toWorkerSnapshot(frame, sentinel, identity?.pid ?? 0, envelope.elapsed_seconds));
+                .push(toWorkerSnapshot(frame, sentinel, identity, envelope.elapsed_seconds));
             getOrCreate(getOrCreate(framesByHostBySocket, host, () => new Map()), socketId, () => new Map())
                 .set(workerId, frame);
             if (identity) {
@@ -109,12 +109,14 @@ export namespace WorldSnapshotMapper {
         return { socketByWorkerId, identityByWorkerId };
     }
 
-    function toWorkerSnapshot(frame: WorkerFrame, sentinel: boolean, pid: number, elapsedSeconds: number): WorkerSnapshot {
+    function toWorkerSnapshot(frame: WorkerFrame, sentinel: boolean, identity: WorkerIdentity | undefined, elapsedSeconds: number): WorkerSnapshot {
         return {
             workerId: frame.worker_id,
             seqNo: frame.seq_no,
-            pid,
+            localMillis: frame.worker_local_ms,
+            pid: identity?.pid ?? 0,
             sentinel,
+            allowedCpuIds: identity?.allowed_cpu_ids ?? [],
             tasksLocalTotal: frame.tasks_local_total,
             tasksRunning: frame.tasks_running,
             tasksSentTotal: frame.tasks_sent_total,

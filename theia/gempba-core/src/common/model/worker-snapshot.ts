@@ -3,9 +3,13 @@ import { PeerSnapshot } from './peer-snapshot';
 export interface WorkerSnapshot {
     readonly workerId: number;
     readonly seqNo: number;
+    /** The worker's own monotonic clock when it took the frame; only the difference between two of its frames means anything. */
+    readonly localMillis: number;
     /** 0 when unknown. */
     readonly pid: number;
     readonly sentinel: boolean;
+    /** The CPUs the worker may run on; empty when unrestricted or unknown. */
+    readonly allowedCpuIds: readonly number[];
     readonly tasksLocalTotal: number;
     readonly tasksRunning: number;
     readonly tasksSentTotal: number;
