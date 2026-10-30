@@ -6,8 +6,9 @@ const GiB = 1024 ** 3;
 
 function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
     return {
-        workerId: 3, seqNo: 17, pid: 4100, sentinel: false, tasksLocalTotal: 12450, tasksRunning: 1, tasksSentTotal: 619, tasksRecvTotal: 0,
-        schedulerPendingCount: 2, idleMicrosPerWorker: 238, cpuPct: 87.3, rssBytes: 256 * 1024 ** 2, threads: 12, elapsedSeconds: 100,
+        workerId: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
+        tasksLocalTotal: 12450, tasksRunning: 1, tasksSentTotal: 619, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 238,
+        cpuPct: 87.3, rssBytes: 256 * 1024 ** 2, threads: 12, elapsedSeconds: 100,
         peers: [{ peerWorkerId: 1, bytes: 4096, count: 3 }], ...overrides
     };
 }
@@ -52,7 +53,7 @@ describe('CardsText', () => {
         expect(rows(live).get('CPU')).to.equal('50.0 % of its allocated cores');
         expect(rows(live).get('Sentinel')).to.equal('Worker 0');
         // Worker frames come more often than node frames: a snapshot without one keeps the history's last memory and its CPU.
-        const history: NodeSeries = { cpu: [50], cpuLatest: 50, memUsedLatest: 6 * GiB, memTotalLatest: 16 * GiB };
+        const history: NodeSeries = { cpu: [50], mem: [6 * GiB], cpuLatest: 50, memUsedLatest: 6 * GiB, memTotalLatest: 16 * GiB };
         const between = rows(CardsText.nodeDetails(node({ hasLiveMemory: false }), history));
         expect(between.get('Memory')).to.equal('6.0 GB used of 16.0 GB');
         expect(between.get('CPU')).to.equal('50.0 % of its allocated cores');

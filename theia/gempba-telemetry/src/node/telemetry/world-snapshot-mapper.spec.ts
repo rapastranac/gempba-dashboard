@@ -173,6 +173,20 @@ describe('WorldSnapshotMapper', () => {
         expect(w11.peers).to.be.empty;
     });
 
+    it('keeps each worker\'s clock and the CPUs it may run on', () => {
+        const base = twoSocketEnvelope();
+        const workers = base.workers!.map(w => ({ ...w, worker_local_ms: 9_000 + w.worker_id }));
+        const [s0, s1] = firstNode({ ...base, workers }).sockets;
+        expect(s0.workers.map(w => [w.workerId, w.localMillis, w.allowedCpuIds])).to.deep.equal([[10, 9_010, [0, 1]], [12, 9_012, []]]);
+        // worker 11 has no allowed list: unrestricted.
+        expect(s1.workers.map(w => [w.workerId, w.localMillis, w.allowedCpuIds])).to.deep.equal([[11, 9_011, []]]);
+    });
+
+    it('a worker without identity may run anywhere', () => {
+        const worker = WorldSnapshotMapper.toWorldSnapshot(envelope(undefined, [frame(99, 1, 10, 1000)], undefined)).nodes[0].sockets[0].workers[0];
+        expect([worker.pid, worker.allowedCpuIds]).to.deep.equal([0, []]);
+    });
+
     it('builds one structure key per worker', () => {
         expect(WorldSnapshotMapper.toWorldSnapshot(twoSocketEnvelope()).structure.keys)
             .to.have.members(['n0|0|10', 'n0|0|12', 'n0|1|11']);

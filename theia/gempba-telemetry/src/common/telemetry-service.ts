@@ -1,5 +1,5 @@
 import { Event } from '@theia/core/lib/common/event';
-import { ConnectionMode, ConnectionState, NodeSeries, SessionSpec, TargetSpec, WorldSnapshot } from '@gempba/core';
+import { ConnectionMode, ConnectionState, NodeSeries, SessionSpec, TargetSpec, WorkerSeries, WorldSnapshot } from '@gempba/core';
 
 /**
  * The frontend API every feature injects: the active session's telemetry stream and its controls. Features
@@ -21,8 +21,8 @@ export interface TelemetryService {
     /** Opens an SSH session (HOST, JUMP), authenticating once; a local gempba needs none. */
     connect(session: SessionSpec): Promise<void>;
     /**
-     * Starts a new target over the open session, or on this machine when none is open; the snapshot and node
-     * history are cleared first.
+     * Starts a new target over the open session, or on this machine when none is open; the snapshot and the
+     * histories are cleared first.
      */
     listen(target: TargetSpec): Promise<void>;
     /** Stops streaming; an SSH session stays open, a local stream ends in DISCONNECTED. */
@@ -37,4 +37,15 @@ export const NodeHistoryService = Symbol('NodeHistoryService');
 export interface NodeHistoryService {
     seriesFor(host: string): NodeSeries;
     hosts(): readonly string[];
+}
+
+/** Per-worker live history of the active session, with node and cluster throughput, updated before each snapshot is announced. */
+export const WorkerHistoryService = Symbol('WorkerHistoryService');
+
+export interface WorkerHistoryService {
+    seriesFor(workerId: number): WorkerSeries;
+    /** Tasks completed per second by all of one node's workers, oldest first. */
+    throughputFor(host: string): readonly number[];
+    /** Tasks completed per second by every worker, oldest first. */
+    clusterThroughput(): readonly number[];
 }

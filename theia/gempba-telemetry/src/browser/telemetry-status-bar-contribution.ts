@@ -1,10 +1,10 @@
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser/status-bar/status-bar-types';
 import { inject, injectable } from '@theia/core/shared/inversify';
-import { ConnectionState } from '@gempba/core';
-import { TelemetryService } from '../common/telemetry-service';
+import { ConnectionState, Rates } from '@gempba/core';
+import { TelemetryService, WorkerHistoryService } from '../common/telemetry-service';
 
-/** One status-bar entry: the connection state, the node count while streaming, the latest status on hover. */
+/** One status-bar entry: the connection state, the node count while streaming, and on hover the latest status and the run's tasks per second. */
 @injectable()
 export class TelemetryStatusBarContribution implements FrontendApplicationContribution {
 
@@ -12,6 +12,7 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
 
     @inject(StatusBar) protected readonly statusBar: StatusBar;
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
+    @inject(WorkerHistoryService) protected readonly workerHistory: WorkerHistoryService;
 
     protected shown = '';
 
@@ -24,11 +25,18 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
 
     protected update(): void {
         const state = this.telemetry.state;
+        const listening = state === ConnectionState.LISTENING;
         const nodes = this.telemetry.snapshot?.nodes.length;
-        const text = state === ConnectionState.LISTENING && nodes !== undefined
+        const text = listening && nodes !== undefined
             ? `$(pulse) GemPBA: ${nodes} ${nodes === 1 ? 'node' : 'nodes'}`
             : `$(plug) GemPBA: ${state.toLowerCase()}`;
-        const tooltip = `${this.telemetry.status || state.toLowerCase()}\nRun the GemPBA commands from the command palette (F1).`;
+        const lines = [this.telemetry.status || state.toLowerCase()];
+        const throughput = this.workerHistory.clusterThroughput();
+        if (listening && throughput.length > 0) {
+            lines.push(`Tasks completed: ${Rates.perSecond(throughput[throughput.length - 1])}`);
+        }
+        lines.push('Run the GemPBA commands from the command palette (F1).');
+        const tooltip = lines.join('\n');
         if (text + tooltip === this.shown) {
             return;
         }

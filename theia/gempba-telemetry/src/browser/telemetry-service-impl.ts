@@ -1,6 +1,6 @@
 import { Emitter } from '@theia/core/lib/common/event';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
-import { ConnectionMode, ConnectionState, NodeHistoryStore, SessionSpec, TargetSpec, WorldSnapshot } from '@gempba/core';
+import { ConnectionMode, ConnectionState, NodeHistoryStore, SessionSpec, TargetSpec, WorkerHistoryStore, WorldSnapshot } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { TelemetryService } from '../common/telemetry-service';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
@@ -10,7 +10,8 @@ export class TelemetryServiceImpl implements TelemetryService {
 
     @inject(TelemetryServer) protected readonly server: TelemetryServer;
     @inject(TelemetryServerClientImpl) protected readonly receiver: TelemetryServerClientImpl;
-    @inject(NodeHistoryStore) protected readonly history: NodeHistoryStore;
+    @inject(NodeHistoryStore) protected readonly nodeHistory: NodeHistoryStore;
+    @inject(WorkerHistoryStore) protected readonly workerHistory: WorkerHistoryStore;
 
     protected readonly onSnapshotEmitter = new Emitter<WorldSnapshot>();
     protected readonly onStateChangeEmitter = new Emitter<ConnectionState>();
@@ -38,7 +39,8 @@ export class TelemetryServiceImpl implements TelemetryService {
     @postConstruct()
     protected init(): void {
         this.receiver.snapshots(snapshot => {
-            this.history.update(snapshot);
+            this.nodeHistory.update(snapshot);
+            this.workerHistory.update(snapshot);
             this.latestSnapshot = snapshot;
             this.onSnapshotEmitter.fire(snapshot);
         });
@@ -61,7 +63,8 @@ export class TelemetryServiceImpl implements TelemetryService {
     }
 
     listen(target: TargetSpec): Promise<void> {
-        this.history.clear();
+        this.nodeHistory.clear();
+        this.workerHistory.clear();
         this.latestSnapshot = undefined;
         return this.server.listen(target);
     }
