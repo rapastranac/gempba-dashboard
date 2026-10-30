@@ -15,6 +15,7 @@ export * from './history/counter-rate';
 export * from './history/node-history-store';
 export * from './history/node-sample';
 export * from './history/node-series';
+export * from './history/ring-series';
 export * from './model/core-usage-snapshot';
 export * from './model/node-snapshot';
 export * from './model/peer-snapshot';
