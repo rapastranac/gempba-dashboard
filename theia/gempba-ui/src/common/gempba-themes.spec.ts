@@ -28,15 +28,17 @@ const TEXT: ReadonlyArray<readonly [foreground: string, background: string]> = [
     ['activityBarBadge.foreground', 'activityBarBadge.background'],
     ['extensionButton.prominentForeground', 'extensionButton.prominentBackground'],
     [UiColors.TILE_FOREGROUND, UiColors.TILE_BACKGROUND],
-    [UiColors.TILE_SECONDARY_FOREGROUND, UiColors.TILE_BACKGROUND]
+    [UiColors.TILE_SECONDARY_FOREGROUND, UiColors.TILE_BACKGROUND],
+    [UiColors.HERO_FOREGROUND, UiColors.PANEL_BACKGROUND],
+    [UiColors.PANEL_TITLE_FOREGROUND, UiColors.PANEL_BACKGROUND]
 ];
 
-/** Chart lines and fills on the tile they are drawn in: at least 3:1. */
+/** Chart lines, a busy CPU and the live states on the tile or panel they are drawn in: at least 3:1. */
 const GRAPHICS: ReadonlyArray<readonly [foreground: string, background: string]> = [
-    [UiColors.CHART_CPU, UiColors.TILE_BACKGROUND],
-    [UiColors.CHART_MEMORY, UiColors.TILE_BACKGROUND],
-    ...['charts.blue', 'charts.green', 'charts.purple', 'charts.orange', 'charts.yellow', 'charts.red']
-        .map(chart => [chart, UiColors.TILE_BACKGROUND] as const)
+    ...[UiColors.CHART_CPU, UiColors.CHART_MEMORY, 'charts.blue', 'charts.green', 'charts.purple', 'charts.orange', 'charts.yellow', 'charts.red']
+        .map(chart => [chart, UiColors.TILE_BACKGROUND] as const),
+    ...[UiColors.CHART_CPU, UiColors.CHART_MEMORY, UiColors.CHART_TASKS, UiColors.CHART_NETWORK, UiColors.CHART_IDLE, UiColors.HEAT_HIGH,
+        UiColors.LIVE_ACTIVE, UiColors.LIVE_STALE, UiColors.LIVE_OFF].map(graphic => [graphic, UiColors.PANEL_BACKGROUND] as const)
 ];
 
 describe('GemPbaThemes', () => {
@@ -71,7 +73,7 @@ describe('GemPbaThemes', () => {
                 expect(low).to.deep.equal([]);
             });
 
-            it('keeps charts visible: at least 3:1 on the tiles', () => {
+            it('keeps charts and states visible: at least 3:1 on the tiles and panels', () => {
                 const low = GRAPHICS.map(([foreground, background]) => [foreground, background, Contrast.ratio(color(foreground), color(background))] as const)
                     .filter(([, , ratio]) => ratio < 3);
                 expect(low).to.deep.equal([]);
