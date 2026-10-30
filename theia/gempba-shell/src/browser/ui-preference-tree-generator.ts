@@ -23,11 +23,10 @@ export class UiPreferenceTreeGenerator extends PreferenceTreeGenerator {
         }
     }
 
+    /** A setting a plugin contributes is always shown: the user installed that plugin. */
     protected override createPluginLeafNode(name: string, property: PreferenceDataProperty, root: CompositeTreeNode,
                                             groups: Map<string, Preference.CompositeTreeNode>): void {
-        if (this.isShown(name)) {
-            super.createPluginLeafNode(name, property, root, groups);
-        }
+        super.createPluginLeafNode(name, property, root, groups);
     }
 
     protected isShown(name: string): boolean {
