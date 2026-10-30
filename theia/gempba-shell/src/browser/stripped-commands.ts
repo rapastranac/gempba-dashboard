@@ -112,5 +112,5 @@ export namespace StrippedCommands {
         PerspectiveServiceImpl.RESET_PERSPECTIVE_COMMAND
     ];
 
-    export const ALL: readonly string[] = [...FILES, ...WORKSPACE, ...EDITOR, ...SETTINGS_FILES, ...OTHER].map(command => command.id);
+    export const ALL: readonly Command[] = [...FILES, ...WORKSPACE, ...EDITOR, ...SETTINGS_FILES, ...OTHER];
 }
