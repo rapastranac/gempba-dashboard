@@ -1,5 +1,13 @@
 /* Colors come only from theme variables: the gempba.* tokens (see ui-colors.ts) and Theia's own. */
 
+/*
+ * Motion: only transforms, opacity and stroke offsets animate, over the duration a view sets from MotionTiming,
+ * and nothing animates when the OS asks for reduced motion.
+ */
+:root {
+    --gempba-motion-duration: 300ms;
+}
+
 .gempba-tile-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -63,11 +71,25 @@
     --gempba-tone: var(--theia-gempba-chart-memory);
 }
 
+.gempba-tone-tasks {
+    --gempba-tone: var(--theia-gempba-chart-tasks);
+}
+
+.gempba-tone-network {
+    --gempba-tone: var(--theia-gempba-chart-network);
+}
+
+.gempba-tone-idle {
+    --gempba-tone: var(--theia-gempba-chart-idle);
+}
+
 .gempba-sparkline {
     display: block;
     width: 100%;
     height: 72px;
     border: 1px solid var(--theia-gempba-chart-grid);
+    /* the newest sample sits on the right edge, and its dot would otherwise be cut in half */
+    overflow: visible;
 }
 
 .gempba-sparkline-gridline {
@@ -75,15 +97,26 @@
     stroke-width: 1px;
 }
 
-.gempba-sparkline-area {
-    fill: var(--gempba-tone);
-    fill-opacity: 0.2;
+.gempba-sparkline-fill-top {
+    stop-color: var(--gempba-tone);
+    stop-opacity: 0.4;
+}
+
+.gempba-sparkline-fill-bottom {
+    stop-color: var(--gempba-tone);
+    stop-opacity: 0.02;
 }
 
 .gempba-sparkline-line {
     fill: none;
     stroke: var(--gempba-tone);
     stroke-width: 1.5px;
+}
+
+.gempba-sparkline-dot {
+    stroke: var(--gempba-tone);
+    stroke-width: 6px;
+    stroke-linecap: round;
 }
 
 .gempba-meter {
@@ -96,6 +129,8 @@
 .gempba-meter-fill {
     height: 100%;
     background: var(--gempba-tone);
+    transform-origin: left;
+    transition: transform var(--gempba-motion-duration) ease-out;
 }
 
 .gempba-property-sheet {
@@ -153,4 +188,10 @@
 
 .gempba-data-table .gempba-data-end {
     text-align: end;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gempba-meter-fill {
+        transition: none;
+    }
 }

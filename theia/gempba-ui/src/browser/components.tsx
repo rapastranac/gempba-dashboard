@@ -1,8 +1,9 @@
 import * as React from '@theia/core/shared/react';
+import { NiceScale } from '../common/nice-scale';
 import { SparklineGeometry } from '../common/sparkline-geometry';
 
 /** Which theme color a chart uses; each maps to a gempba.chart.* token. */
-export type ChartTone = 'cpu' | 'memory';
+export type ChartTone = 'cpu' | 'memory' | 'tasks' | 'network' | 'idle';
 
 const VIEW_WIDTH = 100;
 const VIEW_HEIGHT = 40;
@@ -10,21 +11,33 @@ const VIEW_HEIGHT = 40;
 export interface SparklineProps {
     /** Samples, oldest first. */
     readonly values: readonly number[];
-    /** The top of the scale, e.g. 100 for a percentage. */
-    readonly max: number;
+    /** The top of the scale, e.g. 100 for a percentage; by default a round number above the largest sample. */
+    readonly max?: number;
     /** How many samples a full graph shows; fewer fill in from the right. */
     readonly capacity: number;
     readonly tone: ChartTone;
     readonly label: string;
 }
 
-/** A filled area graph that stretches to its container, like a Task Manager history graph. */
+/**
+ * A history graph that stretches to its container, like a Task Manager graph: a line over an area fading towards the
+ * baseline, and a dot on the newest sample.
+ */
 export function Sparkline({ values, max, capacity, tone, label }: SparklineProps): React.ReactElement {
-    const { line, area } = SparklineGeometry.of(values, { max, capacity, width: VIEW_WIDTH, height: VIEW_HEIGHT });
+    const gradient = `gempba-sparkline-fill-${React.useId().replace(/[^\w-]/g, '')}`;
+    const { line, area, last } = SparklineGeometry.of(values, { max: max ?? NiceScale.max(values), capacity, width: VIEW_WIDTH, height: VIEW_HEIGHT });
     return <svg className={`gempba-sparkline gempba-tone-${tone}`} viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`} preserveAspectRatio='none' role='img' aria-label={label}>
+        <defs>
+            <linearGradient id={gradient} x1={0} y1={0} x2={0} y2={1}>
+                <stop className='gempba-sparkline-fill-top' offset={0} />
+                <stop className='gempba-sparkline-fill-bottom' offset={1} />
+            </linearGradient>
+        </defs>
         <line className='gempba-sparkline-gridline' x1={0} y1={VIEW_HEIGHT / 2} x2={VIEW_WIDTH} y2={VIEW_HEIGHT / 2} vectorEffect='non-scaling-stroke' />
-        {area && <path className='gempba-sparkline-area' d={area} />}
+        {area && <path className='gempba-sparkline-area' d={area} fill={`url(#${gradient})`} />}
         {line && <polyline className='gempba-sparkline-line' points={line} vectorEffect='non-scaling-stroke' />}
+        {/* a zero-length line with a round cap: a dot that keeps its size however the graph stretches */}
+        {last && <line className='gempba-sparkline-dot' x1={last.x} y1={last.y} x2={last.x} y2={last.y} vectorEffect='non-scaling-stroke' />}
     </svg>;
 }
 
@@ -35,11 +48,12 @@ export interface MeterBarProps {
     readonly label: string;
 }
 
-/** A thin horizontal gauge. */
+/** A thin horizontal gauge, whose fill slides to each new value. */
 export function MeterBar({ fraction, tone, label }: MeterBarProps): React.ReactElement {
-    const percent = Math.round(Math.min(Math.max(fraction, 0), 1) * 1000) / 10;
-    return <div className={`gempba-meter gempba-tone-${tone}`} role='meter' aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-        <div className='gempba-meter-fill' style={{ width: `${percent}%` }} />
+    const filled = Number.isFinite(fraction) ? Math.min(Math.max(fraction, 0), 1) : 0;
+    return <div className={`gempba-meter gempba-tone-${tone}`} role='meter' aria-label={label} aria-valuemin={0} aria-valuemax={100}
+        aria-valuenow={Math.round(filled * 1000) / 10}>
+        <div className='gempba-meter-fill' style={{ transform: `scaleX(${Math.round(filled * 1000) / 1000})` }} />
     </div>;
 }
 

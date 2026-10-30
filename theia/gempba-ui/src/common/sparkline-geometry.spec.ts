@@ -29,4 +29,9 @@ describe('SparklineGeometry', () => {
     it('draws a single sample at the right edge', () => {
         expect(SparklineGeometry.of([40], { ...box, capacity: 1 }).line).to.equal('100,30');
     });
+
+    it('marks where the newest sample is drawn', () => {
+        expect(SparklineGeometry.of([50, 100, 20], box).last).to.deep.equal({ x: 100, y: 40 });
+        expect(SparklineGeometry.of([], box).last).to.equal(undefined);
+    });
 });

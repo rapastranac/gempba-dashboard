@@ -8,6 +8,8 @@ export interface SparklineGeometry {
     readonly line: string;
     /** The closed area under the line (an SVG path); empty without samples. */
     readonly area: string;
+    /** Where the newest sample is drawn; absent without samples. */
+    readonly last?: { readonly x: number, readonly y: number };
 }
 
 export namespace SparklineGeometry {
@@ -27,7 +29,8 @@ export namespace SparklineGeometry {
         });
         const line = points.map(([x, y]) => `${x},${y}`).join(' ');
         const area = `M${points[0][0]},${height} ` + points.map(([x, y]) => `L${x},${y}`).join(' ') + ` L${points[points.length - 1][0]},${height} Z`;
-        return { line, area };
+        const [lastX, lastY] = points[points.length - 1];
+        return { line, area, last: { x: lastX, y: lastY } };
     }
 }
 
