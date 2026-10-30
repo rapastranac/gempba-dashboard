@@ -27,7 +27,7 @@ function worker(workerId: number, frame: Frame): WorkerSnapshot {
 function node(host: string, ...workers: WorkerSnapshot[]): NodeSnapshot {
     return {
         host, socketCount: 1, physicalCores: 0, logicalCores: 0, hasLiveMemory: false, memTotalBytes: 0, memUsedBytes: 0,
-        sentinelWorkerId: 0, nodeUtilPct: 0,
+        sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct: 0,
         sockets: [{ socketId: 0, physicalCores: 0, logicalCores: 0, cpuIds: [], hasTopology: false, coreUsage: [], workers }]
     };
 }

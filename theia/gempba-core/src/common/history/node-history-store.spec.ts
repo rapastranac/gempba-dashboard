@@ -10,7 +10,7 @@ function oneNode(timestampMillis: number, host: string, hasLiveMemory: boolean, 
         schemaVersion: 1, timestampMillis, elapsedSeconds: 0, structure: StructureKey.empty(),
         nodes: [{
             host, socketCount: 1, physicalCores: 0, logicalCores: 1, hasLiveMemory, memTotalBytes, memUsedBytes,
-            sentinelWorkerId: 0, nodeUtilPct, sockets: []
+            sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct, sockets: []
         }]
     };
 }

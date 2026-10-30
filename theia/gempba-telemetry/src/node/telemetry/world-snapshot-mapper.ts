@@ -182,6 +182,7 @@ export namespace WorldSnapshotMapper {
             memTotalBytes,
             memUsedBytes,
             sentinelWorkerId: topology ? topology.sentinel_worker_id : nodeFrame?.sentinel_worker_id ?? 0,
+            sentinelLocalMillis: nodeFrame?.sentinel_local_ms ?? 0,
             nodeUtilPct,
             sockets
         };

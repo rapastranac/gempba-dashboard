@@ -15,7 +15,7 @@ function snapshot(host: string): WorldSnapshot {
     };
     const node: NodeSnapshot = {
         host, socketCount: 1, physicalCores: 4, logicalCores: 4, hasLiveMemory: true, memTotalBytes: 100, memUsedBytes: 25,
-        sentinelWorkerId: 7, nodeUtilPct: 50,
+        sentinelWorkerId: 7, sentinelLocalMillis: 0, nodeUtilPct: 50,
         sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 4, cpuIds: [0, 1, 2, 3], hasTopology: true, coreUsage: [], workers: [worker] }]
     };
     return { ...WorldSnapshot.empty(), timestampMillis: 1, nodes: [node] };

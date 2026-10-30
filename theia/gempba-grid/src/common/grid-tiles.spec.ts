@@ -7,7 +7,7 @@ const GiB = 1024 ** 3;
 function node(host: string, nodeUtilPct: number, live: boolean): NodeSnapshot {
     return {
         host, socketCount: 1, physicalCores: 4, logicalCores: 4, hasLiveMemory: live, memTotalBytes: 16 * GiB,
-        memUsedBytes: 4 * GiB, sentinelWorkerId: 0, nodeUtilPct, sockets: []
+        memUsedBytes: 4 * GiB, sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct, sockets: []
     };
 }
 
