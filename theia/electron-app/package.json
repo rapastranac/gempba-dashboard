@@ -21,6 +21,11 @@
           }
         }
       }
+    },
+    "backend": {
+      "config": {
+        "configurationFolder": ".gempba-dashboard/theia"
+      }
     }
   },
   "dependencies": {
