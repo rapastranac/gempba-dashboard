@@ -20,6 +20,7 @@
     "@theia/core": "1.76.0",
     "@theia/debug": "1.76.0",
     "@theia/file-search": "1.76.0",
+    "@theia/monaco": "1.76.0",
     "@theia/notebook": "1.76.0",
     "@theia/plugin-ext": "1.76.0",
     "@theia/plugin-ext-vscode": "1.76.0",
@@ -31,6 +32,7 @@
   },
   "scripts": {
     "clean": "rimraf lib *.tsbuildinfo",
-    "compile": "tsc -b"
+    "compile": "tsc -b",
+    "test": "mocha \"lib/**/*.spec.js\""
   }
 }
