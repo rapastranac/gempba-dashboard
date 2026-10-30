@@ -2,6 +2,7 @@ import { FrontendApplicationContribution } from '@theia/core/lib/browser/fronten
 import { ServiceConnectionProvider } from '@theia/core/lib/browser/messaging/service-connection-provider';
 import { OpenHandler } from '@theia/core/lib/browser/opener-service';
 import { CommandContribution } from '@theia/core/lib/common/command';
+import { MenuContribution } from '@theia/core/lib/common/menu';
 import { ContainerModule } from '@theia/core/shared/inversify';
 import { NodeHistoryStore } from '@gempba/core';
 import { TELEMETRY_SERVICE_PATH, TelemetryServer } from '../common/telemetry-protocol';
@@ -23,7 +24,9 @@ export default new ContainerModule(bind => {
     bind(TelemetryServiceImpl).toSelf().inSingletonScope();
     bind(TelemetryService).toService(TelemetryServiceImpl);
 
-    bind(CommandContribution).to(TelemetryCommandContribution).inSingletonScope();
+    bind(TelemetryCommandContribution).toSelf().inSingletonScope();
+    bind(CommandContribution).toService(TelemetryCommandContribution);
+    bind(MenuContribution).toService(TelemetryCommandContribution);
     bind(FrontendApplicationContribution).to(TelemetryStatusBarContribution).inSingletonScope();
     bind(OpenHandler).to(NodeLinkFallbackOpener).inSingletonScope();
 });
