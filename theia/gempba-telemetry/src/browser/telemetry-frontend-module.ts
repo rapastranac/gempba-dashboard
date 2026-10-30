@@ -4,9 +4,9 @@ import { OpenHandler } from '@theia/core/lib/browser/opener-service';
 import { CommandContribution } from '@theia/core/lib/common/command';
 import { MenuContribution } from '@theia/core/lib/common/menu';
 import { ContainerModule } from '@theia/core/shared/inversify';
-import { NodeHistoryStore } from '@gempba/core';
+import { NodeHistoryStore, WorkerHistoryStore } from '@gempba/core';
 import { TELEMETRY_SERVICE_PATH, TelemetryServer } from '../common/telemetry-protocol';
-import { NodeHistoryService, TelemetryService } from '../common/telemetry-service';
+import { NodeHistoryService, TelemetryService, WorkerHistoryService } from '../common/telemetry-service';
 import { NodeLinkFallbackOpener } from './node-link-fallback-opener';
 import { TelemetryCommandContribution } from './telemetry-command-contribution';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
@@ -21,6 +21,8 @@ export default new ContainerModule(bind => {
 
     bind(NodeHistoryStore).toDynamicValue(() => new NodeHistoryStore()).inSingletonScope();
     bind(NodeHistoryService).toService(NodeHistoryStore);
+    bind(WorkerHistoryStore).toDynamicValue(() => new WorkerHistoryStore()).inSingletonScope();
+    bind(WorkerHistoryService).toService(WorkerHistoryStore);
     bind(TelemetryServiceImpl).toSelf().inSingletonScope();
     bind(TelemetryService).toService(TelemetryServiceImpl);
 
