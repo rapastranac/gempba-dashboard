@@ -12,6 +12,9 @@
     {
       "frontend": "lib/browser/shell-frontend-module",
       "electronMain": "lib/electron-main/shell-electron-main-module"
+    },
+    {
+      "frontendElectron": "lib/electron-browser/shell-electron-frontend-module"
     }
   ],
   "dependencies": {
