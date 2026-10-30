@@ -1,24 +1,42 @@
 import '@theia/core/shared/reflect-metadata';
 import { expect } from 'chai';
+import { Emitter } from '@theia/core/lib/common/event';
 import { Container } from '@theia/core/shared/inversify';
-import { ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, SessionSpec, TargetSpec, WorkerHistoryStore, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import {
+    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, WorkerSnapshot, WorldSnapshot
+} from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { TelemetryService } from '../common/telemetry-service';
+import { RateSettings } from './rate-settings';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
 import { TelemetryServiceImpl } from './telemetry-service-impl';
 
-function snapshot(host: string): WorldSnapshot {
+/** One node "h" whose worker 7 sent frame `seqNo` at `millis`, with a node frame its sentinel took at `millis`. */
+function snapshot(host: string, seqNo = 1, millis = 0): WorldSnapshot {
     const worker: WorkerSnapshot = {
-        workerId: 7, seqNo: 1, localMillis: 0, pid: 0, sentinel: true, allowedCpuIds: [], tasksLocalTotal: 0, tasksRunning: 0,
+        workerId: 7, seqNo, localMillis: millis, pid: 0, sentinel: true, allowedCpuIds: [], tasksLocalTotal: 0, tasksRunning: 0,
         tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0, cpuPct: 90, rssBytes: 0, threads: 1,
         elapsedSeconds: 0, peers: []
     };
     const node: NodeSnapshot = {
         host, socketCount: 1, physicalCores: 4, logicalCores: 4, hasLiveMemory: true, memTotalBytes: 100, memUsedBytes: 25,
-        sentinelWorkerId: 7, sentinelLocalMillis: 0, nodeUtilPct: 50,
+        sentinelWorkerId: 7, sentinelLocalMillis: millis, nodeUtilPct: 50,
         sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 4, cpuIds: [0, 1, 2, 3], hasTopology: true, coreUsage: [], workers: [worker] }]
     };
     return { ...WorldSnapshot.empty(), timestampMillis: 1, nodes: [node] };
+}
+
+/** Rate settings held in memory, announcing each saved change as the preferences do. */
+class FakeRateSettings implements RateSettings {
+    readonly ready = Promise.resolve();
+    rates = RefreshRates.defaults();
+    protected readonly onChangeEmitter = new Emitter<RefreshRates>();
+    readonly onChange = this.onChangeEmitter.event;
+
+    async set(rates: Partial<RefreshRates>): Promise<void> {
+        this.rates = { ...this.rates, ...rates };
+        this.onChangeEmitter.fire(this.rates);
+    }
 }
 
 describe('TelemetryServiceImpl', () => {
@@ -27,6 +45,7 @@ describe('TelemetryServiceImpl', () => {
     let receiver: TelemetryServerClientImpl;
     let nodeHistory: NodeHistoryStore;
     let workerHistory: WorkerHistoryStore;
+    let settings: FakeRateSettings;
     let service: TelemetryService;
 
     beforeEach(() => {
@@ -46,16 +65,19 @@ describe('TelemetryServiceImpl', () => {
         container.bind(TelemetryServerClientImpl).toSelf().inSingletonScope();
         container.bind(NodeHistoryStore).toConstantValue(new NodeHistoryStore());
         container.bind(WorkerHistoryStore).toConstantValue(new WorkerHistoryStore());
+        container.bind(RateSettings).toConstantValue(new FakeRateSettings());
         container.bind(TelemetryServiceImpl).toSelf().inSingletonScope();
         container.bind(TelemetryService).toService(TelemetryServiceImpl);
         receiver = container.get(TelemetryServerClientImpl);
         nodeHistory = container.get(NodeHistoryStore);
         workerHistory = container.get(WorkerHistoryStore);
+        settings = container.get<FakeRateSettings>(RateSettings);
         service = container.get(TelemetryService);
     });
 
-    it('starts disconnected with no snapshot', () => {
+    it('starts disconnected with no snapshot, at the default rates', () => {
         expect([service.state, service.snapshot, service.status]).to.deep.equal([ConnectionState.DISCONNECTED, undefined, '']);
+        expect([service.rates, service.observedRates]).to.deep.equal([RefreshRates.defaults(), { workerIntervalMs: undefined, nodeIntervalMs: undefined }]);
     });
 
     it('records the histories before announcing a snapshot', () => {
@@ -75,20 +97,43 @@ describe('TelemetryServiceImpl', () => {
         expect([service.state, service.status]).to.deep.equal([ConnectionState.LISTENING, 'connected to 127.0.0.1:9000']);
     });
 
-    it('a new target clears the snapshot and the histories', async () => {
-        receiver.onSnapshot(snapshot('h'));
+    it('sends the rates as set before every Listen and Connect', async () => {
+        settings.rates = { workerIntervalMs: 250, nodeIntervalMs: 2000 };
+        await service.connect(SessionSpec.local());
+        await service.listen(TargetSpec.of(undefined, 9001));
+        expect(calls).to.deep.equal(['rates 250 2000', 'connect LOCAL', 'rates 250 2000', 'listen 9001']);
+    });
+
+    it('saves new rates as settings, then announces and sends them', async () => {
+        const announced: RefreshRates[] = [];
+        service.onRatesChange(rates => announced.push(rates));
+        await service.setRates({ workerIntervalMs: 100 });
+        expect(settings.rates).to.deep.equal({ workerIntervalMs: 100, nodeIntervalMs: 1000 });
+        expect(service.rates).to.deep.equal(settings.rates);
+        expect(announced).to.deep.equal([settings.rates]);
+        expect(calls).to.deep.equal(['rates 100 1000']);
+    });
+
+    it('observes how often frames arrive, on the senders\' own clocks', () => {
+        receiver.onSnapshot(snapshot('h', 1, 10_000));
+        receiver.onSnapshot(snapshot('h', 1, 10_000));
+        receiver.onSnapshot(snapshot('h', 2, 10_250));
+        expect(service.observedRates).to.deep.equal({ workerIntervalMs: 250, nodeIntervalMs: 250 });
+    });
+
+    it('a new target clears the snapshot, the histories and the observed rates', async () => {
+        receiver.onSnapshot(snapshot('h', 1, 0));
+        receiver.onSnapshot(snapshot('h', 2, 500));
         await service.listen(TargetSpec.of(undefined, 9001));
         expect(service.snapshot).to.equal(undefined);
         expect([nodeHistory.hosts(), workerHistory.workerIds()]).to.deep.equal([[], []]);
-        expect(calls).to.deep.equal(['listen 9001']);
+        expect(service.observedRates).to.deep.equal({ workerIntervalMs: undefined, nodeIntervalMs: undefined });
     });
 
-    it('forwards the controls to the backend', async () => {
-        await service.connect(SessionSpec.local());
-        await service.pushRates(100, 1000);
+    it('forwards the other controls to the backend', async () => {
         await service.stop();
         await service.disconnect();
         expect(await service.availableModes()).to.deep.equal([ConnectionMode.LOCAL]);
-        expect(calls).to.deep.equal(['connect LOCAL', 'rates 100 1000', 'stop', 'disconnect']);
+        expect(calls).to.deep.equal(['stop', 'disconnect']);
     });
 });
