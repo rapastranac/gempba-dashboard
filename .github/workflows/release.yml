@@ -14,6 +14,7 @@ on:
       - .github/workflows/release.yml
       - .github/actions/setup-node-theia/**
       - configs/smoke-test.js
+      - configs/fixtures/plugins/**
       - theia/electron-app/electron-builder.yml
       - theia/electron-app/package.json
       - theia/electron-app/resources/**

@@ -1,12 +1,50 @@
-// Boots a packaged app and fails unless it reaches the GemPBA Dashboard shell without a single frontend error.
+// Boots a packaged app and fails unless it reaches the GemPBA Dashboard shell without a single frontend error, shows
+// only the dashboard's menus, side-bar views and status-bar items, and loads a plugin: the fixture theme in
+// fixtures/plugins, deployed through THEIA_DEFAULT_PLUGINS, must register its color theme.
 // Usage: node configs/smoke-test.js <the packaged app's executable>
 // The release workflow runs it on every OS after packaging; on Linux, under xvfb-run.
 const { spawn, execSync } = require('child_process');
+const path = require('path');
 
 const PORT = 9333;
 const START_TIMEOUT_MS = 120_000;
 const SETTLE_MS = 8_000;
+const PLUGIN_TIMEOUT_MS = 30_000;
 const TITLE = 'GemPBA Dashboard';
+const FIXTURE_PLUGINS = path.join(__dirname, 'fixtures', 'plugins');
+const FIXTURE_THEME = 'gempba-smoke-theme';
+// Node's deprecation warnings about a dependency's use of its API: Theia relays the plugin host's stderr to the
+// console as errors, but they are not the app failing.
+const NODE_DEPRECATION = /\(node:\d+\) \[DEP\d+\] DeprecationWarning:/;
+// What the dashboard shows. The menu bar is in the page only with Theia's own title bar; with a native one (macOS),
+// the menus are the OS's and are not checked.
+const MENUS = ['File', 'Edit', 'View', 'Help'];
+const SIDE_BAR_VIEWS = ['gempba-connection', 'vsx-extensions-view-container'];
+const STATUS_BAR_ITEMS = ['status-bar-gempba-telemetry-status', 'status-bar-theia-notification-center'];
+/** Runs in the page: what the shell shows, and the color themes registered (Theia caches each one in IndexedDB). */
+async function inventory() {
+    const tabs = selector => [...document.querySelectorAll(`${selector} .lm-TabBar-tab`)]
+        .map(tab => tab.id.replace(/^shell-tab-/, ''))
+        .filter(id => !id.endsWith('-hidden'));
+    const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('theia-monaco');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    const themes = !db.objectStoreNames.contains('themes') ? [] : await new Promise(resolve => {
+        const request = db.transaction('themes').objectStore('themes').getAllKeys();
+        request.onsuccess = () => resolve(request.result);
+    });
+    db.close();
+    return {
+        menus: [...document.querySelectorAll('.lm-MenuBar-item')].map(item => item.innerText.trim()),
+        left: tabs('.theia-app-left'),
+        right: tabs('.theia-app-right'),
+        bottom: tabs('#theia-bottom-content-panel'),
+        statusBar: [...document.querySelectorAll('#theia-statusBar .element')].map(element => element.id),
+        themes
+    };
+}
 // The shell counts as up once GemPBA's own views have rendered in it. Not the window title: on macOS, as in VS Code,
 // Theia leaves the app name out of it, so it reads just the active view, e.g. "Grid".
 const STATE = '({ shell: !!document.querySelector(\'#theia-app-shell\'), gempba: !!document.querySelector(\'.gempba-grid, .gempba-connection-form\'), '
@@ -64,14 +102,53 @@ async function attach(page, errors) {
         if (message.method === 'Runtime.exceptionThrown') {
             errors.push(message.params.exceptionDetails.exception?.description ?? message.params.exceptionDetails.text);
         } else if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
-            errors.push(message.params.args.map(arg => arg.value ?? arg.description).join(' '));
-        } else if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error') {
+            const text = message.params.args.map(arg => arg.value ?? arg.description).join(' ');
+            if (!NODE_DEPRECATION.test(text)) {
+                errors.push(text);
+            }
+        } else if (message.method === 'Log.entryAdded' && message.params.entry.level === 'error' && !NODE_DEPRECATION.test(message.params.entry.text)) {
             errors.push(`${message.params.entry.text} (${message.params.entry.url ?? message.params.entry.source})`);
         }
     });
     await send('Runtime.enable');
     await send('Log.enable');
     return { send, close: () => socket.close() };
+}
+
+/** Compares what the shell shows with what the dashboard should, giving the fixture plugin time to register its theme. */
+async function checkShell(session) {
+    const deadline = Date.now() + PLUGIN_TIMEOUT_MS;
+    let shown;
+    while (Date.now() < deadline) {
+        const reply = await session.send('Runtime.evaluate', { expression: `(${inventory})()`, returnByValue: true, awaitPromise: true });
+        shown = reply.result?.result?.value;
+        if (shown?.themes.includes(FIXTURE_THEME)) {
+            break;
+        }
+        await wait(1000);
+    }
+    if (!shown) {
+        return ['could not read what the shell shows'];
+    }
+    const sorted = list => JSON.stringify([...list].sort());
+    const problems = [];
+    if (shown.menus.length > 0 && JSON.stringify(shown.menus) !== JSON.stringify(MENUS)) {
+        problems.push(`the menus are ${JSON.stringify(shown.menus)}, not ${JSON.stringify(MENUS)}`);
+    }
+    if (sorted(shown.left) !== sorted(SIDE_BAR_VIEWS)) {
+        problems.push(`the side bar shows ${JSON.stringify(shown.left)}, not ${JSON.stringify(SIDE_BAR_VIEWS)}`);
+    }
+    if (shown.right.length > 0 || shown.bottom.length > 0) {
+        problems.push(`views outside the left side bar: ${JSON.stringify([...shown.right, ...shown.bottom])}`);
+    }
+    const unexpected = shown.statusBar.filter(id => !STATUS_BAR_ITEMS.includes(id));
+    if (unexpected.length > 0) {
+        problems.push(`unexpected status-bar items: ${unexpected.join(', ')}`);
+    }
+    if (!shown.themes.includes(FIXTURE_THEME)) {
+        problems.push(`the fixture plugin did not register its theme ${FIXTURE_THEME} within ${PLUGIN_TIMEOUT_MS / 1000} s`);
+    }
+    return problems;
 }
 
 function stop(app) {
@@ -95,8 +172,10 @@ async function main() {
     if (process.platform === 'linux') {
         args.push('--no-sandbox');
     }
-    const app = spawn(executable, args, { stdio: 'inherit', detached: process.platform !== 'win32' });
+    const env = { ...process.env, THEIA_DEFAULT_PLUGINS: `local-dir:${FIXTURE_PLUGINS}` };
+    const app = spawn(executable, args, { stdio: 'inherit', detached: process.platform !== 'win32', env });
     const errors = [];
+    const problems = [];
     const deadline = Date.now() + START_TIMEOUT_MS;
     let up = false;
     let last = 'no window opened';
@@ -135,6 +214,7 @@ async function main() {
         }
         if (up) {
             await wait(SETTLE_MS);
+            problems.push(...await checkShell(session));
         }
         session?.close();
     } finally {
@@ -149,10 +229,13 @@ async function main() {
     for (const error of errors) {
         console.error(`FAIL: frontend error: ${error}`);
     }
-    if (!up || errors.length > 0) {
+    for (const problem of problems) {
+        console.error(`FAIL: ${problem}`);
+    }
+    if (!up || errors.length > 0 || problems.length > 0) {
         process.exit(1);
     }
-    console.log(`OK: the ${TITLE} shell is up with no frontend errors`);
+    console.log(`OK: the ${TITLE} shell is up with no frontend errors, only the dashboard's views, and the fixture plugin's theme`);
 }
 
 main().catch(error => {

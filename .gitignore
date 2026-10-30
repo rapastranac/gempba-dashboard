@@ -107,5 +107,6 @@ theia/electron-app/dist/
 *.tsbuildinfo
 .eslintcache
 plugins/
+!configs/fixtures/plugins/
 theia/*/esbuild.mjs
 theia/*/gen-esbuild*.mjs
