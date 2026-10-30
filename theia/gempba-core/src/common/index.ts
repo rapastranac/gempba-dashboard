@@ -11,6 +11,7 @@ export * from './format/durations';
 export * from './format/number-text';
 export * from './format/peers';
 export * from './format/rates';
+export * from './history/counter-rate';
 export * from './history/node-history-store';
 export * from './history/node-sample';
 export * from './history/node-series';
