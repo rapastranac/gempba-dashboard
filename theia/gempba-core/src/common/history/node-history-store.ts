@@ -3,7 +3,7 @@ import { NodeSample } from './node-sample';
 import { NodeSeries } from './node-series';
 
 /**
- * Per-node rolling utilization history for the grid sparklines; the telemetry stream itself keeps none.
+ * Per-node rolling utilization and memory history for the grid sparklines; the telemetry stream itself keeps none.
  * A sample is appended only for nodes carrying live memory (their sentinel emitted a node frame).
  */
 export class NodeHistoryStore {
@@ -46,6 +46,7 @@ export class NodeHistoryStore {
         const last = samples[samples.length - 1];
         return {
             cpu: samples.map(sample => sample.cpuPct),
+            mem: samples.map(sample => sample.memUsedBytes),
             cpuLatest: last.cpuPct,
             memUsedLatest: last.memUsedBytes,
             memTotalLatest: last.memTotalBytes

@@ -53,7 +53,7 @@ describe('CardsText', () => {
         expect(rows(live).get('CPU')).to.equal('50.0 % of its allocated cores');
         expect(rows(live).get('Sentinel')).to.equal('Worker 0');
         // Worker frames come more often than node frames: a snapshot without one keeps the history's last memory and its CPU.
-        const history: NodeSeries = { cpu: [50], cpuLatest: 50, memUsedLatest: 6 * GiB, memTotalLatest: 16 * GiB };
+        const history: NodeSeries = { cpu: [50], mem: [6 * GiB], cpuLatest: 50, memUsedLatest: 6 * GiB, memTotalLatest: 16 * GiB };
         const between = rows(CardsText.nodeDetails(node({ hasLiveMemory: false }), history));
         expect(between.get('Memory')).to.equal('6.0 GB used of 16.0 GB');
         expect(between.get('CPU')).to.equal('50.0 % of its allocated cores');
