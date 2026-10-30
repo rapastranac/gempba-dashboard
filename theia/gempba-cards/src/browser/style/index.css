@@ -24,14 +24,78 @@
     color: var(--theia-descriptionForeground);
 }
 
-.gempba-cards-peers {
-    display: inline-flex;
-    align-items: baseline;
-    flex-wrap: wrap;
+/* The live instrument panel; the container query stacks it in a narrow pane. */
+.gempba-cards-panel {
+    container-type: inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--theia-ui-padding) * 3);
+}
+
+.gempba-cards-details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
     gap: calc(var(--theia-ui-padding) * 2);
 }
 
-.gempba-cards-peers .theia-button {
+.gempba-cards-heroes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--theia-ui-padding) * 3) calc(var(--theia-ui-padding) * 6);
+}
+
+.gempba-cards-charts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: calc(var(--theia-ui-padding) * 3);
+}
+
+/* three charts side by side once they fit, else one per row: never two and a gap */
+@container (min-width: 640px) {
+    .gempba-cards-charts {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+.gempba-cards-latest {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--theia-gempba-hero-foreground);
+}
+
+.gempba-cards-bar {
+    display: grid;
+    grid-template-columns: minmax(80px, 30%) 1fr auto;
+    align-items: center;
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-cards-bar-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gempba-cards-bar-value {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--theia-descriptionForeground);
+}
+
+@container (max-width: 420px) {
+    .gempba-cards-bar {
+        grid-template-columns: 1fr auto;
+    }
+
+    .gempba-cards-bar .gempba-meter {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+}
+
+.gempba-cards-view-all.theia-button {
     margin: 0;
     min-width: 0;
     padding: 0 calc(var(--theia-ui-padding) * 2);
