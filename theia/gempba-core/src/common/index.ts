@@ -3,6 +3,7 @@ export * from './config/connection-mode';
 export * from './config/connection-state';
 export * from './config/dashboard-settings';
 export * from './config/refresh-interval';
+export * from './config/refresh-rates';
 export * from './config/session-spec';
 export * from './config/target-spec';
 export * from './format/bytes';
