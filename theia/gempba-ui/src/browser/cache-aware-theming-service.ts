@@ -10,7 +10,7 @@ import { StaleThemes } from '../common/stale-themes';
  * which themes were registered again this session, so that the themes of uninstalled plugins can be dropped.
  */
 @injectable()
-export class StaleThemeAwareThemingService extends MonacoThemingService {
+export class CacheAwareThemingService extends MonacoThemingService {
 
     protected readonly restored = new Map<string, Disposable>();
     protected readonly registered = new Set<string>();

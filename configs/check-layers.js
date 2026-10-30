@@ -10,7 +10,7 @@ const ALLOWED = {
     '@gempba/core': [],
     '@gempba/telemetry': ['@gempba/core'],
     '@gempba/shell': [],
-    '@gempba/plugins': ['@gempba/shell'],
+    '@gempba/plugins': ['@gempba/shell', '@gempba/ui'],
     '@gempba/ui': [],
     '@gempba/electron-app': '*'
 };
