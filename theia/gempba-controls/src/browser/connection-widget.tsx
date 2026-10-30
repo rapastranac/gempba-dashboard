@@ -9,6 +9,7 @@ import { ConnectionMode, ConnectionState, DashboardSettings, RefreshInterval, Re
 import { TelemetryService } from '@gempba/telemetry/lib/common';
 import { RememberedSettings } from '../common/remembered-settings';
 import { SettingsServer } from '../common/settings-protocol';
+import { RememberedRatesMove } from './remembered-rates-move';
 
 /** The arrows of a rate field move by this much; gempba itself takes any value between its bounds. */
 const RATE_STEP_MS = 50;
@@ -45,6 +46,7 @@ export class ConnectionWidget extends ReactWidget {
     @inject(SettingsServer) protected readonly settingsServer: SettingsServer;
     @inject(FileDialogService) protected readonly fileDialog: FileDialogService;
     @inject(MessageService) protected readonly messages: MessageService;
+    @inject(RememberedRatesMove) protected readonly ratesMove: RememberedRatesMove;
 
     protected settings = DashboardSettings.defaults();
     protected modes: ConnectionMode[] = [ConnectionMode.LOCAL];
@@ -70,6 +72,7 @@ export class ConnectionWidget extends ReactWidget {
     }
 
     protected async restore(): Promise<void> {
+        await this.ratesMove.moved();
         const [settings, modes] = await Promise.all([this.settingsServer.load(), this.telemetry.availableModes()]);
         this.settings = settings;
         this.modes = modes;

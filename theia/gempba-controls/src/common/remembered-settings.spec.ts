@@ -39,4 +39,21 @@ describe('RememberedSettings', () => {
         const rates = RememberedSettings.withRates(defaults, 250, 2000);
         expect([rates.workerIntervalMs, rates.nodeIntervalMs]).to.deep.equal([250, 2000]);
     });
+
+    it('moves the rates changed from their defaults over to the hub', () => {
+        expect(RememberedSettings.ratesToMove(RememberedSettings.withRates(defaults, 250, 2000))).to.deep.equal({ workerIntervalMs: 250, nodeIntervalMs: 2000 });
+        expect(RememberedSettings.ratesToMove(RememberedSettings.withRates(defaults, 250, 1000))).to.deep.equal({ workerIntervalMs: 250 });
+        expect(RememberedSettings.ratesToMove(RememberedSettings.withRates(defaults, 500, 3000))).to.deep.equal({ nodeIntervalMs: 3000 });
+    });
+
+    it('moves a hand-edited rate within gempba\'s bounds', () => {
+        expect(RememberedSettings.ratesToMove(RememberedSettings.withRates(defaults, 10, 10_000_000))).to.deep.equal({ workerIntervalMs: 50, nodeIntervalMs: 600_000 });
+    });
+
+    it('moves nothing from default rates, so moved rates never move twice', () => {
+        expect(RememberedSettings.ratesToMove(defaults)).to.deep.equal({});
+        const moved = RememberedSettings.withoutRates(RememberedSettings.withRates(defaults, 250, 2000));
+        expect(RememberedSettings.ratesToMove(moved)).to.deep.equal({});
+        expect([moved.workerIntervalMs, moved.nodeIntervalMs]).to.deep.equal([defaults.workerIntervalMs, defaults.nodeIntervalMs]);
+    });
 });
