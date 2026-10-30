@@ -36,7 +36,7 @@ describe('CardsText', () => {
         expect(CardsText.socketCaption(socket({ workers: [worker()] }))).to.equal('1 worker');
         expect(CardsText.workerTitle(worker())).to.equal('Worker 3');
         expect(CardsText.workerTitle(worker({ workerId: 0, sentinel: true }))).to.equal('Worker 0 · sentinel');
-        expect(CardsText.workerCaption(worker())).to.equal('87.3 % CPU · 256.0 MB');
+        expect(CardsText.workerCaption(worker(), 4)).to.equal('22% CPU · 256.0 MB');
     });
 
     it('subtitles a worker with its process, frame and node', () => {

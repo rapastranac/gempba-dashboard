@@ -30,9 +30,9 @@ export namespace CardsText {
         return worker.sentinel ? `Worker ${worker.workerId} · sentinel` : `Worker ${worker.workerId}`;
     }
 
-    /** The short caption of a worker's tree row, e.g. `87.3 % CPU · 256.0 MB`. */
-    export function workerCaption(worker: WorkerSnapshot): string {
-        return `${NumberText.fixed(worker.cpuPct, 1)} % CPU · ${Bytes.human(worker.rssBytes)}`;
+    /** The short caption of a worker's tree row, its CPU as a share of the cores it may use, as its meter shows: `22% CPU · 256.0 MB`. */
+    export function workerCaption(worker: WorkerSnapshot, accessibleCores: number): string {
+        return `${NumberText.fixed(worker.cpuPct / Math.max(accessibleCores, 1), 0)}% CPU · ${Bytes.human(worker.rssBytes)}`;
     }
 
     /** e.g. `PID 4100 · frame #17 · on alpha`. */

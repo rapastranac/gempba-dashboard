@@ -9,6 +9,40 @@
     margin-right: var(--theia-ui-padding);
 }
 
+/* In a narrow tree a row's caption gives way before its name, which is what finds the row. */
+.gempba-cards .theia-TreeNodeSegmentGrow {
+    flex-shrink: 0;
+}
+
+.gempba-cards .theia-TreeNodeInfo {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* A tree row's CPU, at a glance, between its name and its caption. */
+.gempba-cards-row-meter {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    width: 40px;
+    margin-left: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-cards-row-meter .gempba-meter {
+    width: 100%;
+    height: 4px;
+}
+
+/* On a selected row the meter takes the row's text color, which the selection keeps readable. */
+.theia-TreeNode.theia-mod-selected .gempba-cards-row-meter .gempba-meter {
+    background: color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.theia-TreeNode.theia-mod-selected .gempba-cards-row-meter .gempba-meter-fill {
+    background: currentColor;
+}
+
 .gempba-cards-details {
     padding: calc(var(--theia-ui-padding) * 3) calc(var(--theia-ui-padding) * 4);
 }
