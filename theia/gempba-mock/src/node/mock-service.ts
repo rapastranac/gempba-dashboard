@@ -33,7 +33,8 @@ export class MockService implements MockServer {
     protected warnings: string[] = [];
     protected ended = false;
 
-    constructor(protected readonly home: string = os.homedir()) { }
+    /** `remember` keeps the configuration last started for the next run; the command line leaves it alone. */
+    constructor(protected readonly home: string = os.homedir(), protected readonly rememberRuns = true) { }
 
     addClient(client: MockClient): Disposable {
         this.clients.add(client);
@@ -203,6 +204,9 @@ export class MockService implements MockServer {
     }
 
     protected remember(config: MockConfig): void {
+        if (!this.rememberRuns) {
+            return;
+        }
         try {
             fs.mkdirSync(path.dirname(this.lastRunFile()), { recursive: true });
             fs.writeFileSync(this.lastRunFile(), JSON.stringify(config, undefined, 2));

@@ -27,6 +27,7 @@
   "scripts": {
     "clean": "rimraf lib *.tsbuildinfo",
     "compile": "tsc -b",
-    "test": "mocha \"lib/**/*.spec.js\""
+    "test": "mocha \"lib/**/*.spec.js\"",
+    "mock": "node lib/node/mock-main.js"
   }
 }

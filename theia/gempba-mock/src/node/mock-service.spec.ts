@@ -72,6 +72,14 @@ describe('MockService', () => {
         expect(lines.at(-1)!.message).to.equal('Stopped');
     });
 
+    it('leaves the last configuration alone when told not to remember runs, as the command line does', async () => {
+        const quiet = new MockService(home, false);
+        await quiet.start(config({ gempbaPort: await freePort() }));
+        await quiet.dispose();
+        expect(fs.existsSync(path.join(home, '.gempba-dashboard', 'mock', MockService.LAST_RUN))).to.equal(false);
+        expect(await quiet.lastConfig()).to.deep.equal(MockConfig.defaults());
+    });
+
     it('refuses what cannot run, and a port already in use', async () => {
         let refused: unknown;
         await service.start(config({ gempbaPort: 0 })).catch(error => refused = error);
