@@ -13,6 +13,7 @@ on:
     paths:
       - .github/workflows/release.yml
       - .github/actions/setup-node-theia/**
+      - configs/build-production.js
       - configs/smoke-test.js
       - configs/fixtures/plugins/**
       - theia/electron-app/electron-builder.yml
