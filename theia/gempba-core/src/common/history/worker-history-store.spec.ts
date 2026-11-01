@@ -78,6 +78,18 @@ describe('WorkerHistoryStore', () => {
         expect([series.cpu, series.tasksPerSecond, series.idlePct]).to.deep.equal([[90, 90, 10, 20], [100, 40], [0, 0]]);
     });
 
+    it('measures tasks over the last 10 s, so a task every few seconds reads a steady rate rather than 0 and spikes', () => {
+        const store = new WorkerHistoryStore();
+        // a frame every 500 ms, a task finished every 3 s
+        for (let frame = 0; frame <= 60; frame++) {
+            const millis = frame * 500;
+            store.update(solo({ seqNo: frame + 1, localMillis: millis, tasks: Math.floor(millis / 3_000) }));
+        }
+        const steady = store.seriesFor(1).tasksPerSecond.slice(20);
+        expect(Math.min(...steady)).to.be.at.least(0.3);
+        expect(Math.max(...steady)).to.be.at.most(0.4);
+    });
+
     it('a counter that went back with a rising sequence number gives no rate', () => {
         const store = new WorkerHistoryStore();
         store.update(solo({ seqNo: 1, localMillis: 0, tasks: 100 }));
@@ -102,8 +114,8 @@ describe('WorkerHistoryStore', () => {
         expect(series.cpu).to.have.lengthOf(WorkerHistoryStore.CAPACITY);
         expect(series.cpu[0]).to.equal(n + 1 - WorkerHistoryStore.CAPACITY);
         expect(series.tasksPerSecond).to.have.lengthOf(WorkerHistoryStore.CAPACITY);
-        // the rate between frames i - 1 and i is i² - (i - 1)² = 2i - 1
-        expect(series.tasksPerSecond[series.tasksPerSecond.length - 1]).to.equal(2 * n - 1);
+        // over the last 10 s, frames n - 10 to n: (n² - (n - 10)²) / 10 = 2n - 10
+        expect(series.tasksPerSecond[series.tasksPerSecond.length - 1]).to.equal(2 * n - 10);
         expect(store.clusterThroughput()).to.have.lengthOf(WorkerHistoryStore.CAPACITY);
     });
 
@@ -121,7 +133,8 @@ describe('WorkerHistoryStore', () => {
         store.update(world(node('a', worker(1, { seqNo: 1, localMillis: 0 }), worker(2, { seqNo: 1, localMillis: 0 }))));
         store.update(world(node('a', worker(1, { seqNo: 2, localMillis: 1_000, tasks: 10 }), worker(2, { seqNo: 2, localMillis: 1_000, tasks: 20 }))));
         store.update(world(node('a', worker(1, { seqNo: 3, localMillis: 2_000, tasks: 50 }), worker(2, { seqNo: 2, localMillis: 1_000, tasks: 20 }))));
-        expect(store.throughputFor('a')).to.deep.equal([30, 60]);
+        // worker 1 over its last 2 s: 50 / 2
+        expect(store.throughputFor('a')).to.deep.equal([30, 45]);
     });
 
     it('a node adds no throughput sample until one of its workers has a rate, nor while none sends a new frame', () => {
