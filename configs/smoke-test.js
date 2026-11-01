@@ -19,6 +19,7 @@ const NODE_DEPRECATION = /\(node:\d+\) \[DEP\d+\] DeprecationWarning:/;
 // What the dashboard shows. The menu bar is in the page only with Theia's own title bar; with a native one (macOS),
 // the menus are the OS's and are not checked.
 const MENUS = ['File', 'Edit', 'View', 'Help'];
+// The development-only Mock panel opens on a fresh layout, so an installer that shipped the mocker fails this.
 const SIDE_BAR_VIEWS = ['gempba-connection', 'vsx-extensions-view-container'];
 const STATUS_BAR_ITEMS = ['status-bar-gempba-telemetry-status', 'status-bar-theia-notification-center'];
 /** Runs in the page: what the shell shows, and the color themes registered (Theia caches each one in IndexedDB). */

@@ -20,7 +20,7 @@
     "start": "npm --workspace @gempba/electron-app run start",
     "watch": "npm --workspace @gempba/electron-app run watch",
     "test": "node configs/check-layers.js && npm run lint && mocha \"configs/*.spec.js\" && npm run compile && npm run test --workspaces --if-present",
-    "mock": "npm run mock -w @gempba/telemetry --"
+    "mock": "npm run mock -w @gempba/mock --"
   },
   "allowScripts": {
     "@parcel/watcher": true,

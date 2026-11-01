@@ -38,6 +38,7 @@
     "@gempba/cards": "2.0.0",
     "@gempba/controls": "2.0.0",
     "@gempba/grid": "2.0.0",
+    "@gempba/mock": "2.0.0",
     "@gempba/plugins": "2.0.0",
     "@gempba/shell": "2.0.0",
     "@gempba/telemetry": "2.0.0",
@@ -47,6 +48,9 @@
     "@theia/monaco": "1.76.0",
     "@theia/preferences": "1.76.0"
   },
+  "gempbaDevExtensions": [
+    "@gempba/mock"
+  ],
   "devDependencies": {
     "@theia/cli": "1.76.0",
     "electron": "42.8.1",
@@ -55,7 +59,7 @@
   "scripts": {
     "clean": "theia clean",
     "build": "theia build --mode development",
-    "package": "theia build --mode production && electron-builder --publish never",
+    "package": "node ../../configs/build-production.js && electron-builder --publish never",
     "rebuild": "theia rebuild:electron --cacheRoot ../..",
     "start": "theia start",
     "watch": "theia build --watch --mode development"

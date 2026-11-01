@@ -16,8 +16,9 @@ directories:
   buildResources: resources
   output: dist
 
-# The backend is bundled into lib/, so node_modules is not shipped: that also keeps the mock emitter and its
-# fixtures, which only the bundle's tests and `npm run mock` use, out of every installer.
+# The backend is bundled into lib/, so node_modules is not shipped: that also keeps the replay emitter's fixtures,
+# which only the specs use, out of every installer. The built-in mocker is left out of the production bundle itself
+# (configs/build-production.js).
 files:
   - lib
   - src-gen
