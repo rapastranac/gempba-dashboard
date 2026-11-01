@@ -1,11 +1,10 @@
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { codicon } from '@theia/core/lib/browser/widgets/widget';
-import { Disposable } from '@theia/core/lib/common/disposable';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import { ConnectionState, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
 import { NodeHistoryService, TelemetryService, WorkerHistoryService } from '@gempba/telemetry/lib/common';
-import { Gauge, HeatStrip, HeroStat, LiveIndicator, MeterBar, Panel, Sparkline } from '@gempba/ui/lib/browser';
+import { Gauge, HeatStrip, HeroStat, LiveIndicator, LivenessWatch, MeterBar, Panel, Sparkline } from '@gempba/ui/lib/browser';
 import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { MotionTiming } from '@gempba/ui/lib/common/motion-timing';
 import { CardsPanel } from '../common/cards-panel';
@@ -18,9 +17,6 @@ interface Shown {
     readonly icon: string;
     readonly worker?: WorkerSnapshot;
 }
-
-/** How often the pane checks whether frames stopped, which no frame announces. */
-const LIVENESS_CHECK_MS = 1000;
 
 /**
  * The picked row of the Cards tree as a live instrument panel beside it: a gauge and headline figures, history
@@ -37,9 +33,7 @@ export class CardsDetailsWidget extends ReactWidget {
 
     protected snapshot: WorldSnapshot | undefined;
     protected row: CardsTreeNode | undefined;
-    /** When the latest frame arrived, on this machine's clock. */
-    protected lastFrameAt: number | undefined;
-    protected shownLiveness: Liveness | undefined;
+    protected readonly liveness = new LivenessWatch(this, () => this.streamLiveness(), () => this.update());
 
     protected readonly histories: CardsPanel.Histories = {
         node: host => this.nodeHistory.seriesFor(host),
@@ -52,13 +46,7 @@ export class CardsDetailsWidget extends ReactWidget {
         this.id = CardsDetailsWidget.ID;
         this.addClass('gempba-cards-details');
         this.scrollOptions = { suppressScrollX: true };
-        this.toDispose.push(this.telemetry.onSnapshot(() => this.lastFrameAt = Date.now()));
-        const check = setInterval(() => {
-            if (this.isVisible && this.shownLiveness !== undefined && this.liveness() !== this.shownLiveness) {
-                this.update();
-            }
-        }, LIVENESS_CHECK_MS);
-        this.toDispose.push(Disposable.create(() => clearInterval(check)));
+        this.toDispose.push(this.liveness);
     }
 
     showDetails(snapshot: WorldSnapshot | undefined, row: CardsTreeNode | undefined): void {
@@ -70,11 +58,10 @@ export class CardsDetailsWidget extends ReactWidget {
     protected render(): React.ReactNode {
         const shown = this.find();
         if (!shown) {
-            this.shownLiveness = undefined;
+            this.liveness.none();
             return <p className='gempba-cards-empty'>Pick a node, socket or worker to see its details.</p>;
         }
         const { panel, icon, worker } = shown;
-        this.shownLiveness = this.liveness();
         return <div className='gempba-cards-panel' style={{ '--gempba-motion-duration': `${this.motionMs()}ms` } as React.CSSProperties}>
             <header className='gempba-cards-details-header'>
                 <div>
@@ -84,7 +71,7 @@ export class CardsDetailsWidget extends ReactWidget {
                     </div>
                     <div className='gempba-cards-details-subtitle'>{panel.subtitle}</div>
                 </div>
-                <LiveIndicator liveness={this.shownLiveness} />
+                <LiveIndicator liveness={this.liveness.drawn(this.streamLiveness())} />
             </header>
             <div className='gempba-cards-heroes'>
                 {panel.gauge && <Gauge {...panel.gauge} />}
@@ -128,10 +115,10 @@ export class CardsDetailsWidget extends ReactWidget {
         new PeersDialog(worker, this.snapshot).open();
     }
 
-    protected liveness(): Liveness {
+    protected streamLiveness(): Liveness {
         return Liveness.of({
             streaming: this.telemetry.state === ConnectionState.LISTENING,
-            lastFrameAt: this.lastFrameAt,
+            lastFrameAt: this.telemetry.lastFrameAt,
             now: Date.now(),
             intervalMs: this.telemetry.rates.workerIntervalMs
         });
