@@ -5,7 +5,8 @@ import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import { LiveTelemetryView } from '@gempba/telemetry/lib/browser';
-import { NodeHistoryService, NodeLink, NodeSelection, TelemetryService } from '@gempba/telemetry/lib/common';
+import { ConnectionState } from '@gempba/core';
+import { NodeHistoryService, NodeLink, NodeSelection, TelemetryService, WorkerHistoryService } from '@gempba/telemetry/lib/common';
 import { MeterBar, Sparkline, Tile, TileGrid, VisibleRefresh } from '@gempba/ui/lib/browser';
 import { GridTiles } from '../common/grid-tiles';
 
@@ -24,9 +25,19 @@ export class GridWidget extends ReactWidget {
     static readonly LABEL = 'Grid';
 
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
-    @inject(NodeHistoryService) protected readonly history: NodeHistoryService;
+    @inject(NodeHistoryService) protected readonly nodeHistory: NodeHistoryService;
+    @inject(WorkerHistoryService) protected readonly workerHistory: WorkerHistoryService;
     @inject(SelectionService) protected readonly selection: SelectionService;
     @inject(OpenerService) protected readonly openers: OpenerService;
+
+    protected readonly sources: GridTiles.Sources = {
+        node: host => this.nodeHistory.seriesFor(host),
+        throughput: host => this.workerHistory.throughputFor(host),
+        clusterThroughput: () => this.workerHistory.clusterThroughput(),
+        worker: workerId => this.workerHistory.seriesFor(workerId),
+        nodeFrameAt: host => this.telemetry.nodeFrameAt(host),
+        lastFrameAt: () => this.telemetry.lastFrameAt
+    };
 
     @postConstruct()
     protected init(): void {
@@ -48,7 +59,7 @@ export class GridWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
-        const tiles = GridTiles.of(this.telemetry.snapshot, this.history);
+        const tiles = GridTiles.of(this.telemetry.snapshot, this.sources, this.clock());
         if (tiles.length === 0) {
             return <p className='gempba-grid-empty'>No nodes yet. Listen to a gempba center to see one tile per node here.</p>;
         }
@@ -59,10 +70,14 @@ export class GridWidget extends ReactWidget {
                 selected={tile.host === selectedHost} onSelect={() => this.selection.selection = NodeSelection.of(tile.host)}
                 onOpen={() => this.openNode(tile.host)}>
                 <Sparkline values={tile.cpuHistory} max={100} capacity={GridTiles.HISTORY_CAPACITY} tone='cpu' label={`CPU history of ${tile.host}`} />
-                <span className='gempba-tile-caption'>{tile.memoryText}</span>
-                <MeterBar fraction={tile.memoryFraction} tone='memory' label={`Memory of ${tile.host}`} />
+                <span className='gempba-tile-caption'>{tile.memory ? `Memory ${tile.memory.value} ${tile.memory.unit} ${tile.memory.detail}` : 'Memory —'}</span>
+                <MeterBar fraction={tile.memory?.meter ?? 0} tone='memory' label={`Memory of ${tile.host}`} />
             </Tile>)}
         </TileGrid>;
+    }
+
+    protected clock(): GridTiles.Clock {
+        return { streaming: this.telemetry.state === ConnectionState.LISTENING, now: Date.now(), intervalMs: this.telemetry.rates.workerIntervalMs };
     }
 
     /** Opens the node in whichever view registered for node links; with none, the hub's fallback opens nothing. */
