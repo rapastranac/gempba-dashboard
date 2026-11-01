@@ -17,14 +17,14 @@ import { CardsWidget } from './cards-widget';
 
 /**
  * Theia's tree services with our tree and tree widget (no search, no multi-select, our own selection
- * publishing), and the details pane beside them in Theia's split widget, which we build by hand because it is
+ * publishing, rows that expand only from their chevron), and the details pane beside them in Theia's split widget, which we build by hand because it is
  * not a DI class.
  */
 function createCardsWidget(parent: interfaces.Container): CardsWidget {
     const child = createTreeContainer(parent, {
         tree: CardsTree,
         widget: CardsTreeWidget,
-        props: { search: false, multiSelect: false, globalSelection: false }
+        props: { search: false, multiSelect: false, globalSelection: false, expandOnlyOnExpansionToggleClick: true }
     });
     child.bind(CardsDetailsWidget).toSelf();
     return new CardsWidget(child.get(CardsTreeWidget), child.get(CardsTree), child.get(CardsDetailsWidget),
