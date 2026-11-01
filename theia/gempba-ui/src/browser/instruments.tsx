@@ -51,10 +51,24 @@ export function HeatStrip({ cells, label }: { readonly cells: readonly HeatCell[
 }
 
 /** A dot and a word for whether frames are arriving: live (the dot pulses), waiting, or not streaming. */
-export function LiveIndicator({ liveness, label }: { readonly liveness: Liveness, readonly label?: string }): React.ReactElement {
+export interface LiveIndicatorProps {
+    readonly liveness: Liveness;
+    /** The words for the state; its usual words by default. */
+    readonly label?: string;
+    /** Only the dot, still steady while live, its words in its tooltip: for one of many, as on every tile. */
+    readonly compact?: boolean;
+}
+
+export function LiveIndicator({ liveness, label, compact }: LiveIndicatorProps): React.ReactElement {
+    const words = label ?? Liveness.label(liveness);
+    if (compact) {
+        return <span className={`gempba-live gempba-live-${liveness} gempba-live-compact`} role='img' aria-label={words} title={words}>
+            <span className='gempba-live-dot' aria-hidden={true} />
+        </span>;
+    }
     return <span className={`gempba-live gempba-live-${liveness}`} role='status'>
         <span className='gempba-live-dot' aria-hidden={true} />
-        {label ?? Liveness.label(liveness)}
+        {words}
     </span>;
 }
 

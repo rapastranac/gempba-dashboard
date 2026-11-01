@@ -38,11 +38,27 @@
     box-shadow: 0 0 0 1px var(--theia-gempba-tile-selectedBorder);
 }
 
+.gempba-tile-selected {
+    background: color-mix(in srgb, var(--theia-gempba-tile-selectedBorder) 12%, var(--theia-gempba-tile-background));
+}
+
 .gempba-tile-header {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
     gap: var(--theia-ui-padding);
+}
+
+.gempba-tile-dimmed .gempba-tile-readout,
+.gempba-tile-dimmed > :not(.gempba-tile-header) {
+    opacity: 0.55;
+}
+
+.gempba-tile-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
 }
 
 .gempba-tile-title {
@@ -414,6 +430,10 @@
 
 .gempba-live-off .gempba-live-dot {
     background: var(--theia-gempba-live-off);
+}
+
+.gempba-live-compact .gempba-live-dot {
+    animation: none;
 }
 
 @keyframes gempba-live-pulse {

@@ -44,6 +44,11 @@ describe('LiveIndicator', () => {
         expect(renderToStaticMarkup(<LiveIndicator liveness='stale' />)).to.contain('gempba-live-stale').and.to.contain('Waiting for frames');
         expect(renderToStaticMarkup(<LiveIndicator liveness='off' label='Stopped' />)).to.contain('gempba-live-off').and.to.contain('Stopped');
     });
+
+    it('shows only the dot when compact, its words in its tooltip', () => {
+        expect(renderToStaticMarkup(<LiveIndicator liveness='stale' compact={true} />)).to.equal('<span class="gempba-live gempba-live-stale gempba-live-compact" '
+            + 'role="img" aria-label="Waiting for frames" title="Waiting for frames"><span class="gempba-live-dot" aria-hidden="true"></span></span>');
+    });
 });
 
 describe('RateReadout', () => {

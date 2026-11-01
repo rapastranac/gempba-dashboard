@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import * as React from '@theia/core/shared/react';
 import { renderToStaticMarkup } from '@theia/core/shared/react-dom/server';
-import { MeterBar, Sparkline } from './components';
+import { MeterBar, Sparkline, Tile } from './components';
 
 describe('Sparkline', () => {
 
@@ -52,5 +52,23 @@ describe('MeterBar', () => {
     it('clamps the fraction, and shows nothing for one that is not a number', () => {
         expect(renderToStaticMarkup(<MeterBar fraction={1.5} tone='cpu' label='CPU' />)).to.contain('scaleX(1)');
         expect(renderToStaticMarkup(<MeterBar fraction={Number.NaN} tone='cpu' label='CPU' />)).to.contain('scaleX(0)');
+    });
+});
+
+describe('Tile', () => {
+
+    it('heads with its title and readout, and marks itself selected', () => {
+        const html = renderToStaticMarkup(<Tile title='alpha' readout='87%' selected={true} />);
+        expect(html).to.contain('class="gempba-tile gempba-tile-selected"').and.to.contain('aria-pressed="true"');
+        expect(html).to.contain('<span class="gempba-tile-name"><span class="gempba-tile-title">alpha</span></span><span class="gempba-tile-readout">87%</span>');
+    });
+
+    it('marks itself dimmed', () => {
+        expect(renderToStaticMarkup(<Tile title='alpha' dimmed={true} />)).to.contain('class="gempba-tile gempba-tile-dimmed"');
+    });
+
+    it('puts a status mark before its title', () => {
+        expect(renderToStaticMarkup(<Tile title='alpha' status={<i className='dot' />} />))
+            .to.contain('<span class="gempba-tile-name"><i class="dot"></i><span class="gempba-tile-title">alpha</span></span>');
     });
 });
