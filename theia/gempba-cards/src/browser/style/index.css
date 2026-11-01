@@ -86,9 +86,9 @@
     gap: calc(var(--theia-ui-padding) * 3);
 }
 
-/* three charts side by side once they fit, else one per row: never two and a gap */
+/* three charts side by side once they fit, else one per row: never two and a gap; a lone chart takes the row */
 @container (min-width: 640px) {
-    .gempba-cards-charts {
+    .gempba-cards-charts:not(:has(> :only-child)) {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 }

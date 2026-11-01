@@ -25,9 +25,9 @@ export namespace CardsText {
         return plural(socket.workers.length, 'worker');
     }
 
-    /** `Worker 3`, or `Worker 0 · sentinel`; the view marks the sentinel with a star icon. */
-    export function workerTitle(worker: WorkerSnapshot): string {
-        return worker.sentinel ? `Worker ${worker.workerId} · sentinel` : `Worker ${worker.workerId}`;
+    /** `Worker 3`, `Worker 3 · sentinel`, or `Worker 0 · center · sentinel`; the view marks the sentinel with a star icon. */
+    export function workerTitle(worker: WorkerSnapshot, center = false): string {
+        return [`Worker ${worker.workerId}`, ...(center ? ['center'] : []), ...(worker.sentinel ? ['sentinel'] : [])].join(' · ');
     }
 
     /** The short caption of a worker's tree row, its CPU as a share of the cores it may use, as its meter shows: `22% CPU · 256.0 MB`. */

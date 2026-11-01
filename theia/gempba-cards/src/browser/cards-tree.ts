@@ -68,7 +68,7 @@ export class CardsTree extends TreeImpl {
                 return node ? node.sockets.map(each => this.socketRow(parent, node, each)) : [];
             case 'socket': {
                 const socket = node?.sockets.find(candidate => candidate.socketId === parent.socketId);
-                return socket ? socket.workers.map(each => this.workerRow(parent, parent.host, socket, each)) : [];
+                return socket ? socket.workers.map(each => this.workerRow(parent, parent.host, socket, each, WorldSnapshot.isCenter(snapshot, each.workerId))) : [];
             }
             default:
                 return [];
@@ -91,9 +91,9 @@ export class CardsTree extends TreeImpl {
             socket.logicalCores > 0 ? busy / socket.logicalCores : undefined);
     }
 
-    protected workerRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, worker: WorkerSnapshot): CardsTreeNode {
+    protected workerRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, worker: WorkerSnapshot, center: boolean): CardsTreeNode {
         const id = CardsTreeNode.workerId(host, worker.workerId);
-        const name = CardsText.workerTitle(worker);
+        const name = CardsText.workerTitle(worker, center);
         const accessible = CardsPanel.accessibleCores(worker, socket);
         const description = CardsText.workerCaption(worker, accessible);
         const icon = codicon(worker.sentinel ? 'star-full' : 'gear');

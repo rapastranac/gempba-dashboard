@@ -141,7 +141,7 @@ export namespace CardsPanel {
         };
     }
 
-    export function forSocket(node: NodeSnapshot, socket: SocketSnapshot): Panel {
+    export function forSocket(world: WorldSnapshot | undefined, node: NodeSnapshot, socket: SocketSnapshot): Panel {
         const busy = NodeUtilization.coresBusy(socket.workers);
         const cores = socket.logicalCores;
         return {
@@ -162,7 +162,8 @@ export namespace CardsPanel {
                     const accessible = accessibleCores(worker, socket);
                     const fraction = worker.cpuPct / (100 * accessible);
                     return {
-                        label: CardsText.workerTitle(worker), fraction, tone: 'cpu', valueText: `${NumberText.fixed(fraction * 100, 0)}% of ${plural(accessible, 'core')}`
+                        label: CardsText.workerTitle(worker, WorldSnapshot.isCenter(world, worker.workerId)), fraction, tone: 'cpu',
+                        valueText: `${NumberText.fixed(fraction * 100, 0)}% of ${plural(accessible, 'core')}`
                     };
                 })
             }],
@@ -175,9 +176,12 @@ export namespace CardsPanel {
         const accessible = accessibleCores(worker, socket);
         const idle = latest(series.idlePct);
         const host = world?.nodes.find(node => node.sockets.some(each => each.workers.some(other => other.workerId === worker.workerId)))?.host;
+        const center = WorldSnapshot.isCenter(world, worker.workerId);
         // gempba's process has one thread beyond its pool, which runs the tasks; a source that counts differently never shows more running than threads
         const pool = Math.max(worker.threads - 1, worker.tasksRunning, 1);
-        const heroes: Hero[] = [
+        const memory: Hero = { label: 'Memory', ...bytesValue(worker.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' };
+        // the center schedules the run and runs no tasks, so it has no task rate, idle time or pool to show
+        const heroes: Hero[] = center ? [memory] : [
             {
                 label: TaskWords.STARTED, ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks',
                 detail: runAverage([worker]), hint: TaskWords.STARTED_HINT
@@ -186,13 +190,13 @@ export namespace CardsPanel {
                 label: 'Idle', value: idle === undefined ? '—' : NumberText.fixed(idle, 0), unit: idle === undefined ? undefined : '%',
                 trend: Trend.of(series.idlePct), tone: 'idle'
             },
-            { label: 'Memory', ...bytesValue(worker.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' }
+            memory
         ];
         // only gempba's centralized center queues tasks, for the workers that run out
         if (worker.schedulerPendingCount > 0) {
             heroes.push({ label: 'Queued', value: NumberText.grouped(worker.schedulerPendingCount), unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
         }
-        const bars: Bars[] = [{
+        const bars: Bars[] = center ? [] : [{
             title: 'Thread pool',
             rows: [{ label: 'Running', fraction: worker.tasksRunning / pool, valueText: `${worker.tasksRunning} of ${plural(pool, 'thread')}`, tone: 'tasks' }]
         }];
@@ -209,32 +213,35 @@ export namespace CardsPanel {
                 }))
             });
         }
+        const cpu: Chart = {
+            title: 'CPU', latest: `${NumberText.fixed(worker.cpuPct / accessible, 0)}% of ${plural(accessible, 'core')}`, values: series.cpu.map(pct => pct / accessible),
+            max: 100, capacity: WorkerHistoryStore.CAPACITY, tone: 'cpu'
+        };
+        const moved: Total[] = [
+            { label: TaskWords.SENT, value: Rates.countWithRate(worker.tasksSentTotal, worker.elapsedSeconds), hint: TaskWords.SENT_HINT },
+            { label: TaskWords.RECEIVED, value: Rates.countWithRate(worker.tasksRecvTotal, worker.elapsedSeconds), hint: TaskWords.RECEIVED_HINT }
+        ];
         return {
-            title: CardsText.workerTitle(worker),
-            subtitle: CardsText.workerSubtitle(host ?? '—', worker),
+            title: CardsText.workerTitle(worker, center),
+            subtitle: [...(center ? ['schedules the run, runs no tasks'] : []), CardsText.workerSubtitle(host ?? '—', worker)].join(' · '),
             gauge: {
                 label: `CPU on ${plural(accessible, 'core')}`, fraction: worker.cpuPct / (100 * accessible), tone: 'cpu',
                 valueText: `${NumberText.fixed(worker.cpuPct / accessible, 0)}%`
             },
             heroes,
-            charts: [
+            charts: center ? [cpu] : [
                 rateChart(series.tasksPerSecond),
                 {
                     title: 'Idle', latest: idle === undefined ? '—' : `${NumberText.fixed(idle, 0)}%`, values: series.idlePct, max: 100,
                     capacity: WorkerHistoryStore.CAPACITY, tone: 'idle'
                 },
-                {
-                    title: 'CPU', latest: `${NumberText.fixed(worker.cpuPct / accessible, 0)}% of ${plural(accessible, 'core')}`, values: series.cpu.map(pct => pct / accessible),
-                    max: 100,
-                    capacity: WorkerHistoryStore.CAPACITY, tone: 'cpu'
-                }
+                cpu
             ],
             strips: [],
             bars,
-            totals: [
+            totals: center ? moved : [
                 { label: TaskWords.STARTED, value: Rates.countWithRate(worker.tasksLocalTotal, worker.elapsedSeconds), hint: TaskWords.STARTED_HINT },
-                { label: TaskWords.SENT, value: Rates.countWithRate(worker.tasksSentTotal, worker.elapsedSeconds), hint: TaskWords.SENT_HINT },
-                { label: TaskWords.RECEIVED, value: Rates.countWithRate(worker.tasksRecvTotal, worker.elapsedSeconds), hint: TaskWords.RECEIVED_HINT },
+                ...moved,
                 { label: 'Pool idle', value: `${Durations.format(worker.idleMicrosPerWorker)} per thread` }
             ]
         };
