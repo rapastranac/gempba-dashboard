@@ -32,4 +32,5 @@ export * from './model/worker-snapshot';
 export * from './model/world-snapshot';
 export * from './policy/core-heat';
 export * from './policy/node-utilization';
+export * from './policy/task-moves';
 export * from './ssh/ssh-endpoint';
