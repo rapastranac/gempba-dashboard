@@ -1,6 +1,6 @@
 import {
-    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NumberText, Rates, SocketSnapshot, WorkerHistoryStore, WorkerSeries,
-    WorkerSnapshot, WorldSnapshot
+    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, SocketSnapshot, WorkerHistoryStore,
+    WorkerSeries, WorkerSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { Trend } from '@gempba/ui/lib/common/trend';
 import { CardsText } from './cards-text';
@@ -104,8 +104,8 @@ export namespace CardsPanel {
         const series = histories.node(node.host);
         const throughput = histories.throughput(node.host);
         const workers = node.sockets.flatMap(socket => socket.workers);
-        const allocated = allocatedCores(node);
-        const busy = workers.reduce((sum, worker) => sum + worker.cpuPct, 0) / 100;
+        const allocated = NodeUtilization.allocatedCores(node);
+        const busy = NodeUtilization.coresBusy(workers);
         const memTotal = series.memTotalLatest > 0 ? series.memTotalLatest : node.memTotalBytes;
         const memUsed = series.memTotalLatest > 0 ? series.memUsedLatest : node.memUsedBytes;
         const heroes: Hero[] = [
@@ -135,7 +135,7 @@ export namespace CardsPanel {
     }
 
     export function forSocket(node: NodeSnapshot, socket: SocketSnapshot): Panel {
-        const busy = socket.workers.reduce((sum, worker) => sum + worker.cpuPct, 0) / 100;
+        const busy = NodeUtilization.coresBusy(socket.workers);
         const cores = socket.logicalCores;
         return {
             title: CardsText.socketTitle(socket),
@@ -230,12 +230,6 @@ export namespace CardsPanel {
         };
     }
 
-    /** The cores a node's workers may run on: their allowed CPUs together, or every core when none is restricted. */
-    export function allocatedCores(node: NodeSnapshot): number {
-        const allowed = new Set(node.sockets.flatMap(socket => socket.workers.flatMap(worker => worker.allowedCpuIds)));
-        return allowed.size > 0 ? allowed.size : node.logicalCores;
-    }
-
     /** The cores a worker may run on in its socket, as core usage counts them; at least 1. */
     export function accessibleCores(worker: WorkerSnapshot, socket: SocketSnapshot): number {
         const usage = socket.coreUsage.find(entry => entry.workerId === worker.workerId);
@@ -287,12 +281,7 @@ export namespace CardsPanel {
 
     /** The run's average rate, all tasks over the elapsed time. */
     function runAverage(workers: readonly WorkerSnapshot[]): string | undefined {
-        const elapsed = workers[0]?.elapsedSeconds ?? 0;
-        if (elapsed <= 0) {
-            return undefined;
-        }
-        const total = workers.reduce((sum, worker) => sum + worker.tasksLocalTotal, 0);
-        return `run average ${Rates.text(total / elapsed)}`;
+        return Rates.runAverage(workers.reduce((sum, worker) => sum + worker.tasksLocalTotal, 0), workers[0]?.elapsedSeconds ?? 0);
     }
 
     function strip(node: NodeSnapshot, socket: SocketSnapshot): Strip {

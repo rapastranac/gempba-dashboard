@@ -35,4 +35,10 @@ describe('Rates', () => {
         expect(Rates.countWithRate(1000, 100)).to.equal('1,000 · 10 tasks/s on average');
         expect(Rates.countWithRate(3, 600)).to.equal('3 · 0.30 tasks/min on average');
     });
+
+    it('reads a run average once time has elapsed', () => {
+        expect(Rates.runAverage(12_000, 100)).to.equal('run average 120 tasks/s');
+        expect(Rates.runAverage(3, 600)).to.equal('run average 0.30 tasks/min');
+        expect(Rates.runAverage(12_000, 0)).to.equal(undefined);
+    });
 });

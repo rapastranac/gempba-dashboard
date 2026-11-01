@@ -3,7 +3,7 @@ import { CompositeTreeNode, TreeImpl, TreeNode } from '@theia/core/lib/browser/t
 import { ExpandableTreeNode } from '@theia/core/lib/browser/tree/tree-expansion';
 import { SelectableTreeNode } from '@theia/core/lib/browser/tree/tree-selection';
 import { injectable } from '@theia/core/shared/inversify';
-import { NodeSnapshot, SocketSnapshot, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeSnapshot, NodeUtilization, SocketSnapshot, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
 import { CardsPanel } from '../common/cards-panel';
 import { CardsText } from '../common/cards-text';
 
@@ -85,7 +85,7 @@ export class CardsTree extends TreeImpl {
 
     protected socketRow(parent: CompositeTreeNode, node: NodeSnapshot, socket: SocketSnapshot): CardsGroupNode {
         const holdsSentinel = socket.workers.some(worker => worker.workerId === node.sentinelWorkerId);
-        const busy = socket.workers.reduce((sum, worker) => sum + worker.cpuPct, 0) / 100;
+        const busy = NodeUtilization.coresBusy(socket.workers);
         return this.group(parent, `socket:${node.host}/${socket.socketId}`, { kind: 'socket', host: node.host, socketId: socket.socketId },
             CardsText.socketTitle(socket), CardsText.socketCaption(socket), codicon('circuit-board'), holdsSentinel,
             socket.logicalCores > 0 ? busy / socket.logicalCores : undefined);

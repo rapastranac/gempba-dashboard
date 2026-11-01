@@ -65,7 +65,7 @@ describe('CardsPanel', () => {
 
         it('counts every core when no worker is restricted', () => {
             const unrestricted = node({ sockets: [socket({ workers: [worker({ allowedCpuIds: [] })] })] });
-            expect(CardsPanel.allocatedCores(unrestricted)).to.equal(8);
+            expect(CardsPanel.forNode(unrestricted, histories()).heroes[1].unit).to.equal('of 8');
         });
 
         it('shows no rate before the workers sent two frames', () => {
