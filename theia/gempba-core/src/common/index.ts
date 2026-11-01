@@ -13,6 +13,7 @@ export * from './format/number-text';
 export * from './format/peers';
 export * from './format/rates';
 export * from './history/counter-rate';
+export * from './history/frame-arrivals';
 export * from './history/frame-cadence';
 export * from './history/node-history-store';
 export * from './history/node-sample';

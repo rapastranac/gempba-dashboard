@@ -1,7 +1,7 @@
 import { Emitter } from '@theia/core/lib/common/event';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import {
-    ConnectionMode, ConnectionState, FrameCadence, NodeHistoryStore, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, WorldSnapshot
+    ConnectionMode, ConnectionState, FrameArrivals, FrameCadence, NodeHistoryStore, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { TelemetryService } from '../common/telemetry-service';
@@ -31,6 +31,8 @@ export class TelemetryServiceImpl implements TelemetryService {
     protected latestStatus = '';
     protected readonly workerCadence = new FrameCadence();
     protected readonly nodeCadence = new FrameCadence();
+    protected readonly nodeArrivals = new FrameArrivals();
+    protected latestFrameAt: number | undefined;
 
     get state(): ConnectionState {
         return this.currentState;
@@ -38,6 +40,10 @@ export class TelemetryServiceImpl implements TelemetryService {
 
     get snapshot(): WorldSnapshot | undefined {
         return this.latestSnapshot;
+    }
+
+    get lastFrameAt(): number | undefined {
+        return this.latestFrameAt;
     }
 
     get status(): string {
@@ -57,7 +63,9 @@ export class TelemetryServiceImpl implements TelemetryService {
         this.receiver.snapshots(snapshot => {
             this.nodeHistory.update(snapshot);
             this.workerHistory.update(snapshot);
-            this.observe(snapshot);
+            const now = Date.now();
+            this.observe(snapshot, now);
+            this.latestFrameAt = now;
             this.latestSnapshot = snapshot;
             this.onSnapshotEmitter.fire(snapshot);
         });
@@ -76,6 +84,10 @@ export class TelemetryServiceImpl implements TelemetryService {
         });
     }
 
+    nodeFrameAt(host: string): number | undefined {
+        return this.nodeArrivals.lastAt(host);
+    }
+
     availableModes(): Promise<ConnectionMode[]> {
         return this.server.availableModes();
     }
@@ -90,6 +102,8 @@ export class TelemetryServiceImpl implements TelemetryService {
         this.workerHistory.clear();
         this.workerCadence.clear();
         this.nodeCadence.clear();
+        this.nodeArrivals.clear();
+        this.latestFrameAt = undefined;
         this.latestSnapshot = undefined;
         await this.sendRates();
         return this.server.listen(target);
@@ -114,7 +128,7 @@ export class TelemetryServiceImpl implements TelemetryService {
         await this.server.pushRates(rates.workerIntervalMs, rates.nodeIntervalMs);
     }
 
-    protected observe(snapshot: WorldSnapshot): void {
+    protected observe(snapshot: WorldSnapshot, now: number): void {
         for (const node of snapshot.nodes) {
             if (node.hasLiveMemory) {
                 this.nodeCadence.record(node.host, node.sentinelLocalMillis, node.sentinelLocalMillis);
@@ -122,6 +136,7 @@ export class TelemetryServiceImpl implements TelemetryService {
             for (const socket of node.sockets) {
                 for (const worker of socket.workers) {
                     this.workerCadence.record(String(worker.workerId), worker.seqNo, worker.localMillis);
+                    this.nodeArrivals.record(node.host, String(worker.workerId), worker.seqNo, now);
                 }
             }
         }
