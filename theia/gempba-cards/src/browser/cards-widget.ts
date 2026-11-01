@@ -1,7 +1,7 @@
 import { CompositeTreeNode } from '@theia/core/lib/browser/tree/tree';
 import { ExpandableTreeNode } from '@theia/core/lib/browser/tree/tree-expansion';
 import { SplitWidget } from '@theia/core/lib/browser/widgets/split-widget';
-import { codicon, Message } from '@theia/core/lib/browser/widgets/widget';
+import { codicon, Message, Widget } from '@theia/core/lib/browser/widgets/widget';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { WorldSnapshot } from '@gempba/core';
 import { LiveTelemetryView } from '@gempba/telemetry/lib/browser';
@@ -22,6 +22,8 @@ export class CardsWidget extends SplitWidget {
 
     static readonly ID = 'gempba-cards';
     static readonly LABEL = 'Cards';
+    /** The tree takes a third, room for a row's name, meter and caption; the panel the rest, room for its three charts side by side. */
+    static readonly DEFAULT_SIZES: readonly number[] = [1, 2];
 
     /** The snapshot the tree and the details were last built from. */
     protected snapshot: WorldSnapshot | undefined;
@@ -32,6 +34,11 @@ export class CardsWidget extends SplitWidget {
     /** Whether a row was ever picked, by the user, by another view, or by default. */
     protected picked = false;
     protected readonly refreshes: VisibleRefresh;
+    /**
+     * The pane sizes to apply once the view has a width: the split scales sizes to its width on its first layout, so
+     * sizes set while the view is hidden, as at startup behind another tab, are lost and the panes split evenly.
+     */
+    protected pendingSizes: readonly number[] | undefined = CardsWidget.DEFAULT_SIZES;
 
     constructor(
         protected readonly tree: CardsTreeWidget,
@@ -50,7 +57,6 @@ export class CardsWidget extends SplitWidget {
         LiveTelemetryView.mark(this);
         this.addPane(tree);
         this.addPane(details);
-        this.setRelativeSizes([2, 3]);
 
         const refresh = this.refreshes = new VisibleRefresh(this, () => this.refresh());
         this.toDispose.push(refresh);
@@ -162,7 +168,25 @@ export class CardsWidget extends SplitWidget {
 
     override restoreState(state: SplitWidget.State): void {
         if (state.relativeSizes?.length === 2) {
-            this.setRelativeSizes(state.relativeSizes);
+            this.pendingSizes = state.relativeSizes;
+            this.applyPendingSizes();
+        }
+    }
+
+    protected override onAfterShow(message: Message): void {
+        super.onAfterShow(message);
+        this.applyPendingSizes();
+    }
+
+    protected override onResize(message: Widget.ResizeMessage): void {
+        super.onResize(message);
+        this.applyPendingSizes();
+    }
+
+    protected applyPendingSizes(): void {
+        if (this.pendingSizes && this.node.offsetWidth > 0) {
+            this.setRelativeSizes([...this.pendingSizes]);
+            this.pendingSizes = undefined;
         }
     }
 

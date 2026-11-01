@@ -41,7 +41,7 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
         const lines = [this.telemetry.status || state.toLowerCase()];
         const throughput = this.workerHistory.clusterThroughput();
         if (listening && throughput.length > 0) {
-            lines.push(`Tasks completed: ${Rates.perSecond(throughput[throughput.length - 1])}`);
+            lines.push(`Tasks completed: ${Rates.text(throughput[throughput.length - 1])}`);
         }
         const observed = this.telemetry.observedRates.workerIntervalMs;
         lines.push(`Worker frames every ${rate}${listening && observed !== undefined ? `, arriving every ${RefreshInterval.label(observed)}` : ''}`);
