@@ -155,6 +155,19 @@
     "gempba.tile.secondaryForeground": "#8fa1b3",
     "gempba.chart.cpu": "#2fc6db",
     "gempba.chart.memory": "#b48cf2",
-    "gempba.chart.grid": "#2a3b4c"
+    "gempba.chart.grid": "#2a3b4c",
+    "gempba.chart.tasks": "#63ea61",
+    "gempba.chart.network": "#f2a65a",
+    "gempba.chart.idle": "#e8d06a",
+    "gempba.panel.background": "#16222e",
+    "gempba.panel.border": "#24384a",
+    "gempba.panel.titleForeground": "#8fa1b3",
+    "gempba.hero.foreground": "#e6edf3",
+    "gempba.gauge.track": "#24384a",
+    "gempba.heat.low": "#1f3142",
+    "gempba.heat.high": "#f2706a",
+    "gempba.live.active": "#63ea61",
+    "gempba.live.stale": "#e8d06a",
+    "gempba.live.off": "#6b7c8c"
   }
 }

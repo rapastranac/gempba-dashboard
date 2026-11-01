@@ -1,5 +1,13 @@
 /* Colors come only from theme variables: the gempba.* tokens (see ui-colors.ts) and Theia's own. */
 
+/*
+ * Motion: only transforms, opacity and stroke offsets animate, over the duration a view sets from MotionTiming,
+ * and nothing animates when the OS asks for reduced motion.
+ */
+:root {
+    --gempba-motion-duration: 300ms;
+}
+
 .gempba-tile-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -63,11 +71,25 @@
     --gempba-tone: var(--theia-gempba-chart-memory);
 }
 
+.gempba-tone-tasks {
+    --gempba-tone: var(--theia-gempba-chart-tasks);
+}
+
+.gempba-tone-network {
+    --gempba-tone: var(--theia-gempba-chart-network);
+}
+
+.gempba-tone-idle {
+    --gempba-tone: var(--theia-gempba-chart-idle);
+}
+
 .gempba-sparkline {
     display: block;
     width: 100%;
     height: 72px;
     border: 1px solid var(--theia-gempba-chart-grid);
+    /* the newest sample sits on the right edge, and its dot would otherwise be cut in half */
+    overflow: visible;
 }
 
 .gempba-sparkline-gridline {
@@ -75,15 +97,26 @@
     stroke-width: 1px;
 }
 
-.gempba-sparkline-area {
-    fill: var(--gempba-tone);
-    fill-opacity: 0.2;
+.gempba-sparkline-fill-top {
+    stop-color: var(--gempba-tone);
+    stop-opacity: 0.4;
+}
+
+.gempba-sparkline-fill-bottom {
+    stop-color: var(--gempba-tone);
+    stop-opacity: 0.02;
 }
 
 .gempba-sparkline-line {
     fill: none;
     stroke: var(--gempba-tone);
     stroke-width: 1.5px;
+}
+
+.gempba-sparkline-dot {
+    stroke: var(--gempba-tone);
+    stroke-width: 6px;
+    stroke-linecap: round;
 }
 
 .gempba-meter {
@@ -96,6 +129,8 @@
 .gempba-meter-fill {
     height: 100%;
     background: var(--gempba-tone);
+    transform-origin: left;
+    transition: transform var(--gempba-motion-duration) ease-out;
 }
 
 .gempba-property-sheet {
@@ -153,4 +188,260 @@
 
 .gempba-data-table .gempba-data-end {
     text-align: end;
+}
+
+/* Instrument panels: titled sections holding headline figures, charts and tables. */
+
+.gempba-panel {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--theia-ui-padding) * 2);
+    min-width: 0;
+    padding: calc(var(--theia-ui-padding) * 3);
+    border: 1px solid var(--theia-gempba-panel-border);
+    border-radius: calc(var(--theia-ui-padding) * 2);
+    background: var(--theia-gempba-panel-background);
+}
+
+.gempba-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--theia-ui-padding);
+}
+
+.gempba-panel-title {
+    margin: 0;
+    font-size: var(--theia-ui-font-size0);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--theia-gempba-panel-titleForeground);
+}
+
+.gempba-panel-actions {
+    display: flex;
+    gap: var(--theia-ui-padding);
+}
+
+.gempba-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.gempba-hero-label,
+.gempba-hero-detail {
+    font-size: var(--theia-ui-font-size0);
+    color: var(--theia-gempba-panel-titleForeground);
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-hero-value {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: calc(var(--theia-ui-font-size1) * 2);
+    font-weight: 600;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: var(--theia-gempba-hero-foreground);
+}
+
+.gempba-hero-unit {
+    font-size: var(--theia-ui-font-size1);
+    font-weight: normal;
+    color: var(--theia-gempba-panel-titleForeground);
+}
+
+.gempba-hero-trend {
+    align-self: center;
+    color: var(--gempba-tone, var(--theia-gempba-panel-titleForeground));
+}
+
+.gempba-segmented {
+    display: inline-flex;
+    overflow: hidden;
+    border: 1px solid var(--theia-gempba-panel-border);
+    border-radius: calc(var(--theia-ui-padding) * 1.5);
+}
+
+.gempba-segmented-option {
+    padding: 2px calc(var(--theia-ui-padding) * 3);
+    border: none;
+    background: transparent;
+    color: var(--theia-foreground);
+    font: inherit;
+    cursor: pointer;
+}
+
+.gempba-segmented-option + .gempba-segmented-option {
+    border-left: 1px solid var(--theia-gempba-panel-border);
+}
+
+.gempba-segmented-option:hover:not(:disabled) {
+    background: var(--theia-toolbar-hoverBackground);
+}
+
+.gempba-segmented-option[aria-checked="true"] {
+    background: var(--theia-button-background);
+    color: var(--theia-button-foreground);
+}
+
+.gempba-segmented-option:focus-visible {
+    outline: 1px solid var(--theia-focusBorder);
+    outline-offset: -1px;
+}
+
+.gempba-segmented-option:disabled {
+    cursor: default;
+    opacity: var(--theia-mod-disabled-opacity);
+}
+
+.gempba-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: calc(var(--theia-ui-padding) * 2);
+    box-sizing: border-box;
+    height: 100%;
+    padding: calc(var(--theia-ui-padding) * 8);
+    text-align: center;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-empty-icon.codicon {
+    font-size: 48px;
+    opacity: 0.6;
+}
+
+.gempba-empty-title {
+    margin: 0;
+    font-size: var(--theia-ui-font-size2);
+    font-weight: 600;
+    color: var(--theia-foreground);
+}
+
+.gempba-empty-message {
+    max-width: 40em;
+    margin: 0;
+}
+
+.gempba-empty-actions {
+    display: flex;
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+/* Instruments: gauges, heat strips, the live indicator and the rate readout. */
+
+.gempba-gauge {
+    position: relative;
+    flex: none;
+}
+
+.gempba-gauge svg {
+    display: block;
+}
+
+.gempba-gauge-track,
+.gempba-gauge-value {
+    fill: none;
+    stroke-linecap: round;
+}
+
+.gempba-gauge-track {
+    stroke: var(--theia-gempba-gauge-track);
+}
+
+.gempba-gauge-value {
+    stroke: var(--gempba-tone);
+    transition: stroke-dashoffset var(--gempba-motion-duration) ease-out, opacity var(--gempba-motion-duration) ease-out;
+}
+
+.gempba-gauge-text {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--theia-ui-font-size2);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--theia-gempba-hero-foreground);
+}
+
+.gempba-heat-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12px, 1fr));
+    gap: 2px;
+}
+
+.gempba-heat-cell {
+    height: 14px;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--theia-gempba-heat-high) var(--gempba-heat-mix), var(--theia-gempba-heat-low));
+}
+
+.gempba-heat-over {
+    outline: 1px solid var(--theia-gempba-heat-high);
+    outline-offset: 1px;
+}
+
+.gempba-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--theia-ui-font-size0);
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.gempba-live-live .gempba-live-dot {
+    background: var(--theia-gempba-live-active);
+    animation: gempba-live-pulse 1.6s ease-in-out infinite;
+}
+
+.gempba-live-stale .gempba-live-dot {
+    background: var(--theia-gempba-live-stale);
+}
+
+.gempba-live-off .gempba-live-dot {
+    background: var(--theia-gempba-live-off);
+}
+
+@keyframes gempba-live-pulse {
+    50% {
+        opacity: 0.35;
+    }
+}
+
+.gempba-rate {
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-rate-observed {
+    margin-left: 6px;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-rate-differs .gempba-rate-observed {
+    color: var(--theia-gempba-live-stale);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gempba-meter-fill,
+    .gempba-gauge-value {
+        transition: none;
+    }
+
+    .gempba-live-live .gempba-live-dot {
+        animation: none;
+    }
 }
