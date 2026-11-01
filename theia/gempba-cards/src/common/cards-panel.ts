@@ -1,5 +1,5 @@
 import {
-    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, SocketSnapshot, WorkerHistoryStore,
+    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, SocketSnapshot, TaskWords, WorkerHistoryStore,
     WorkerSeries, WorkerSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { Trend } from '@gempba/ui/lib/common/trend';
@@ -30,6 +30,8 @@ export namespace CardsPanel {
         readonly detail?: string;
         readonly trend?: Trend;
         readonly tone?: Tone;
+        /** What the figure counts, on hover. */
+        readonly hint?: string;
     }
 
     export interface Chart {
@@ -76,6 +78,8 @@ export namespace CardsPanel {
     export interface Total {
         readonly label: string;
         readonly value: string;
+        /** What the total counts, on hover. */
+        readonly hint?: string;
     }
 
     export interface Panel {
@@ -109,7 +113,10 @@ export namespace CardsPanel {
         const memTotal = series.memTotalLatest > 0 ? series.memTotalLatest : node.memTotalBytes;
         const memUsed = series.memTotalLatest > 0 ? series.memUsedLatest : node.memUsedBytes;
         const heroes: Hero[] = [
-            { label: 'Tasks completed', ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks', detail: runAverage(workers) },
+            {
+                label: TaskWords.STARTED, ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks', detail: runAverage(workers),
+                hint: TaskWords.STARTED_HINT
+            },
             { label: 'Cores busy', value: NumberText.fixed(busy, 1), unit: `of ${allocated}`, detail: plural(workers.length, 'worker') }
         ];
         if (memTotal > 0) {
@@ -171,7 +178,10 @@ export namespace CardsPanel {
         // gempba's process has one thread beyond its pool, which runs the tasks; a source that counts differently never shows more running than threads
         const pool = Math.max(worker.threads - 1, worker.tasksRunning, 1);
         const heroes: Hero[] = [
-            { label: 'Tasks completed', ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks', detail: runAverage([worker]) },
+            {
+                label: TaskWords.STARTED, ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks',
+                detail: runAverage([worker]), hint: TaskWords.STARTED_HINT
+            },
             {
                 label: 'Idle', value: idle === undefined ? '—' : NumberText.fixed(idle, 0), unit: idle === undefined ? undefined : '%',
                 trend: Trend.of(series.idlePct), tone: 'idle'
@@ -222,9 +232,9 @@ export namespace CardsPanel {
             strips: [],
             bars,
             totals: [
-                { label: 'Tasks completed', value: Rates.countWithRate(worker.tasksLocalTotal, worker.elapsedSeconds) },
-                { label: 'Sent to peers', value: Rates.countWithRate(worker.tasksSentTotal, worker.elapsedSeconds) },
-                { label: 'Received from peers', value: Rates.countWithRate(worker.tasksRecvTotal, worker.elapsedSeconds) },
+                { label: TaskWords.STARTED, value: Rates.countWithRate(worker.tasksLocalTotal, worker.elapsedSeconds), hint: TaskWords.STARTED_HINT },
+                { label: TaskWords.SENT, value: Rates.countWithRate(worker.tasksSentTotal, worker.elapsedSeconds), hint: TaskWords.SENT_HINT },
+                { label: TaskWords.RECEIVED, value: Rates.countWithRate(worker.tasksRecvTotal, worker.elapsedSeconds), hint: TaskWords.RECEIVED_HINT },
                 { label: 'Pool idle', value: `${Durations.format(worker.idleMicrosPerWorker)} per thread` }
             ]
         };
@@ -265,11 +275,11 @@ export namespace CardsPanel {
         return facts.join(' · ');
     }
 
-    /** Tasks completed per second or per minute, one unit for the whole history: per second once any sample reaches one a second. */
+    /** Tasks started per second or per minute, one unit for the whole history: per second once any sample reaches one a second. */
     function rateChart(perSecond: readonly number[]): Chart {
         const unit = Rates.unitFor(Math.max(0, ...perSecond));
         return {
-            title: 'Tasks completed', latest: Rates.text(latest(perSecond), 'tasks', unit), values: perSecond.map(rate => Rates.inUnit(rate, unit)),
+            title: TaskWords.STARTED, latest: Rates.text(latest(perSecond), 'tasks', unit), values: perSecond.map(rate => Rates.inUnit(rate, unit)),
             capacity: WorkerHistoryStore.CAPACITY, tone: 'tasks'
         };
     }

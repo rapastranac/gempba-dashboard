@@ -60,12 +60,12 @@ export class WorkerHistoryStore {
         return this.tracks.get(workerId)?.series() ?? WorkerSeries.empty();
     }
 
-    /** Tasks completed per second by all of one node's workers, oldest first. */
+    /** Tasks started per second by all of one node's workers, oldest first. */
     throughputFor(host: string): readonly number[] {
         return this.throughputByHost.get(host)?.values() ?? [];
     }
 
-    /** Tasks completed per second by every worker, oldest first. */
+    /** Tasks started per second by every worker, oldest first. */
     clusterThroughput(): readonly number[] {
         return this.throughputOfCluster.values();
     }

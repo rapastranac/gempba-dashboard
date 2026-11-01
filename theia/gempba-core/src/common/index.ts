@@ -12,6 +12,7 @@ export * from './format/durations';
 export * from './format/number-text';
 export * from './format/peers';
 export * from './format/rates';
+export * from './format/task-words';
 export * from './history/counter-rate';
 export * from './history/frame-arrivals';
 export * from './history/frame-cadence';

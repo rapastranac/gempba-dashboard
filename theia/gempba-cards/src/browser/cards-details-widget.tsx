@@ -96,7 +96,7 @@ export class CardsDetailsWidget extends ReactWidget {
                 <table className='gempba-property-sheet'>
                     <tbody>
                         {panel.totals.map(total => <tr key={total.label}>
-                            <th className='gempba-property-label' scope='row'>{total.label}</th>
+                            <th className='gempba-property-label' scope='row' title={total.hint}>{total.label}</th>
                             <td className='gempba-property-value'>{total.value}</td>
                         </tr>)}
                     </tbody>

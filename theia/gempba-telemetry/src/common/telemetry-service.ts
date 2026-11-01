@@ -60,8 +60,8 @@ export const WorkerHistoryService = Symbol('WorkerHistoryService');
 
 export interface WorkerHistoryService {
     seriesFor(workerId: number): WorkerSeries;
-    /** Tasks completed per second by all of one node's workers, oldest first. */
+    /** Tasks started per second by all of one node's workers, oldest first. */
     throughputFor(host: string): readonly number[];
-    /** Tasks completed per second by every worker, oldest first. */
+    /** Tasks started per second by every worker, oldest first. */
     clusterThroughput(): readonly number[];
 }
