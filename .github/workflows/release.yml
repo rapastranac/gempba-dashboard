@@ -35,16 +35,16 @@ jobs:
       matrix:
         include:
           - target: linux-x64
-            runner: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+            runner: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
             unpacked: linux-unpacked
           - target: windows-x64
-            runner: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
+            runner: ${{ fromJSON(vars.RUNNER_WINDOWS || '["windows-2025"]') }}
             unpacked: win-unpacked
           - target: macos-arm64
-            runner: ${{ vars.RUNNER_MACOS || 'macos-26' }}
+            runner: ${{ fromJSON(vars.RUNNER_MACOS_ARM || '["macos-26"]') }}
             unpacked: mac-arm64
           - target: macos-x64
-            runner: ${{ vars.RUNNER_MACOS_INTEL || 'macos-15-intel' }}
+            runner: ${{ fromJSON(vars.RUNNER_MACOS_INTEL || '["macos-26-intel"]') }}
             unpacked: mac
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -90,7 +90,7 @@ jobs:
   publish:
     needs: package
     if: github.ref_type == 'tag'
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    runs-on: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
     timeout-minutes: 10
     permissions:
       contents: write
