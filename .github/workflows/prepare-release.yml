@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   prepare:
-    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    runs-on: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
     timeout-minutes: 15
     steps:
       - name: Validate version
