@@ -21,7 +21,7 @@ function node(host: string, ...workers: WorkerSnapshot[]): NodeSnapshot {
 
 const peer = (peerWorkerId: number, count: number): PeerSnapshot => ({ peerWorkerId, count, bytes: count * 100 });
 
-// gempba's own report for a four-rank run: the center sent the root to rank 1, which handed most of it on
+// gempba's own report for a four-rank run: the coordinator sent the root to rank 1, which handed most of it on
 const RUN: WorldSnapshot = {
     ...WorldSnapshot.empty(),
     nodes: [

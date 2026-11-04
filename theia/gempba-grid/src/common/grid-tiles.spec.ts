@@ -44,7 +44,7 @@ const CLOCK: GridTiles.Clock = { streaming: true, now: 10_000, intervalMs: 500 }
 
 const sentTo = (peerWorkerId: number, count: number): PeerSnapshot => ({ peerWorkerId, count, bytes: count * 100 });
 
-/** Three processes on two nodes: the center on alpha sent the root to worker 1, which shared work with worker 2 on beta. */
+/** Three processes on two nodes: the coordinator on alpha sent the root to worker 1, which shared work with worker 2 on beta. */
 const SHARED = world(
     node('alpha', {}, [
         worker({ workerId: 0, tasksStartedTotal: 0, tasksSentTotal: 1, peers: [sentTo(1, 1)] }),
@@ -157,7 +157,7 @@ describe('GridTiles', () => {
             expect(GridTiles.overview(busy, sources(), CLOCK)!.figures.find(figure => figure.label === 'Tasks moved')?.detail).to.equal('<0.1% of started · 98 across nodes');
         });
 
-        it('averages how idle the workers are now, leaving out the center, which runs no tasks', () => {
+        it('averages how idle the workers are now, leaving out the coordinator, which runs no tasks', () => {
             const idlePct = new Map([[0, [0]], [1, [5, 10]], [2, [30]]]);
             const series = (id: number): WorkerSeries => ({ ...WorkerSeries.empty(), idlePct: idlePct.get(id) ?? [] });
             const idle = GridTiles.overview(SHARED, sources({ worker: series }), CLOCK)!.figures.find(figure => figure.label === 'Idle');
