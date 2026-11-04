@@ -9,7 +9,7 @@ const GiB = 1024 ** 3;
 function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
     return {
         workerId: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
-        tasksLocalTotal: 12_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 0,
+        tasksStartedTotal: 12_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 0,
         cpuPct: 300, rssBytes: 256 * 1024 ** 2, threads: 5, elapsedSeconds: 100, peers: [], ...overrides
     };
 }
@@ -184,7 +184,7 @@ describe('CardsPanel', () => {
         });
 
         it('shows the center as the center: no tasks started, idle time or pool; its CPU, memory, and the tasks it sent and received', () => {
-            const center = worker({ workerId: 0, tasksLocalTotal: 0, tasksSentTotal: 1, schedulerPendingCount: 0 });
+            const center = worker({ workerId: 0, tasksStartedTotal: 0, tasksSentTotal: 1, schedulerPendingCount: 0 });
             const shared = socket({ workers: [center, worker()] });
             const panel = CardsPanel.forWorker(world(node({ sockets: [shared] })), shared, center, histories());
             expect([panel.title, panel.subtitle]).to.deep.equal(['Worker 0 · center', 'schedules the run, runs no tasks · PID 4100 · frame #17 · on alpha']);

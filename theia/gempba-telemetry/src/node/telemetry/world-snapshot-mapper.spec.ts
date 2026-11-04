@@ -166,7 +166,7 @@ describe('WorldSnapshotMapper', () => {
         expect(w10.seqNo).to.equal(5);
         expect(w10.pid).to.equal(1000);
         expect(w10.sentinel).to.be.true;
-        expect(w10.tasksLocalTotal).to.equal(100);
+        expect(w10.tasksStartedTotal).to.equal(100);
         expect(w10.tasksRunning).to.equal(3);
         expect(w10.schedulerPendingCount).to.equal(7);
         expect(w10.cpuPct).to.equal(80);

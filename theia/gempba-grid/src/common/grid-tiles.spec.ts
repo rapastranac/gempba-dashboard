@@ -7,7 +7,7 @@ const GiB = 1024 ** 3;
 function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
     return {
         workerId: 3, seqNo: 1, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
-        tasksLocalTotal: 6_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0,
+        tasksStartedTotal: 6_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0,
         cpuPct: 300, rssBytes: 0, threads: 5, elapsedSeconds: 100, peers: [], ...overrides
     };
 }
@@ -47,10 +47,10 @@ const sentTo = (peerWorkerId: number, count: number): PeerSnapshot => ({ peerWor
 /** Three processes on two nodes: the center on alpha sent the root to worker 1, which shared work with worker 2 on beta. */
 const SHARED = world(
     node('alpha', {}, [
-        worker({ workerId: 0, tasksLocalTotal: 0, tasksSentTotal: 1, peers: [sentTo(1, 1)] }),
-        worker({ workerId: 1, tasksLocalTotal: 142, tasksSentTotal: 78, tasksRecvTotal: 21, peers: [sentTo(2, 78)] })
+        worker({ workerId: 0, tasksStartedTotal: 0, tasksSentTotal: 1, peers: [sentTo(1, 1)] }),
+        worker({ workerId: 1, tasksStartedTotal: 142, tasksSentTotal: 78, tasksRecvTotal: 21, peers: [sentTo(2, 78)] })
     ]),
-    node('beta', {}, [worker({ workerId: 2, tasksLocalTotal: 3609, tasksSentTotal: 20, tasksRecvTotal: 78, peers: [sentTo(1, 20)] })])
+    node('beta', {}, [worker({ workerId: 2, tasksStartedTotal: 3609, tasksSentTotal: 20, tasksRecvTotal: 78, peers: [sentTo(1, 20)] })])
 );
 
 describe('GridTiles', () => {
@@ -152,7 +152,7 @@ describe('GridTiles', () => {
             const moved = GridTiles.overview(SHARED, sources(), CLOCK)!.figures.find(figure => figure.label === 'Tasks moved');
             expect(moved).to.include({ value: '99', detail: '2.6% of started · 98 across nodes', tone: 'network' });
             const busy = world(...SHARED.nodes.map(each => ({ ...each, sockets: each.sockets.map(socket => ({
-                ...socket, workers: socket.workers.map(one => ({ ...one, tasksLocalTotal: one.tasksLocalTotal * 1000 }))
+                ...socket, workers: socket.workers.map(one => ({ ...one, tasksStartedTotal: one.tasksStartedTotal * 1000 }))
             })) })));
             expect(GridTiles.overview(busy, sources(), CLOCK)!.figures.find(figure => figure.label === 'Tasks moved')?.detail).to.equal('<0.1% of started · 98 across nodes');
         });

@@ -6,7 +6,7 @@ import { NodeUtilization } from './node-utilization';
 function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
     return {
         workerId: 3, seqNo: 1, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
-        tasksLocalTotal: 0, tasksRunning: 0, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0,
+        tasksStartedTotal: 0, tasksRunning: 0, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0,
         cpuPct: 300, rssBytes: 0, threads: 5, elapsedSeconds: 0, peers: [], ...overrides
     };
 }

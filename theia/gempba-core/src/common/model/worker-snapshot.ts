@@ -10,7 +10,7 @@ export interface WorkerSnapshot {
     readonly sentinel: boolean;
     /** The CPUs the worker may run on; empty when unrestricted or unknown. */
     readonly allowedCpuIds: readonly number[];
-    readonly tasksLocalTotal: number;
+    readonly tasksStartedTotal: number;
     readonly tasksRunning: number;
     readonly tasksSentTotal: number;
     readonly tasksRecvTotal: number;

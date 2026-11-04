@@ -7,7 +7,7 @@ import { WorldSnapshot } from './world-snapshot';
 
 function worker(workerId: number): WorkerSnapshot {
     return {
-        workerId, seqNo: 1, localMillis: 0, pid: 100 + workerId, sentinel: false, allowedCpuIds: [], tasksLocalTotal: 0, tasksRunning: 0,
+        workerId, seqNo: 1, localMillis: 0, pid: 100 + workerId, sentinel: false, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
         tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0,
         cpuPct: 0, rssBytes: 0, threads: 1, elapsedSeconds: 0, peers: []
     };

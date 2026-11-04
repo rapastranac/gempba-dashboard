@@ -28,7 +28,7 @@ export namespace TaskMoves {
         let acrossNodes = 0;
         for (const node of world.nodes.filter(candidate => host === undefined || candidate.host === host)) {
             for (const worker of node.sockets.flatMap(socket => socket.workers)) {
-                started += worker.tasksLocalTotal;
+                started += worker.tasksStartedTotal;
                 sent += worker.tasksSentTotal;
                 received += worker.tasksRecvTotal;
                 for (const peer of worker.peers) {

@@ -240,7 +240,7 @@ export namespace CardsPanel {
             strips: [],
             bars,
             totals: center ? moved : [
-                { label: TaskWords.STARTED, value: Rates.countWithRate(worker.tasksLocalTotal, worker.elapsedSeconds), hint: TaskWords.STARTED_HINT },
+                { label: TaskWords.STARTED, value: Rates.countWithRate(worker.tasksStartedTotal, worker.elapsedSeconds), hint: TaskWords.STARTED_HINT },
                 ...moved,
                 { label: 'Pool idle', value: `${Durations.format(worker.idleMicrosPerWorker)} per thread` }
             ]
@@ -298,7 +298,7 @@ export namespace CardsPanel {
 
     /** The run's average rate, all tasks over the elapsed time. */
     function runAverage(workers: readonly WorkerSnapshot[]): string | undefined {
-        return Rates.runAverage(workers.reduce((sum, worker) => sum + worker.tasksLocalTotal, 0), workers[0]?.elapsedSeconds ?? 0);
+        return Rates.runAverage(workers.reduce((sum, worker) => sum + worker.tasksStartedTotal, 0), workers[0]?.elapsedSeconds ?? 0);
     }
 
     function strip(node: NodeSnapshot, socket: SocketSnapshot): Strip {

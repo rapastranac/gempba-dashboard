@@ -18,7 +18,7 @@ interface Frame {
 function worker(workerId: number, frame: Frame): WorkerSnapshot {
     return {
         workerId, seqNo: frame.seqNo, localMillis: frame.localMillis, pid: 0, sentinel: false, allowedCpuIds: [],
-        tasksLocalTotal: frame.tasks ?? 0, tasksRunning: 0, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0,
+        tasksStartedTotal: frame.tasks ?? 0, tasksRunning: 0, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0,
         idleMicrosPerWorker: frame.idleMicros ?? 0, cpuPct: frame.cpuPct ?? 0, rssBytes: frame.rssBytes ?? 0, threads: 1,
         elapsedSeconds: 0, peers: []
     };

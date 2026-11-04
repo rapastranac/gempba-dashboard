@@ -46,7 +46,7 @@ export class WorkerTrack {
                 this.counts.shift();
             }
             const since = this.counts[0];
-            const tasks = since && CounterRate.perSecond(since.tasks, worker.tasksLocalTotal, worker.localMillis - since.millis);
+            const tasks = since && CounterRate.perSecond(since.tasks, worker.tasksStartedTotal, worker.localMillis - since.millis);
             if (tasks !== undefined) {
                 this.tasksPerSecond.push(tasks);
             } else {
@@ -55,7 +55,7 @@ export class WorkerTrack {
         } else {
             this.counts = [];
         }
-        this.counts.push({ millis: worker.localMillis, tasks: worker.tasksLocalTotal });
+        this.counts.push({ millis: worker.localMillis, tasks: worker.tasksStartedTotal });
         this.last = worker;
         return true;
     }

@@ -117,7 +117,7 @@ export namespace WorldSnapshotMapper {
             pid: identity?.pid ?? 0,
             sentinel,
             allowedCpuIds: identity?.allowed_cpu_ids ?? [],
-            tasksLocalTotal: frame.tasks_local_total,
+            tasksStartedTotal: frame.tasks_local_total,
             tasksRunning: frame.tasks_running,
             tasksSentTotal: frame.tasks_sent_total,
             tasksRecvTotal: frame.tasks_recv_total,

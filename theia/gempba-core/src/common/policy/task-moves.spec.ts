@@ -7,7 +7,7 @@ import { TaskMoves } from './task-moves';
 
 function worker(workerId: number, counts: Partial<WorkerSnapshot> = {}, peers: PeerSnapshot[] = []): WorkerSnapshot {
     return {
-        workerId, seqNo: 1, localMillis: 0, pid: 0, sentinel: false, allowedCpuIds: [], tasksLocalTotal: 0, tasksRunning: 0, tasksSentTotal: 0,
+        workerId, seqNo: 1, localMillis: 0, pid: 0, sentinel: false, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0, tasksSentTotal: 0,
         tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0, cpuPct: 0, rssBytes: 0, threads: 1, elapsedSeconds: 0, peers, ...counts
     };
 }
@@ -27,10 +27,10 @@ const RUN: WorldSnapshot = {
     nodes: [
         node('alpha',
             worker(0, { tasksSentTotal: 1 }, [peer(1, 1)]),
-            worker(1, { tasksLocalTotal: 142, tasksSentTotal: 78, tasksRecvTotal: 7 }, [peer(2, 40), peer(3, 38)])),
+            worker(1, { tasksStartedTotal: 142, tasksSentTotal: 78, tasksRecvTotal: 7 }, [peer(2, 40), peer(3, 38)])),
         node('beta',
-            worker(2, { tasksLocalTotal: 3609, tasksSentTotal: 20, tasksRecvTotal: 41 }, [peer(1, 5), peer(3, 15)]),
-            worker(3, { tasksLocalTotal: 3537, tasksSentTotal: 19, tasksRecvTotal: 70 }, [peer(1, 2), peer(2, 17)]))
+            worker(2, { tasksStartedTotal: 3609, tasksSentTotal: 20, tasksRecvTotal: 41 }, [peer(1, 5), peer(3, 15)]),
+            worker(3, { tasksStartedTotal: 3537, tasksSentTotal: 19, tasksRecvTotal: 70 }, [peer(1, 2), peer(2, 17)]))
     ]
 };
 
