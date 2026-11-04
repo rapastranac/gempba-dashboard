@@ -98,7 +98,7 @@ describe('TelemetryClient', () => {
         start(listener);
 
         await eventually(() => listener.frames.length === 1);
-        expect(listener.frames[0].workers![0].tasks_local_total).to.equal(42);
+        expect(listener.frames[0].workers![0].tasks_started_total).to.equal(42);
     });
 
     it('fires onConnected before any frames', async () => {

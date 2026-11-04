@@ -7,7 +7,7 @@ const GiB = 1024 ** 3;
 
 function frame(id: number, seq: number, cpu: number, rss: number, edges?: EdgeOut[]): WorkerFrame {
     return {
-        worker_id: id, seq_no: seq, worker_local_ms: 0, tasks_local_total: 100, tasks_sent_total: 20, tasks_recv_total: 5,
+        worker_id: id, seq_no: seq, worker_local_ms: 0, tasks_started_total: 100, tasks_sent_total: 20, tasks_recv_total: 5,
         tasks_running: 3, scheduler_pending_count: 7, idle_microseconds_per_worker: 1_000,
         process_cpu_pct: cpu, process_rss_bytes: rss, process_threads: 8, edges_out: edges
     };
@@ -15,7 +15,7 @@ function frame(id: number, seq: number, cpu: number, rss: number, edges?: EdgeOu
 
 function cpuFrame(id: number, cpu: number): WorkerFrame {
     return {
-        worker_id: id, seq_no: 1, worker_local_ms: 0, tasks_local_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
+        worker_id: id, seq_no: 1, worker_local_ms: 0, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
         tasks_running: 0, scheduler_pending_count: 0, idle_microseconds_per_worker: 0,
         process_cpu_pct: cpu, process_rss_bytes: 0, process_threads: 1, edges_out: []
     };

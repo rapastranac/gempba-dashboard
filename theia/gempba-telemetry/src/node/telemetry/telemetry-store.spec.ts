@@ -6,7 +6,7 @@ import { WorldSnapshotMapper } from './world-snapshot-mapper';
 
 function cpuFrame(id: number, cpu: number): WorkerFrame {
     return {
-        worker_id: id, seq_no: 1, worker_local_ms: 0, tasks_local_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
+        worker_id: id, seq_no: 1, worker_local_ms: 0, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
         tasks_running: 0, scheduler_pending_count: 0, idle_microseconds_per_worker: 0,
         process_cpu_pct: cpu, process_rss_bytes: 0, process_threads: 1, edges_out: []
     };

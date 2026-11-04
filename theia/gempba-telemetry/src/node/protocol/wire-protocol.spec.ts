@@ -82,7 +82,7 @@ describe('wire protocol', () => {
         const worker = envelope.workers![0];
         expect(envelope.workers).to.have.lengthOf(1);
         expect(worker.worker_id).to.equal(0);
-        expect(worker.tasks_local_total).to.equal(12_450);
+        expect(worker.tasks_started_total).to.equal(12_450);
         // The two queue-like counters live at different layers and must map independently.
         expect(worker.tasks_running).to.equal(6);
         expect(worker.scheduler_pending_count).to.equal(4);
