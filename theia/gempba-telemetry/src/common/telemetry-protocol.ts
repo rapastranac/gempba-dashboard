@@ -14,7 +14,7 @@ export interface TelemetryServer extends RpcServer<TelemetryServerClient> {
     availableModes(): Promise<ConnectionMode[]>;
     /** Opens an SSH session, authenticating once; rejects when it cannot. LOCAL needs none. */
     connect(session: SessionSpec): Promise<void>;
-    /** Streams one gempba center over the open session, or on this machine when none is open, replacing any previous target. */
+    /** Streams one gempba run's telemetry over the open session, or on this machine when none is open, replacing any previous target. */
     listen(target: TargetSpec): Promise<void>;
     /** Stops streaming; an SSH session stays open for the next target, a local stream simply ends. */
     stop(): Promise<void>;

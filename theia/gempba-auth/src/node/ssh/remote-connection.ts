@@ -277,7 +277,7 @@ function identityFiles(explicitKey: string, sshDir: string): string[] {
     return files;
 }
 
-/** Whether a gempba center answers through the port: it speaks first, so one byte proves the whole path. */
+/** Whether gempba's telemetry answers through the port: it speaks first, so one byte proves the whole path. */
 function carriesData(port: number): Promise<boolean> {
     return new Promise(resolve => {
         const socket = net.createConnection({ host: '127.0.0.1', port });

@@ -9,7 +9,7 @@ export interface TelemetryClientOptions {
 }
 
 /**
- * Reader of the gempba center's line-delimited JSON stream, with control lines written back on the same
+ * Reader of the line-delimited JSON stream that a gempba run's rank 0, the aggregator, serves, with control lines written back on the same
  * socket. A malformed line is skipped without dropping the connection.
  */
 export class TelemetryClient {
