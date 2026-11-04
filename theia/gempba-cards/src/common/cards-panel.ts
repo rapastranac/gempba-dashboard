@@ -1,6 +1,6 @@
 import {
-    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NumberText, Rates, SocketSnapshot, WorkerHistoryStore, WorkerSeries,
-    WorkerSnapshot, WorldSnapshot
+    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, SocketSnapshot, TaskWords, WorkerHistoryStore,
+    WorkerSeries, WorkerSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { Trend } from '@gempba/ui/lib/common/trend';
 import { CardsText } from './cards-text';
@@ -30,6 +30,8 @@ export namespace CardsPanel {
         readonly detail?: string;
         readonly trend?: Trend;
         readonly tone?: Tone;
+        /** What the figure counts, on hover. */
+        readonly hint?: string;
     }
 
     export interface Chart {
@@ -76,6 +78,8 @@ export namespace CardsPanel {
     export interface Total {
         readonly label: string;
         readonly value: string;
+        /** What the total counts, on hover. */
+        readonly hint?: string;
     }
 
     export interface Panel {
@@ -104,12 +108,15 @@ export namespace CardsPanel {
         const series = histories.node(node.host);
         const throughput = histories.throughput(node.host);
         const workers = node.sockets.flatMap(socket => socket.workers);
-        const allocated = allocatedCores(node);
-        const busy = workers.reduce((sum, worker) => sum + worker.cpuPct, 0) / 100;
+        const allocated = NodeUtilization.allocatedCores(node);
+        const busy = NodeUtilization.coresBusy(workers);
         const memTotal = series.memTotalLatest > 0 ? series.memTotalLatest : node.memTotalBytes;
         const memUsed = series.memTotalLatest > 0 ? series.memUsedLatest : node.memUsedBytes;
         const heroes: Hero[] = [
-            { label: 'Tasks completed', ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks', detail: runAverage(workers) },
+            {
+                label: TaskWords.STARTED, ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks', detail: runAverage(workers),
+                hint: TaskWords.STARTED_HINT
+            },
             { label: 'Cores busy', value: NumberText.fixed(busy, 1), unit: `of ${allocated}`, detail: plural(workers.length, 'worker') }
         ];
         if (memTotal > 0) {
@@ -134,8 +141,8 @@ export namespace CardsPanel {
         };
     }
 
-    export function forSocket(node: NodeSnapshot, socket: SocketSnapshot): Panel {
-        const busy = socket.workers.reduce((sum, worker) => sum + worker.cpuPct, 0) / 100;
+    export function forSocket(world: WorldSnapshot | undefined, node: NodeSnapshot, socket: SocketSnapshot): Panel {
+        const busy = NodeUtilization.coresBusy(socket.workers);
         const cores = socket.logicalCores;
         return {
             title: CardsText.socketTitle(socket),
@@ -155,7 +162,8 @@ export namespace CardsPanel {
                     const accessible = accessibleCores(worker, socket);
                     const fraction = worker.cpuPct / (100 * accessible);
                     return {
-                        label: CardsText.workerTitle(worker), fraction, tone: 'cpu', valueText: `${NumberText.fixed(fraction * 100, 0)}% of ${plural(accessible, 'core')}`
+                        label: CardsText.workerTitle(worker, WorldSnapshot.isCenter(world, worker.workerId)), fraction, tone: 'cpu',
+                        valueText: `${NumberText.fixed(fraction * 100, 0)}% of ${plural(accessible, 'core')}`
                     };
                 })
             }],
@@ -168,21 +176,27 @@ export namespace CardsPanel {
         const accessible = accessibleCores(worker, socket);
         const idle = latest(series.idlePct);
         const host = world?.nodes.find(node => node.sockets.some(each => each.workers.some(other => other.workerId === worker.workerId)))?.host;
+        const center = WorldSnapshot.isCenter(world, worker.workerId);
         // gempba's process has one thread beyond its pool, which runs the tasks; a source that counts differently never shows more running than threads
         const pool = Math.max(worker.threads - 1, worker.tasksRunning, 1);
-        const heroes: Hero[] = [
-            { label: 'Tasks completed', ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks', detail: runAverage([worker]) },
+        const memory: Hero = { label: 'Memory', ...bytesValue(worker.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' };
+        // the center schedules the run and runs no tasks, so it has no task rate, idle time or pool to show
+        const heroes: Hero[] = center ? [memory] : [
+            {
+                label: TaskWords.STARTED, ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks',
+                detail: runAverage([worker]), hint: TaskWords.STARTED_HINT
+            },
             {
                 label: 'Idle', value: idle === undefined ? '—' : NumberText.fixed(idle, 0), unit: idle === undefined ? undefined : '%',
                 trend: Trend.of(series.idlePct), tone: 'idle'
             },
-            { label: 'Memory', ...bytesValue(worker.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' }
+            memory
         ];
         // only gempba's centralized center queues tasks, for the workers that run out
         if (worker.schedulerPendingCount > 0) {
             heroes.push({ label: 'Queued', value: NumberText.grouped(worker.schedulerPendingCount), unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
         }
-        const bars: Bars[] = [{
+        const bars: Bars[] = center ? [] : [{
             title: 'Thread pool',
             rows: [{ label: 'Running', fraction: worker.tasksRunning / pool, valueText: `${worker.tasksRunning} of ${plural(pool, 'thread')}`, tone: 'tasks' }]
         }];
@@ -199,41 +213,38 @@ export namespace CardsPanel {
                 }))
             });
         }
+        const cpu: Chart = {
+            title: 'CPU', latest: `${NumberText.fixed(worker.cpuPct / accessible, 0)}% of ${plural(accessible, 'core')}`, values: series.cpu.map(pct => pct / accessible),
+            max: 100, capacity: WorkerHistoryStore.CAPACITY, tone: 'cpu'
+        };
+        const moved: Total[] = [
+            { label: TaskWords.SENT, value: Rates.countWithRate(worker.tasksSentTotal, worker.elapsedSeconds), hint: TaskWords.SENT_HINT },
+            { label: TaskWords.RECEIVED, value: Rates.countWithRate(worker.tasksRecvTotal, worker.elapsedSeconds), hint: TaskWords.RECEIVED_HINT }
+        ];
         return {
-            title: CardsText.workerTitle(worker),
-            subtitle: CardsText.workerSubtitle(host ?? '—', worker),
+            title: CardsText.workerTitle(worker, center),
+            subtitle: [...(center ? ['schedules the run, runs no tasks'] : []), CardsText.workerSubtitle(host ?? '—', worker)].join(' · '),
             gauge: {
                 label: `CPU on ${plural(accessible, 'core')}`, fraction: worker.cpuPct / (100 * accessible), tone: 'cpu',
                 valueText: `${NumberText.fixed(worker.cpuPct / accessible, 0)}%`
             },
             heroes,
-            charts: [
+            charts: center ? [cpu] : [
                 rateChart(series.tasksPerSecond),
                 {
                     title: 'Idle', latest: idle === undefined ? '—' : `${NumberText.fixed(idle, 0)}%`, values: series.idlePct, max: 100,
                     capacity: WorkerHistoryStore.CAPACITY, tone: 'idle'
                 },
-                {
-                    title: 'CPU', latest: `${NumberText.fixed(worker.cpuPct / accessible, 0)}% of ${plural(accessible, 'core')}`, values: series.cpu.map(pct => pct / accessible),
-                    max: 100,
-                    capacity: WorkerHistoryStore.CAPACITY, tone: 'cpu'
-                }
+                cpu
             ],
             strips: [],
             bars,
-            totals: [
-                { label: 'Tasks completed', value: Rates.countWithRate(worker.tasksLocalTotal, worker.elapsedSeconds) },
-                { label: 'Sent to peers', value: Rates.countWithRate(worker.tasksSentTotal, worker.elapsedSeconds) },
-                { label: 'Received from peers', value: Rates.countWithRate(worker.tasksRecvTotal, worker.elapsedSeconds) },
+            totals: center ? moved : [
+                { label: TaskWords.STARTED, value: Rates.countWithRate(worker.tasksLocalTotal, worker.elapsedSeconds), hint: TaskWords.STARTED_HINT },
+                ...moved,
                 { label: 'Pool idle', value: `${Durations.format(worker.idleMicrosPerWorker)} per thread` }
             ]
         };
-    }
-
-    /** The cores a node's workers may run on: their allowed CPUs together, or every core when none is restricted. */
-    export function allocatedCores(node: NodeSnapshot): number {
-        const allowed = new Set(node.sockets.flatMap(socket => socket.workers.flatMap(worker => worker.allowedCpuIds)));
-        return allowed.size > 0 ? allowed.size : node.logicalCores;
     }
 
     /** The cores a worker may run on in its socket, as core usage counts them; at least 1. */
@@ -271,11 +282,11 @@ export namespace CardsPanel {
         return facts.join(' · ');
     }
 
-    /** Tasks completed per second or per minute, one unit for the whole history: per second once any sample reaches one a second. */
+    /** Tasks started per second or per minute, one unit for the whole history: per second once any sample reaches one a second. */
     function rateChart(perSecond: readonly number[]): Chart {
         const unit = Rates.unitFor(Math.max(0, ...perSecond));
         return {
-            title: 'Tasks completed', latest: Rates.text(latest(perSecond), 'tasks', unit), values: perSecond.map(rate => Rates.inUnit(rate, unit)),
+            title: TaskWords.STARTED, latest: Rates.text(latest(perSecond), 'tasks', unit), values: perSecond.map(rate => Rates.inUnit(rate, unit)),
             capacity: WorkerHistoryStore.CAPACITY, tone: 'tasks'
         };
     }
@@ -287,12 +298,7 @@ export namespace CardsPanel {
 
     /** The run's average rate, all tasks over the elapsed time. */
     function runAverage(workers: readonly WorkerSnapshot[]): string | undefined {
-        const elapsed = workers[0]?.elapsedSeconds ?? 0;
-        if (elapsed <= 0) {
-            return undefined;
-        }
-        const total = workers.reduce((sum, worker) => sum + worker.tasksLocalTotal, 0);
-        return `run average ${Rates.text(total / elapsed)}`;
+        return Rates.runAverage(workers.reduce((sum, worker) => sum + worker.tasksLocalTotal, 0), workers[0]?.elapsedSeconds ?? 0);
     }
 
     function strip(node: NodeSnapshot, socket: SocketSnapshot): Strip {

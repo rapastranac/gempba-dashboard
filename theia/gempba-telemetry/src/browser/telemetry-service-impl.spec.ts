@@ -76,7 +76,7 @@ describe('TelemetryServiceImpl', () => {
     });
 
     it('starts disconnected with no snapshot, at the default rates', () => {
-        expect([service.state, service.snapshot, service.status]).to.deep.equal([ConnectionState.DISCONNECTED, undefined, '']);
+        expect([service.state, service.snapshot, service.lastFrameAt, service.status]).to.deep.equal([ConnectionState.DISCONNECTED, undefined, undefined, '']);
         expect([service.rates, service.observedRates]).to.deep.equal([RefreshRates.defaults(), { workerIntervalMs: undefined, nodeIntervalMs: undefined }]);
     });
 
@@ -121,13 +121,30 @@ describe('TelemetryServiceImpl', () => {
         expect(service.observedRates).to.deep.equal({ workerIntervalMs: 250, nodeIntervalMs: 250 });
     });
 
-    it('a new target clears the snapshot, the histories and the observed rates', async () => {
+    it('keeps when the latest snapshot arrived, and when each node last sent a new frame', () => {
+        const realNow = Date.now;
+        try {
+            Date.now = () => 1000;
+            receiver.onSnapshot(snapshot('h', 1));
+            Date.now = () => 1500;
+            receiver.onSnapshot(snapshot('h', 1));
+            expect([service.lastFrameAt, service.nodeFrameAt('h'), service.nodeFrameAt('other')]).to.deep.equal([1500, 1000, undefined]);
+            Date.now = () => 2000;
+            receiver.onSnapshot(snapshot('h', 2));
+            expect([service.lastFrameAt, service.nodeFrameAt('h')]).to.deep.equal([2000, 2000]);
+        } finally {
+            Date.now = realNow;
+        }
+    });
+
+    it('a new target clears the snapshot, the histories, the observed rates and the frame times', async () => {
         receiver.onSnapshot(snapshot('h', 1, 0));
         receiver.onSnapshot(snapshot('h', 2, 500));
         await service.listen(TargetSpec.of(undefined, 9001));
         expect(service.snapshot).to.equal(undefined);
         expect([nodeHistory.hosts(), workerHistory.workerIds()]).to.deep.equal([[], []]);
         expect(service.observedRates).to.deep.equal({ workerIntervalMs: undefined, nodeIntervalMs: undefined });
+        expect([service.lastFrameAt, service.nodeFrameAt('h')]).to.deep.equal([undefined, undefined]);
     });
 
     it('forwards the other controls to the backend', async () => {

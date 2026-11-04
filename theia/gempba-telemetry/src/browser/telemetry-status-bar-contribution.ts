@@ -2,7 +2,7 @@ import { ContextMenuRenderer } from '@theia/core/lib/browser/context-menu-render
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser/status-bar/status-bar-types';
 import { inject, injectable } from '@theia/core/shared/inversify';
-import { ConnectionState, Rates, RefreshInterval } from '@gempba/core';
+import { ConnectionState, Rates, RefreshInterval, TaskWords } from '@gempba/core';
 import { TelemetryService, WorkerHistoryService } from '../common/telemetry-service';
 import { TelemetryMenus } from './telemetry-command-contribution';
 
@@ -41,7 +41,7 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
         const lines = [this.telemetry.status || state.toLowerCase()];
         const throughput = this.workerHistory.clusterThroughput();
         if (listening && throughput.length > 0) {
-            lines.push(`Tasks completed: ${Rates.text(throughput[throughput.length - 1])}`);
+            lines.push(`${TaskWords.STARTED}: ${Rates.text(throughput[throughput.length - 1])}`);
         }
         const observed = this.telemetry.observedRates.workerIntervalMs;
         lines.push(`Worker frames every ${rate}${listening && observed !== undefined ? `, arriving every ${RefreshInterval.label(observed)}` : ''}`);

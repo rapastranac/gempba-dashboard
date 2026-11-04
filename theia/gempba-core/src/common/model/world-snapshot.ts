@@ -16,6 +16,9 @@ export interface WorldSnapshot {
 
 export namespace WorldSnapshot {
 
+    /** gempba's center is rank 0, and worker ids are ranks. */
+    export const CENTER_ID = 0;
+
     export function empty(): WorldSnapshot {
         return { schemaVersion: 0, timestampMillis: 0, elapsedSeconds: 0, nodes: [], structure: StructureKey.empty() };
     }
@@ -26,6 +29,11 @@ export namespace WorldSnapshot {
 
     export function totalWorkers(snapshot: WorldSnapshot): number {
         return snapshot.nodes.reduce((total, node) => total + NodeSnapshot.workerCount(node), 0);
+    }
+
+    /** Whether the worker is gempba's center, which schedules the run and runs no tasks: rank 0 once the run has other processes. */
+    export function isCenter(snapshot: WorldSnapshot | undefined, workerId: number): boolean {
+        return workerId === CENTER_ID && snapshot !== undefined && totalWorkers(snapshot) > 1;
     }
 
     /**

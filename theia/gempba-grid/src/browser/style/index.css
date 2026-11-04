@@ -2,7 +2,62 @@
     overflow-y: auto;
 }
 
-.gempba-grid-empty {
+.gempba-grid-overview {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--theia-ui-padding) * 2);
+    margin: calc(var(--theia-ui-padding) * 3) calc(var(--theia-ui-padding) * 3) 0;
     padding: calc(var(--theia-ui-padding) * 3);
-    color: var(--theia-descriptionForeground);
+    border: 1px solid var(--theia-gempba-panel-border);
+    border-radius: calc(var(--theia-ui-padding) * 2);
+    background: var(--theia-gempba-panel-background);
+}
+
+.gempba-grid-overview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-grid-overview-summary {
+    font-weight: 600;
+}
+
+.gempba-grid-overview-body {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: calc(var(--theia-ui-padding) * 3) calc(var(--theia-ui-padding) * 6);
+}
+
+.gempba-grid-overview-chart {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theia-ui-padding);
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.gempba-grid-figure {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theia-ui-padding);
+    min-width: 0;
+}
+
+.gempba-grid-tile-figures {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-grid-tile-figures .gempba-hero-value {
+    font-size: calc(var(--theia-ui-font-size1) * 1.4);
+}
+
+.gempba-grid-moved {
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }

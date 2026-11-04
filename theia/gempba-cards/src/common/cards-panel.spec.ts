@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import {
-    NodeHistoryStore, NodeSeries, NodeSnapshot, SocketSnapshot, StructureKey, WorkerHistoryStore, WorkerSeries, WorkerSnapshot, WorldSnapshot
+    NodeHistoryStore, NodeSeries, NodeSnapshot, SocketSnapshot, StructureKey, TaskWords, WorkerHistoryStore, WorkerSeries, WorkerSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { CardsPanel } from './cards-panel';
 
@@ -54,10 +54,11 @@ describe('CardsPanel', () => {
             expect(CardsPanel.forNode(node(), histories()).gauge).to.deep.equal({ label: 'CPU of the allocation', fraction: 0.75, valueText: '75%', tone: 'cpu' });
         });
 
-        it('heads with its tasks completed per second and their trend, the cores busy, and its memory', () => {
+        it('heads with its tasks started per second and their trend, the cores busy, and its memory', () => {
             const [tasks, cores, memory] = CardsPanel.forNode(node(), histories()).heroes;
             expect(tasks).to.deep.equal({
-                label: 'Tasks completed', value: '130', unit: '/s', trend: { direction: 'up', change: 0.3 }, tone: 'tasks', detail: 'run average 120 tasks/s'
+                label: 'Tasks started', value: '130', unit: '/s', trend: { direction: 'up', change: 0.3 }, tone: 'tasks', detail: 'run average 120 tasks/s',
+                hint: TaskWords.STARTED_HINT
             });
             expect(cores).to.deep.equal({ label: 'Cores busy', value: '3.0', unit: 'of 4', detail: '1 worker' });
             expect(memory).to.include({ label: 'Memory', value: '4.0', unit: 'GB', detail: 'of 16.0 GB', tone: 'memory' });
@@ -65,7 +66,7 @@ describe('CardsPanel', () => {
 
         it('counts every core when no worker is restricted', () => {
             const unrestricted = node({ sockets: [socket({ workers: [worker({ allowedCpuIds: [] })] })] });
-            expect(CardsPanel.allocatedCores(unrestricted)).to.equal(8);
+            expect(CardsPanel.forNode(unrestricted, histories()).heroes[1].unit).to.equal('of 8');
         });
 
         it('shows no rate before the workers sent two frames', () => {
@@ -80,11 +81,11 @@ describe('CardsPanel', () => {
             expect(CardsPanel.forNode(node({ memTotalBytes: 0, hasLiveMemory: false }), fresh).heroes.map(hero => hero.label)).to.not.include('Memory');
         });
 
-        it('charts CPU on a 0–100 scale, memory up to the total, and tasks completed on a round scale', () => {
+        it('charts CPU on a 0–100 scale, memory up to the total, and tasks started on a round scale', () => {
             const charts = CardsPanel.forNode(node(), histories()).charts;
             expect(charts.map(chart => chart.capacity)).to.deep.equal([NodeHistoryStore.CAPACITY, NodeHistoryStore.CAPACITY, WorkerHistoryStore.CAPACITY]);
             expect(charts.map(chart => [chart.title, chart.latest, chart.max, chart.tone])).to.deep.equal([
-                ['CPU', '75%', 100, 'cpu'], ['Memory', '4.0 GB', 16 * GiB, 'memory'], ['Tasks completed', '130 tasks/s', undefined, 'tasks']
+                ['CPU', '75%', 100, 'cpu'], ['Memory', '4.0 GB', 16 * GiB, 'memory'], ['Tasks started', '130 tasks/s', undefined, 'tasks']
             ]);
         });
 
@@ -114,7 +115,7 @@ describe('CardsPanel', () => {
     describe('a socket', () => {
 
         it('gauges its CPU and heads with the cores busy and its workers', () => {
-            const panel = CardsPanel.forSocket(node(), socket());
+            const panel = CardsPanel.forSocket(undefined, node(), socket());
             expect([panel.title, panel.subtitle]).to.deep.equal(['Socket 0: Xeon', 'on alpha · 4 physical / 8 logical cores · CPUs 0–7']);
             expect(panel.gauge).to.deep.equal({ label: 'CPU of the socket', fraction: 3 / 8, valueText: '38%', tone: 'cpu' });
             expect(panel.heroes).to.deep.equal([{ label: 'Cores busy', value: '3.0', unit: 'of 8' }, { label: 'Workers', value: '1' }]);
@@ -123,14 +124,14 @@ describe('CardsPanel', () => {
 
         it('has a bar per worker, its CPU as a share of the cores it may use, as its gauge reads', () => {
             const two = socket({ workers: [worker(), worker({ workerId: 4, cpuPct: 50, allowedCpuIds: [] })] });
-            expect(CardsPanel.forSocket(node(), two).bars[0].rows).to.deep.equal([
+            expect(CardsPanel.forSocket(undefined, node(), two).bars[0].rows).to.deep.equal([
                 { label: 'Worker 3', fraction: 0.75, valueText: '75% of 4 cores', tone: 'cpu' },
                 { label: 'Worker 4', fraction: 50 / 800, valueText: '6% of 8 cores', tone: 'cpu' }
             ]);
         });
 
         it('has no gauge without topology', () => {
-            expect(CardsPanel.forSocket(node(), socket({ logicalCores: 0, cpuIds: [], hasTopology: false })).gauge).to.equal(undefined);
+            expect(CardsPanel.forSocket(undefined, node(), socket({ logicalCores: 0, cpuIds: [], hasTopology: false })).gauge).to.equal(undefined);
         });
     });
 
@@ -146,17 +147,17 @@ describe('CardsPanel', () => {
                 .to.deep.equal({ label: 'CPU on 4 cores', fraction: 0.75, tone: 'cpu', valueText: '75%' });
         });
 
-        it('heads with its tasks completed per second, idle time and memory', () => {
+        it('heads with its tasks started per second, idle time and memory', () => {
             const [tasks, idle, memory] = CardsPanel.forWorker(undefined, socket(), worker(), histories()).heroes;
-            expect(tasks).to.include({ label: 'Tasks completed', value: '120', unit: '/s', detail: 'run average 120 tasks/s', tone: 'tasks' });
+            expect(tasks).to.include({ label: 'Tasks started', value: '120', unit: '/s', detail: 'run average 120 tasks/s', tone: 'tasks' });
             expect(idle).to.include({ label: 'Idle', value: '12', unit: '%', tone: 'idle' });
             expect(memory).to.include({ value: '256.0', unit: 'MB', tone: 'memory' });
         });
 
-        it('charts its tasks completed, idle time and CPU, the CPU as a share of its cores as the gauge reads it', () => {
+        it('charts its tasks started, idle time and CPU, the CPU as a share of its cores as the gauge reads it', () => {
             const charts = CardsPanel.forWorker(undefined, socket(), worker(), histories()).charts;
             expect(charts.map(chart => [chart.title, chart.latest, chart.max]))
-                .to.deep.equal([['Tasks completed', '120 tasks/s', undefined], ['Idle', '12%', 100], ['CPU', '75% of 4 cores', 100]]);
+                .to.deep.equal([['Tasks started', '120 tasks/s', undefined], ['Idle', '12%', 100], ['CPU', '75% of 4 cores', 100]]);
             expect(charts[2].values).to.deep.equal([70, 75]);
         });
 
@@ -172,14 +173,31 @@ describe('CardsPanel', () => {
             expect(center.heroes[3]).to.deep.equal({ label: 'Queued', value: '1,200', unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
         });
 
-        it('totals what no figure shows: tasks completed, sent and received with their run averages, and the pool\'s idle time', () => {
+        it('totals what no figure shows: tasks started, sent and received with their run averages, and the pool\'s idle time', () => {
             const totals = CardsPanel.forWorker(undefined, socket(), worker({ tasksSentTotal: 30, idleMicrosPerWorker: 4_500_000 }), histories()).totals;
             expect(totals).to.deep.equal([
-                { label: 'Tasks completed', value: '12,000 · 120 tasks/s on average' },
-                { label: 'Sent to peers', value: '30 · 18 tasks/min on average' },
-                { label: 'Received from peers', value: '0' },
+                { label: 'Tasks started', value: '12,000 · 120 tasks/s on average', hint: TaskWords.STARTED_HINT },
+                { label: 'Tasks sent', value: '30 · 18 tasks/min on average', hint: TaskWords.SENT_HINT },
+                { label: 'Tasks received', value: '0', hint: TaskWords.RECEIVED_HINT },
                 { label: 'Pool idle', value: '4.5 s per thread' }
             ]);
+        });
+
+        it('shows the center as the center: no tasks started, idle time or pool; its CPU, memory, and the tasks it sent and received', () => {
+            const center = worker({ workerId: 0, tasksLocalTotal: 0, tasksSentTotal: 1, schedulerPendingCount: 0 });
+            const shared = socket({ workers: [center, worker()] });
+            const panel = CardsPanel.forWorker(world(node({ sockets: [shared] })), shared, center, histories());
+            expect([panel.title, panel.subtitle]).to.deep.equal(['Worker 0 · center', 'schedules the run, runs no tasks · PID 4100 · frame #17 · on alpha']);
+            expect(panel.heroes.map(hero => hero.label)).to.deep.equal(['Memory']);
+            expect(panel.charts.map(chart => chart.title)).to.deep.equal(['CPU']);
+            expect(panel.bars).to.deep.equal([]);
+            expect(panel.totals.map(total => [total.label, total.value])).to.deep.equal([['Tasks sent', '1 · 0.60 tasks/min on average'], ['Tasks received', '0']]);
+        });
+
+        it('marks the center among the workers of a socket', () => {
+            const shared = socket({ workers: [worker({ workerId: 0 }), worker()] });
+            const labels = CardsPanel.forSocket(world(node({ sockets: [shared] })), node({ sockets: [shared] }), shared).bars[0].rows.map(row => row.label);
+            expect(labels).to.deep.equal(['Worker 0 · center', 'Worker 3']);
         });
 
         it('never meters more tasks running than threads', () => {

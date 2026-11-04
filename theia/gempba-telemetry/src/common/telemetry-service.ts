@@ -11,6 +11,8 @@ export interface TelemetryService {
     readonly state: ConnectionState;
     /** The latest snapshot of the active session, for a view that opens mid-stream. */
     readonly snapshot: WorldSnapshot | undefined;
+    /** When the latest snapshot arrived, on this machine's clock; `undefined` before the first of a stream. */
+    readonly lastFrameAt: number | undefined;
     /** The latest user-facing status line. */
     readonly status: string;
     readonly onSnapshot: Event<WorldSnapshot>;
@@ -25,12 +27,17 @@ export interface TelemetryService {
     readonly observedRates: Partial<RefreshRates>;
     readonly onRatesChange: Event<RefreshRates>;
 
+    /**
+     * When one of the node's workers last sent a new frame, on this machine's clock; `undefined` before any. A node whose
+     * workers stalled keeps its time while the stream goes on.
+     */
+    nodeFrameAt(host: string): number | undefined;
     availableModes(): Promise<ConnectionMode[]>;
     /** Opens an SSH session (HOST, JUMP), authenticating once; a local gempba needs none. */
     connect(session: SessionSpec): Promise<void>;
     /**
      * Starts a new target over the open session, or on this machine when none is open; the snapshot, the
-     * histories and the observed rates are cleared first.
+     * histories, the observed rates and the frame times are cleared first.
      */
     listen(target: TargetSpec): Promise<void>;
     /** Stops streaming; an SSH session stays open, a local stream ends in DISCONNECTED. */
@@ -53,8 +60,8 @@ export const WorkerHistoryService = Symbol('WorkerHistoryService');
 
 export interface WorkerHistoryService {
     seriesFor(workerId: number): WorkerSeries;
-    /** Tasks completed per second by all of one node's workers, oldest first. */
+    /** Tasks started per second by all of one node's workers, oldest first. */
     throughputFor(host: string): readonly number[];
-    /** Tasks completed per second by every worker, oldest first. */
+    /** Tasks started per second by every worker, oldest first. */
     clusterThroughput(): readonly number[];
 }

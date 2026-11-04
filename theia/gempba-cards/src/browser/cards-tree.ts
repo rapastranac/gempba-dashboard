@@ -3,7 +3,7 @@ import { CompositeTreeNode, TreeImpl, TreeNode } from '@theia/core/lib/browser/t
 import { ExpandableTreeNode } from '@theia/core/lib/browser/tree/tree-expansion';
 import { SelectableTreeNode } from '@theia/core/lib/browser/tree/tree-selection';
 import { injectable } from '@theia/core/shared/inversify';
-import { NodeSnapshot, SocketSnapshot, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeSnapshot, NodeUtilization, SocketSnapshot, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
 import { CardsPanel } from '../common/cards-panel';
 import { CardsText } from '../common/cards-text';
 
@@ -68,7 +68,7 @@ export class CardsTree extends TreeImpl {
                 return node ? node.sockets.map(each => this.socketRow(parent, node, each)) : [];
             case 'socket': {
                 const socket = node?.sockets.find(candidate => candidate.socketId === parent.socketId);
-                return socket ? socket.workers.map(each => this.workerRow(parent, parent.host, socket, each)) : [];
+                return socket ? socket.workers.map(each => this.workerRow(parent, parent.host, socket, each, WorldSnapshot.isCenter(snapshot, each.workerId))) : [];
             }
             default:
                 return [];
@@ -85,15 +85,15 @@ export class CardsTree extends TreeImpl {
 
     protected socketRow(parent: CompositeTreeNode, node: NodeSnapshot, socket: SocketSnapshot): CardsGroupNode {
         const holdsSentinel = socket.workers.some(worker => worker.workerId === node.sentinelWorkerId);
-        const busy = socket.workers.reduce((sum, worker) => sum + worker.cpuPct, 0) / 100;
+        const busy = NodeUtilization.coresBusy(socket.workers);
         return this.group(parent, `socket:${node.host}/${socket.socketId}`, { kind: 'socket', host: node.host, socketId: socket.socketId },
             CardsText.socketTitle(socket), CardsText.socketCaption(socket), codicon('circuit-board'), holdsSentinel,
             socket.logicalCores > 0 ? busy / socket.logicalCores : undefined);
     }
 
-    protected workerRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, worker: WorkerSnapshot): CardsTreeNode {
+    protected workerRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, worker: WorkerSnapshot, center: boolean): CardsTreeNode {
         const id = CardsTreeNode.workerId(host, worker.workerId);
-        const name = CardsText.workerTitle(worker);
+        const name = CardsText.workerTitle(worker, center);
         const accessible = CardsPanel.accessibleCores(worker, socket);
         const description = CardsText.workerCaption(worker, accessible);
         const icon = codicon(worker.sentinel ? 'star-full' : 'gear');

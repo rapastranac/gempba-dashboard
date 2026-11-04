@@ -2,7 +2,7 @@
 export interface WorkerSeries {
     /** Percent of one core, as in the frames. */
     readonly cpu: readonly number[];
-    /** Tasks completed per second, over the last 10 s of the worker's frames. */
+    /** Tasks started per second, handed to its threads, over the last 10 s of the worker's frames. */
     readonly tasksPerSecond: readonly number[];
     /** Percent of the time the worker's pool threads were idle, between two consecutive frames. */
     readonly idlePct: readonly number[];

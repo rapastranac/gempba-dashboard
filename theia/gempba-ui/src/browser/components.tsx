@@ -61,8 +61,12 @@ export interface TileProps {
     readonly title: string;
     /** The headline figure at the top right, e.g. a CPU percentage. */
     readonly readout?: string;
+    /** A small mark before the title, such as a live dot. */
+    readonly status?: React.ReactNode;
     readonly tooltip?: string;
     readonly selected?: boolean;
+    /** Fades what the tile shows below its name, as for a node whose frames stopped. */
+    readonly dimmed?: boolean;
     readonly onSelect?: () => void;
     /** Opens what the tile stands for: on double-click, or on Enter, which also selects it. */
     readonly onOpen?: () => void;
@@ -70,7 +74,7 @@ export interface TileProps {
 }
 
 /** A selectable card with a title row; what it shows is up to its children. A click selects it, a double-click opens it. */
-export function Tile({ title, readout, tooltip, selected, onSelect, onOpen, children }: TileProps): React.ReactElement {
+export function Tile({ title, readout, status, tooltip, selected, dimmed, onSelect, onOpen, children }: TileProps): React.ReactElement {
     const onKeyDown = (event: React.KeyboardEvent) => {
         if (event.key !== 'Enter' && event.key !== ' ') {
             return;
@@ -81,10 +85,14 @@ export function Tile({ title, readout, tooltip, selected, onSelect, onOpen, chil
             onOpen?.();
         }
     };
-    return <div className={'gempba-tile' + (selected ? ' gempba-tile-selected' : '')} title={tooltip} role='button' tabIndex={0}
+    return <div className={'gempba-tile' + (selected ? ' gempba-tile-selected' : '') + (dimmed ? ' gempba-tile-dimmed' : '')} title={tooltip}
+        role='button' tabIndex={0}
         aria-pressed={selected === true} onClick={onSelect} onDoubleClick={onOpen} onKeyDown={onKeyDown}>
         <div className='gempba-tile-header'>
-            <span className='gempba-tile-title'>{title}</span>
+            <span className='gempba-tile-name'>
+                {status}
+                <span className='gempba-tile-title'>{title}</span>
+            </span>
             {readout && <span className='gempba-tile-readout'>{readout}</span>}
         </div>
         {children}

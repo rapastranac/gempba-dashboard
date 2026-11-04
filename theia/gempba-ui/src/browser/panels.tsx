@@ -31,15 +31,17 @@ export interface HeroStatProps {
     readonly trend?: Trend;
     /** Colors the trend arrow like the chart of the same figure. */
     readonly tone?: ChartTone;
+    /** What the figure counts, on hover. */
+    readonly hint?: string;
 }
 
 const TREND_ARROWS = { up: ['arrow-up', 'rising'], down: ['arrow-down', 'falling'] } as const;
 
 /** A headline figure: a small label over a large number with its unit, the way it trends, and a detail line. */
-export function HeroStat({ label, value, unit, detail, trend, tone }: HeroStatProps): React.ReactElement {
+export function HeroStat({ label, value, unit, detail, trend, tone, hint }: HeroStatProps): React.ReactElement {
     const arrow = trend && trend.direction !== 'flat' ? TREND_ARROWS[trend.direction] : undefined;
     const trendWords = arrow && (trend?.change === undefined ? arrow[1] : `${arrow[1]} ${Math.round(Math.abs(trend.change) * 100)}%`);
-    return <div className={tone ? `gempba-hero gempba-tone-${tone}` : 'gempba-hero'}>
+    return <div className={tone ? `gempba-hero gempba-tone-${tone}` : 'gempba-hero'} title={hint}>
         <span className='gempba-hero-label'>{label}</span>
         <span className='gempba-hero-value'>
             {value}

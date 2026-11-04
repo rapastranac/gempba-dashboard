@@ -48,6 +48,13 @@ describe('WorldSnapshot', () => {
         expect(NodeSnapshot.workerCount(snapshot.nodes[0])).to.equal(3);
     });
 
+    it('takes rank 0 for the center once the run has other processes, and a lone process for none', () => {
+        const cluster = world(node('alpha', socket(0, 0, 1)), node('beta', socket(0, 2)));
+        expect([0, 1, 2].map(id => WorldSnapshot.isCenter(cluster, id))).to.deep.equal([true, false, false]);
+        expect(WorldSnapshot.isCenter(world(node('alpha', socket(0, 0))), 0)).to.equal(false);
+        expect(WorldSnapshot.isCenter(undefined, 0)).to.equal(false);
+    });
+
     it('forHost keeps only that host and rebuilds its structure key', () => {
         const snapshot = world(node('a', socket(0, 1), socket(1, 2)), node('b', socket(0, 3)));
         const narrowed = WorldSnapshot.forHost(snapshot, 'a');

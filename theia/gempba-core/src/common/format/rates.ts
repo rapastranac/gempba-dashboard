@@ -40,6 +40,11 @@ export namespace Rates {
         return `${NumberText.grouped(count)} · ${text(count / elapsedSeconds)} on average`;
     }
 
+    /** `run average 120 tasks/s`: the tasks over the time the run has taken, or nothing before any time elapsed. */
+    export function runAverage(tasks: number, elapsedSeconds: number): string | undefined {
+        return elapsedSeconds > 0 ? `run average ${text(tasks / elapsedSeconds)}` : undefined;
+    }
+
     /** Adaptive precision: `0.42`, `3.5`, `42`, `1,234`. */
     function figure(value: number): string {
         if (value >= 1000) {

@@ -27,6 +27,11 @@ describe('HeroStat', () => {
         expect(html).to.contain('<span class="gempba-hero-detail">86% of the allocation</span>');
     });
 
+    it('says what the figure counts on hover', () => {
+        expect(renderToStaticMarkup(<HeroStat label='Tasks started' value='12' hint='Subtrees handed to threads' />))
+            .to.match(/^<div class="gempba-hero" title="Subtrees handed to threads">/);
+    });
+
     it('points the way the figure trends, and how far', () => {
         const up = renderToStaticMarkup(<HeroStat label='Tasks/s' value='12k' trend={{ direction: 'up', change: 0.204 }} />);
         expect(up).to.contain('class="gempba-hero-trend codicon codicon-arrow-up" role="img" aria-label="rising 20%"');
