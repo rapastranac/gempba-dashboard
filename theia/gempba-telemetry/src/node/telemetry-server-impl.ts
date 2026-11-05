@@ -15,7 +15,8 @@ import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
  * and pending opens from a superseded session are dropped.
  * A local gempba needs no session: listening while disconnected streams it directly, and stopping that stream
  * disconnects. Connect is for the modes that authenticate. An SSH session that drops on its own cannot recover
- * without authenticating again, so it disconnects and says so instead of retrying the stream.
+ * without authenticating again, so it disconnects and says so instead of retrying the stream. A stream that closes
+ * after the run's final line says the run ended, and waits for the next run on the same port.
  */
 @injectable()
 export class TelemetryServerImpl implements TelemetryServer {
@@ -36,6 +37,8 @@ export class TelemetryServerImpl implements TelemetryServer {
     protected forward: Forward | undefined;
     protected telemetry: TelemetryClient | undefined;
     protected readonly store = new TelemetryStore();
+    /** Whether the stream's latest line was the run's final one: gempba closes the connection after it. */
+    protected runEnded = false;
     protected workerIntervalMs = RefreshInterval.DEFAULT_WORKER_MS;
     protected nodeIntervalMs = RefreshInterval.DEFAULT_NODE_MS;
 
@@ -101,6 +104,7 @@ export class TelemetryServerImpl implements TelemetryServer {
         }
         this.forward = forward;
         this.store.reset();
+        this.runEnded = false;
         const address = `${TelemetryServerImpl.LOOPBACK}:${forward.port}`;
         this.telemetry = new TelemetryClient(TelemetryServerImpl.LOOPBACK, forward.port, this.frameListener(epoch, address));
         this.setState(ConnectionState.LISTENING);
@@ -194,13 +198,19 @@ export class TelemetryServerImpl implements TelemetryServer {
             },
             onFrame: frame => {
                 if (epoch === this.epoch) {
-                    this.client?.onSnapshot(this.store.ingest(frame));
+                    const snapshot = this.store.ingest(frame);
+                    this.runEnded = snapshot.final === true;
+                    this.client?.onSnapshot(snapshot);
                 }
             },
             onDisconnected: cause => {
-                if (epoch === this.epoch) {
-                    this.status(`disconnected from ${address} (${cause ? cause.message : 'peer closed'}); retrying…`);
+                if (epoch !== this.epoch) {
+                    return;
                 }
+                // schema 1 has no final line, so a gempba 4.2 run that ends reads as a lost connection
+                this.status(this.runEnded
+                    ? `the run ended; waiting for the next run on ${address}`
+                    : `disconnected from ${address} (${cause ? cause.message : 'peer closed'}); retrying…`);
             }
         };
     }
