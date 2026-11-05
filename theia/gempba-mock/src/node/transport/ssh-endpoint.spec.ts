@@ -35,10 +35,18 @@ describe('MockKeys', () => {
         expect(parsed.type).to.equal('ssh-ed25519');
     });
 
+    it('draws only key pairs that parse, though ssh2 now and then writes one that does not', () => {
+        for (let i = 0; i < 2048; i++) {
+            const pair = MockKeys.generatePair();
+            expect(utils.parseKey(pair.private)).not.to.be.instanceOf(Error);
+            expect(utils.parseKey(pair.public)).not.to.be.instanceOf(Error);
+        }
+    });
+
     it('reads the user\'s public keys and authorized_keys, skipping what does not parse', () => {
         fs.mkdirSync(path.join(home, '.ssh'));
-        const a = utils.generateKeyPairSync('ed25519').public;
-        const b = utils.generateKeyPairSync('ed25519').public;
+        const a = MockKeys.generatePair().public;
+        const b = MockKeys.generatePair().public;
         fs.writeFileSync(path.join(home, '.ssh', 'id_ed25519.pub'), a + '\n');
         fs.writeFileSync(path.join(home, '.ssh', 'authorized_keys'), `# mine\n${b}\nnot a key\n`);
         fs.writeFileSync(path.join(home, '.ssh', 'id_ed25519'), 'private, never read');
@@ -48,7 +56,7 @@ describe('MockKeys', () => {
 
     it('finds a known_hosts line that holds another key for the mock, plain or hashed', () => {
         const ours = MockKeys.hostKey(MockKeys.dir(home)).parsed;
-        const theirs = (utils.parseKey(utils.generateKeyPairSync('ed25519').private) as ParsedKey).getPublicSSH().toString('base64');
+        const theirs = (utils.parseKey(MockKeys.generatePair().private) as ParsedKey).getPublicSSH().toString('base64');
         const salt = crypto.randomBytes(20);
         const hashed = crypto.createHmac('sha1', salt).update('[127.0.0.1]:2222').digest('base64');
         fs.mkdirSync(path.join(home, '.ssh'));
@@ -177,7 +185,7 @@ describe('MockSshEndpoint', () => {
 
     it('refuses an unknown key, and everyone when it accepts no key', async () => {
         await serve(ConnectionMode.HOST);
-        const stranger = (utils.generateKeyPairSync('ed25519')).private;
+        const stranger = MockKeys.generatePair().private;
         let failed: unknown;
         await connect({ privateKey: stranger }).catch(error => failed = error);
         expect(String(failed)).to.contain('All configured authentication methods failed');
