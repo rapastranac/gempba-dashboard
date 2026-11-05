@@ -317,6 +317,80 @@ describe('MockRun', () => {
         });
     });
 
+    describe('time accounting, as gempba 4.3 counts it', () => {
+
+        const COORDINATOR_KEYS = [
+            'assign_latency_microseconds_total', 'assign_count', 'assign_latency_microseconds_max', 'available_microseconds_queue_empty',
+            'coordinator_state_msgs_total', 'coordinator_score_proposals_total', 'coordinator_score_broadcasts_total', 'last_score_improvement_ms',
+            'coordinator_full_microseconds'
+        ] as const;
+        const WORKER_KEYS = ['sched_running_microseconds', 'sched_waiting_microseconds', 'first_task_ms', 'last_task_ms', 'score_proposals_sent'] as const;
+
+        it('splits each rank\'s idle time into starved and imbalanced, and a worker\'s time into running and waiting', () => {
+            const mock = run();
+            mock.advanceTo(30_000);
+            for (const frame of envelope(mock).ranks!) {
+                expect(frame.idle_microseconds_starved! + frame.idle_microseconds_imbalanced!).to.be.closeTo(frame.idle_microseconds_per_thread, 1);
+                if (frame.rank === 0) {
+                    expect(frame.idle_microseconds_starved).to.equal(frame.idle_microseconds_per_thread);
+                } else {
+                    expect(frame.sched_running_microseconds! + frame.sched_waiting_microseconds!).to.be.within(29_000_000, 30_000_000);
+                }
+            }
+        });
+
+        it('counts the bytes and the time of every task moved, at both ends', () => {
+            const mock = run({}, { shape: { nodes: 2 } });
+            mock.advanceTo(30_000);
+            for (const frame of envelope(mock).ranks!) {
+                expect(frame.bytes_sent_total).to.equal(frame.edges_out!.reduce((sum, edge) => sum + edge.bytes, 0));
+                expect(frame.tasks_sent_total > 0 ? frame.send_microseconds_total : 0).to.be.at.least(frame.tasks_sent_total > 0 ? 15 : 0);
+                expect(frame.tasks_recv_total > 0).to.equal(frame.bytes_recv_total! > 0);
+            }
+        });
+
+        it('fills the coordinator\'s counters on the coordinator alone, and the workers\' on the workers alone', () => {
+            const mock = run();
+            mock.advanceTo(30_000);
+            const [coordinator, ...workers] = envelope(mock).ranks!;
+            expect(coordinator.assign_count).to.be.above(0);
+            expect(coordinator.assign_latency_microseconds_total).to.be.at.least(200 * coordinator.assign_count!);
+            expect(coordinator.assign_latency_microseconds_max).to.be.within(1, coordinator.assign_latency_microseconds_total!);
+            expect(coordinator.coordinator_state_msgs_total).to.be.above(0);
+            expect(coordinator.coordinator_score_proposals_total).to.be.at.least(coordinator.coordinator_score_broadcasts_total!);
+            expect(coordinator.coordinator_score_broadcasts_total).to.be.above(0);
+            expect(coordinator.last_score_improvement_ms).to.be.within(1, 30_000);
+            expect(WORKER_KEYS.map(key => coordinator[key])).to.deep.equal(WORKER_KEYS.map(() => 0));
+            for (const worker of workers) {
+                expect(COORDINATOR_KEYS.map(key => worker[key]), `rank ${worker.rank}`).to.deep.equal(COORDINATOR_KEYS.map(() => 0));
+            }
+            expect(workers.reduce((sum, worker) => sum + worker.score_proposals_sent!, 0)).to.be.above(0);
+        });
+
+        it('counts the time ranks wait while the centralized queue is empty, and the time it is full', () => {
+            const mock = run({}, { scheduler: 'centralized', shape: { nodes: 1, ranksPerNode: 3 } });
+            mock.advanceTo(400_000);
+            const coordinator = rankFrame(mock, 0);
+            expect(coordinator.available_microseconds_queue_empty).to.be.above(0);
+            expect(coordinator.coordinator_full_microseconds).to.be.above(0);
+        });
+
+        it('refuses spawns while a pool is full, and remote ones while there is no channel to send them on', () => {
+            const mock = run({ loadPct: 100 });
+            mock.advanceTo(30_000);
+            const workers = envelope(mock).ranks!.filter(frame => frame.rank !== 0);
+            expect(workers.every(frame => frame.spawn_rejected_pool_full! >= frame.spawn_remote_rejected!)).to.equal(true);
+            expect(workers.some(frame => frame.spawn_remote_rejected! > 0)).to.equal(true);
+        });
+
+        it('counts telemetry\'s own time, most of it on rank 0, the aggregator', () => {
+            const mock = run();
+            mock.advanceTo(10_000);
+            const [aggregator, ...others] = envelope(mock).ranks!;
+            expect(others.every(frame => frame.telemetry_microseconds_total! > 0 && frame.telemetry_microseconds_total! < aggregator.telemetry_microseconds_total!)).to.equal(true);
+        });
+    });
+
     describe('fidelity', () => {
 
         it('sends schema 1 as gempba 4.2 does: zeros for socket CPU and use, network and disk, every 500 ms', () => {

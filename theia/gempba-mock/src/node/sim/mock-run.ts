@@ -62,6 +62,10 @@ interface RankState {
     baseRss: number;
     efficiency: number;
     edges: Map<number, Edge>;
+    /** What schema 2 counts beyond schema 1; the coordinator's counters stay 0 on a worker, and the workers' on the coordinator. */
+    acct: Accounting;
+    /** When the coordinator reserved it as a push target: where the assignment's latency starts. */
+    assignedAtMs?: number;
     /** Its edges serialized, kept until it sends again: a rank's edges reach every rank it ever sent to, as gempba's do. */
     edgesJson?: string;
 }
@@ -76,6 +80,33 @@ interface NodeState {
     frameJson?: string;
     frameSchema?: number;
     pageCache: number;
+}
+
+/** Schema 2's time accounting, as gempba v4.3.0 counts it; times in microseconds unless they say `Ms`, since the run started. */
+interface Accounting {
+    bytesSent: number;
+    bytesRecv: number;
+    sendMicros: number;
+    recvMicros: number;
+    spawnRejectedPoolFull: number;
+    spawnRemoteRejected: number;
+    idleStarved: number;
+    idleImbalanced: number;
+    schedRunning: number;
+    schedWaiting: number;
+    firstTaskMs: number;
+    lastTaskMs: number;
+    assignLatencyTotal: number;
+    assignCount: number;
+    assignLatencyMax: number;
+    availableQueueEmpty: number;
+    stateMsgs: number;
+    scoreProposals: number;
+    scoreBroadcasts: number;
+    scoreProposalsSent: number;
+    lastImprovementMs: number;
+    fullMicros: number;
+    telemetryMicros: number;
 }
 
 /** What a rank's frame says, taken when it is sampled; either schema writes it. */
@@ -93,6 +124,8 @@ interface RankSample {
     readonly rssBytes: number;
     readonly threads: number;
     readonly edgesJson: string;
+    /** Whole microseconds, as gempba's counters are. */
+    readonly acct: Readonly<Accounting>;
 }
 
 /** What a node's frame says, taken when its sentinel samples it; either schema writes it. */
@@ -143,8 +176,17 @@ export class MockRun {
     static readonly SPLIT_SHARE: readonly [number, number] = [0.2, 0.5];
     /** gempba's main thread polls MPI without sleeping, so an idle process still keeps about one core busy. */
     static readonly POLLING_PCT = 97;
+    /** A task's latency and bandwidth on the way, in microseconds and bytes per microsecond: shared memory within a node, the network across. */
+    static readonly WITHIN_NODE: readonly [number, number] = [15, 8000];
+    static readonly ACROSS_NODES: readonly [number, number] = [60, 1250];
+    /** The node expansions a running task tries to spawn; with every pool thread busy, each is refused and runs inline. */
+    static readonly SPAWN_TRIES_PER_TASK = 4;
+    /** The share of finished tasks that reach a leaf whose score a worker proposes. */
+    static readonly PROPOSALS_PER_TASK = 1e-4;
 
     protected readonly random: MockRandom;
+    /** The counters' own noise, apart from the run's, so the same seed steps the same run whatever schema 2 counts. */
+    protected readonly noise: MockRandom;
     protected topologyNow: MockTopology;
     protected readonly ranks = new Map<number, RankState>();
     protected readonly nodes: NodeState[];
@@ -169,6 +211,7 @@ export class MockRun {
     constructor(protected readonly shape: MockShape, readonly scheduler: MockScheduler, live: MockLive, seed: number,
         rates: RefreshRates = RefreshRates.defaults(), protected readonly roles: MockRoles = { coordinatorRank: 0 }) {
         this.random = new MockRandom(seed);
+        this.noise = new MockRandom(seed + 0x5eed);
         this.runSeed = seed;
         this.liveNow = live;
         this.model = MockScenarioModel.of(live.scenario);
@@ -320,19 +363,33 @@ export class MockRun {
     protected runRank(rank: RankState, scenarioTime: number): void {
         const dt = MockRun.STEP_MS;
         const pool = rank.place.poolThreads;
+        const acct = rank.acct;
         if (rank.phase === 'running') {
+            acct.schedRunning += dt * 1000;
             const busyTarget = pool * this.model.loadFactor(scenarioTime) * this.liveNow.loadPct / 100;
             rank.running = Math.min(pool, this.random.round(busyTarget), rank.subtree);
             const finished = Math.min(this.random.poisson(rank.running * dt / this.model.meanTaskMs), rank.subtree);
             rank.tasksLocal += finished;
             rank.subtree -= finished;
+            this.spawn(rank, finished);
+            for (let proposals = this.noise.poisson(finished * MockRun.PROPOSALS_PER_TASK); proposals > 0; proposals--) {
+                this.propose(rank);
+            }
             if (rank.subtree <= 0) {
                 this.finish(rank);
             }
         } else {
+            acct.schedWaiting += dt * 1000;
             rank.running = 0;
         }
-        rank.idleMicros += dt * 1000 * (pool - rank.running) / pool;
+        const idle = dt * 1000 * (pool - rank.running) / pool;
+        rank.idleMicros += idle;
+        // starved while no task ran in the pool, imbalanced while some ran and other threads waited
+        if (rank.running === 0) {
+            acct.idleStarved += idle;
+        } else {
+            acct.idleImbalanced += idle;
+        }
         const cap = Math.max(rank.place.allowedCpuIds.length, 1) * 100;
         const cpuTarget = Math.min(cap, MockRun.POLLING_PCT + rank.running * 100 * rank.efficiency);
         rank.cpuPct = clamp(rank.cpuPct + 0.5 * (cpuTarget - rank.cpuPct) + this.random.normal(), 0, cap);
@@ -342,8 +399,18 @@ export class MockRun {
 
     /** The coordinator runs no tasks: its pool stays idle while it polls MPI, and it holds the queued tasks in memory. */
     protected runCoordinator(coordinator: RankState): void {
+        const dt = MockRun.STEP_MS;
         coordinator.running = 0;
-        coordinator.idleMicros += MockRun.STEP_MS * 1000;
+        coordinator.idleMicros += dt * 1000;
+        coordinator.acct.idleStarved += dt * 1000;
+        if (this.scheduler === 'centralized') {
+            if (this.coordinatorFull) {
+                coordinator.acct.fullMicros += dt * 1000;
+            }
+            if (this.queue.length === 0) {
+                coordinator.acct.availableQueueEmpty += dt * 1000 * this.computing().filter(rank => rank.phase === 'available').length;
+            }
+        }
         coordinator.cpuPct = clamp(coordinator.cpuPct + 0.5 * (98 - coordinator.cpuPct) + this.random.normal(), 0, 100);
         const rssTarget = this.coordinatorMemory(coordinator);
         coordinator.rssBytes = Math.max(coordinator.baseRss * 0.9, coordinator.rssBytes + 0.2 * (rssTarget - coordinator.rssBytes) + this.random.normal() * 64 * KiB);
@@ -362,6 +429,7 @@ export class MockRun {
             for (let i = 0; i < Math.min(turn.length, available.length); i++) {
                 turn[i].next = available[i].place.id;
                 available[i].phase = 'assigned';
+                available[i].assignedAtMs = this.time;
             }
         }
         for (const rank of this.computing()) {
@@ -429,6 +497,11 @@ export class MockRun {
     protected give(from: RankState, to: RankState, task: QueuedTask): void {
         from.sent += 1;
         to.recv += 1;
+        const [latency, bytesPerMicro] = from.place.nodeIndex === to.place.nodeIndex ? MockRun.WITHIN_NODE : MockRun.ACROSS_NODES;
+        from.acct.bytesSent += task.bytes;
+        from.acct.sendMicros += latency + task.bytes / bytesPerMicro;
+        to.acct.bytesRecv += task.bytes;
+        to.acct.recvMicros += task.bytes / bytesPerMicro;
         const edge = from.edges.get(to.place.id) ?? { bytes: 0, count: 0 };
         edge.bytes += task.bytes;
         edge.count += 1;
@@ -439,7 +512,63 @@ export class MockRun {
         } else {
             to.phase = 'running';
             to.subtree = task.tasks;
+            if (to.recv === 1) {
+                to.acct.firstTaskMs = this.time;
+            }
+            this.assigned(to, this.isCoordinator(from) ? latency + task.bytes / bytesPerMicro : undefined);
         }
+    }
+
+    /**
+     * The rank reports itself running, which ends the coordinator's assignment: a task it handed out, or a push target it
+     * named and a worker then sent to; the latency runs from the assignment to the report.
+     */
+    protected assigned(rank: RankState, transferMicros: number | undefined): void {
+        const coordinator = this.coordinatorRank();
+        if (!coordinator) {
+            return;
+        }
+        coordinator.acct.stateMsgs += 1;
+        const since = transferMicros ?? (rank.assignedAtMs === undefined ? undefined : (this.time - rank.assignedAtMs) * 1000);
+        rank.assignedAtMs = undefined;
+        if (since === undefined) {
+            return;
+        }
+        const latency = since + this.noise.int(200, 1500);
+        coordinator.acct.assignLatencyTotal += latency;
+        coordinator.acct.assignCount += 1;
+        coordinator.acct.assignLatencyMax = Math.max(coordinator.acct.assignLatencyMax, latency);
+    }
+
+    /** A busy pool refuses the node expansions it can't take, and so does the scheduler when the rank has no channel to send them on. */
+    protected spawn(rank: RankState, finished: number): void {
+        if (rank.running < rank.place.poolThreads) {
+            return;
+        }
+        const refused = this.noise.poisson(finished * MockRun.SPAWN_TRIES_PER_TASK);
+        rank.acct.spawnRejectedPoolFull += refused;
+        const channel = this.scheduler === 'centralized' ? !this.coordinatorFull : rank.next !== undefined;
+        if (!channel) {
+            rank.acct.spawnRemoteRejected += refused;
+        }
+    }
+
+    /** A worker proposes a score it reached; the coordinator broadcasts it when it improves, less often as the run goes on. */
+    protected propose(rank: RankState): void {
+        const coordinator = this.coordinatorRank();
+        if (!coordinator) {
+            return;
+        }
+        rank.acct.scoreProposalsSent += 1;
+        coordinator.acct.scoreProposals += 1;
+        if (this.noise.chance(1 / (1 + coordinator.acct.scoreBroadcasts))) {
+            coordinator.acct.scoreBroadcasts += 1;
+            coordinator.acct.lastImprovementMs = this.time;
+        }
+    }
+
+    protected coordinatorRank(): RankState | undefined {
+        return this.ranks.get(this.roles.coordinatorRank);
     }
 
     /** The coordinator hands the search tree's root to the first worker, the lowest rank beside it. */
@@ -454,6 +583,11 @@ export class MockRun {
 
     /** The worker explored its whole subtree: it reports itself available, and a rank reserved for it is freed. */
     protected finish(rank: RankState): void {
+        rank.acct.lastTaskMs = this.time;
+        const coordinator = this.coordinatorRank();
+        if (coordinator) {
+            coordinator.acct.stateMsgs += 1;
+        }
         rank.phase = 'available';
         rank.availableSinceMs = this.time;
         rank.subtree = 0;
@@ -467,6 +601,7 @@ export class MockRun {
             if (reserved?.phase === 'assigned') {
                 reserved.phase = 'available';
                 reserved.availableSinceMs = this.time;
+                reserved.assignedAtMs = undefined;
             }
             rank.next = undefined;
         }
@@ -584,10 +719,13 @@ export class MockRun {
         // a rank's samples drift apart from the others', as separate processes' do
         rank.nextSampleMs = first ? this.time + this.random.int(1, this.workerInterval) : nextAfter(rank.nextSampleMs, this.workerInterval, this.time);
         rank.edgesJson ??= JSON.stringify([...rank.edges.entries()].sort(([a], [b]) => a - b).map(([to, edge]) => ({ to, bytes: edge.bytes, count: edge.count })));
+        // rank 0 is telemetry's aggregator in every run: it gathers every rank's frame and serves the stream
+        rank.acct.telemetryMicros += rank.place.id === 0 ? 1500 + 400 * this.ranks.size : this.noise.int(25, 60);
         rank.sample = {
             id: rank.place.id, seqNo: rank.seqNo, localMs: this.nodes[rank.place.nodeIndex].clockBaseMs + this.time, tasksStarted: rank.tasksLocal,
             sent: rank.sent, recv: rank.recv, running: rank.running, pending: this.pendingOf(rank), idleMicros: Math.round(rank.idleMicros),
-            cpuPct: Math.round(rank.cpuPct * 100) / 100, rssBytes: Math.round(rank.rssBytes), threads: rank.place.poolThreads + 1, edgesJson: rank.edgesJson
+            cpuPct: Math.round(rank.cpuPct * 100) / 100, rssBytes: Math.round(rank.rssBytes), threads: rank.place.poolThreads + 1, edgesJson: rank.edgesJson,
+            acct: Object.fromEntries(Object.entries(rank.acct).map(([key, value]) => [key, Math.round(value)])) as unknown as Accounting
         };
         rank.frameJson = undefined;
     }
@@ -687,7 +825,7 @@ export class MockRun {
             place, pid: this.nextPid++, seqNo: 0, lastSampleMs: this.time, nextSampleMs: this.time, phase: 'available', availableSinceMs: this.time,
             subtree: 0, running: 0,
             tasksLocal: 0, sent: 0, recv: 0, idleMicros: 0, cpuPct: 0, rssBytes: baseRss, baseRss, efficiency: this.random.between(0.92, 0.99),
-            edges: new Map()
+            edges: new Map(), acct: noAccounting()
         };
     }
 }
@@ -708,17 +846,21 @@ function schema1Frame(sample: RankSample): Schema1Frame {
     };
 }
 
-/** Every key gempba v4.3.0 writes, in its order; the time accounting reads 0 until the simulation fills it. */
+/** Every key gempba v4.3.0 writes, in its order. */
 function schema2Frame(sample: RankSample): Schema2Frame {
+    const acct = sample.acct;
     return {
         rank: sample.id, seq_no: sample.seqNo, rank_local_ms: sample.localMs, tasks_started_total: sample.tasksStarted,
-        tasks_sent_total: sample.sent, tasks_recv_total: sample.recv, bytes_sent_total: 0, bytes_recv_total: 0, send_microseconds_total: 0,
-        recv_microseconds_total: 0, spawn_rejected_pool_full: 0, spawn_remote_rejected: 0, tasks_running: sample.running,
-        scheduler_pending_count: sample.pending, idle_microseconds_per_thread: sample.idleMicros, idle_microseconds_starved: 0,
-        idle_microseconds_imbalanced: 0, sched_running_microseconds: 0, sched_waiting_microseconds: 0, first_task_ms: 0, last_task_ms: 0,
-        assign_latency_microseconds_total: 0, assign_count: 0, assign_latency_microseconds_max: 0, available_microseconds_queue_empty: 0,
-        coordinator_state_msgs_total: 0, coordinator_score_proposals_total: 0, coordinator_score_broadcasts_total: 0, score_proposals_sent: 0,
-        last_score_improvement_ms: 0, coordinator_full_microseconds: 0, telemetry_microseconds_total: 0,
+        tasks_sent_total: sample.sent, tasks_recv_total: sample.recv, bytes_sent_total: acct.bytesSent, bytes_recv_total: acct.bytesRecv,
+        send_microseconds_total: acct.sendMicros, recv_microseconds_total: acct.recvMicros, spawn_rejected_pool_full: acct.spawnRejectedPoolFull,
+        spawn_remote_rejected: acct.spawnRemoteRejected, tasks_running: sample.running, scheduler_pending_count: sample.pending,
+        idle_microseconds_per_thread: sample.idleMicros, idle_microseconds_starved: acct.idleStarved, idle_microseconds_imbalanced: acct.idleImbalanced,
+        sched_running_microseconds: acct.schedRunning, sched_waiting_microseconds: acct.schedWaiting, first_task_ms: acct.firstTaskMs,
+        last_task_ms: acct.lastTaskMs, assign_latency_microseconds_total: acct.assignLatencyTotal, assign_count: acct.assignCount,
+        assign_latency_microseconds_max: acct.assignLatencyMax, available_microseconds_queue_empty: acct.availableQueueEmpty,
+        coordinator_state_msgs_total: acct.stateMsgs, coordinator_score_proposals_total: acct.scoreProposals,
+        coordinator_score_broadcasts_total: acct.scoreBroadcasts, score_proposals_sent: acct.scoreProposalsSent,
+        last_score_improvement_ms: acct.lastImprovementMs, coordinator_full_microseconds: acct.fullMicros, telemetry_microseconds_total: acct.telemetryMicros,
         process_cpu_pct: sample.cpuPct, process_rss_bytes: sample.rssBytes, process_threads: sample.threads
     };
 }
@@ -744,6 +886,15 @@ function nodeFields(sample: NodeSample): Omit<Schema2NodeFrame, 'sentinel_rank'>
         sockets: sample.sockets.map(socket => ({
             socket_id: socket.socketId, cpu_pct: socket.cpuPct, mem_total_bytes: socket.memTotalBytes, mem_used_bytes: socket.memUsedBytes
         }))
+    };
+}
+
+function noAccounting(): Accounting {
+    return {
+        bytesSent: 0, bytesRecv: 0, sendMicros: 0, recvMicros: 0, spawnRejectedPoolFull: 0, spawnRemoteRejected: 0, idleStarved: 0, idleImbalanced: 0,
+        schedRunning: 0, schedWaiting: 0, firstTaskMs: 0, lastTaskMs: 0, assignLatencyTotal: 0, assignCount: 0, assignLatencyMax: 0,
+        availableQueueEmpty: 0, stateMsgs: 0, scoreProposals: 0, scoreBroadcasts: 0, scoreProposalsSent: 0, lastImprovementMs: 0, fullMicros: 0,
+        telemetryMicros: 0
     };
 }
 
