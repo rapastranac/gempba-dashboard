@@ -59,8 +59,8 @@ describe('MockRun', () => {
         const world: WorldSnapshot = WorldSnapshotMapper.toWorldSnapshot(envelope(mock));
         expect(world.elapsedSeconds).to.equal(10);
         expect(world.nodes.map(node => node.host)).to.deep.equal(['mock-host-01', 'mock-host-02']);
-        expect(world.nodes.map(node => node.sockets.map(socket => socket.workers.length))).to.deep.equal([[2, 2], [2, 2]]);
-        expect(world.nodes[1].sentinelWorkerId).to.equal(4);
+        expect(world.nodes.map(node => node.sockets.map(socket => socket.ranks.length))).to.deep.equal([[2, 2], [2, 2]]);
+        expect(world.nodes[1].sentinelRank).to.equal(4);
         expect(world.nodes[0].hasLiveMemory).to.equal(true);
         expect(workerFrame(mock, 3).process_threads).to.equal(5);
     });

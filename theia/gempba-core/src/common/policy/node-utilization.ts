@@ -1,5 +1,5 @@
 import { NodeSnapshot } from '../model/node-snapshot';
-import { WorkerSnapshot } from '../model/worker-snapshot';
+import { RankSnapshot } from '../model/rank-snapshot';
 
 export namespace NodeUtilization {
 
@@ -20,12 +20,12 @@ export namespace NodeUtilization {
 
     /** The cores a node's workers may run on: their allowed CPUs together, or every core when none is restricted. */
     export function allocatedCores(node: NodeSnapshot): number {
-        const allowed = new Set(node.sockets.flatMap(socket => socket.workers.flatMap(worker => worker.allowedCpuIds)));
+        const allowed = new Set(node.sockets.flatMap(socket => socket.ranks.flatMap(worker => worker.allowedCpuIds)));
         return allowed.size > 0 ? allowed.size : node.logicalCores;
     }
 
     /** How many cores the workers keep busy together, e.g. 3.5 for workers at 300% and 50%. */
-    export function coresBusy(workers: readonly WorkerSnapshot[]): number {
+    export function coresBusy(workers: readonly RankSnapshot[]): number {
         return workers.reduce((sum, worker) => sum + worker.cpuPct, 0) / 100;
     }
 }

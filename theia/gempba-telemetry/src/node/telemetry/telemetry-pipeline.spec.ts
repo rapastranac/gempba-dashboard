@@ -55,7 +55,7 @@ describe('Telemetry pipeline against the mock emitter', () => {
         expect(snapshots[0].nodes.map(n => n.host)).to.deep.equal(['alpha', 'beta', WorldSnapshotMapper.UNKNOWN_HOST]);
         const orphan = node(snapshots[0], WorldSnapshotMapper.UNKNOWN_HOST);
         expect(orphan.sockets[0].hasTopology).to.equal(false);
-        expect(orphan.sockets[0].workers.map(w => w.workerId)).to.deep.equal([9]);
+        expect(orphan.sockets[0].ranks.map(w => w.id)).to.deep.equal([9]);
     });
 
     it('prefers the job cgroup over host memory', () => {
@@ -67,7 +67,7 @@ describe('Telemetry pipeline against the mock emitter', () => {
 
     it('counts accessible cores as the allowed cpus within each socket', () => {
         const alpha = node(snapshots[0], 'alpha');
-        expect(alpha.sockets.map(s => s.coreUsage.map(u => [u.workerId, u.accessibleCores, u.socketCores])))
+        expect(alpha.sockets.map(s => s.coreUsage.map(u => [u.rank, u.accessibleCores, u.socketCores])))
             .to.deep.equal([[[0, 2, 4]], [[1, 2, 4]]]);
         const beta = node(snapshots[0], 'beta');
         expect(beta.sockets[0].coreUsage.map(u => u.accessibleCores)).to.deep.equal([4]);

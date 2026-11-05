@@ -134,9 +134,9 @@ export class TelemetryServiceImpl implements TelemetryService {
                 this.nodeCadence.record(node.host, node.sentinelLocalMillis, node.sentinelLocalMillis);
             }
             for (const socket of node.sockets) {
-                for (const worker of socket.workers) {
-                    this.workerCadence.record(String(worker.workerId), worker.seqNo, worker.localMillis);
-                    this.nodeArrivals.record(node.host, String(worker.workerId), worker.seqNo, now);
+                for (const worker of socket.ranks) {
+                    this.workerCadence.record(String(worker.id), worker.seqNo, worker.localMillis);
+                    this.nodeArrivals.record(node.host, String(worker.id), worker.seqNo, now);
                 }
             }
         }

@@ -1,5 +1,5 @@
 import {
-    CoreUsageSnapshot, NodeSnapshot, NodeUtilization, RunSetup, SocketSnapshot, StructureKey, WorkerAccounting, WorkerRole, WorkerSnapshot, WorldSnapshot
+    CoreUsageSnapshot, NodeSnapshot, NodeUtilization, RunSetup, SocketSnapshot, StructureKey, RankAccounting, SchedulerRole, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { BroadcastEnvelope, NodeFrame, TopologyNode, TopologyRun, TopologySocket, WorkerFrame, WorkerIdentity } from '../protocol/wire-protocol';
 
@@ -23,7 +23,7 @@ export namespace WorldSnapshotMapper {
         const { topologyByHost, hostByWorkerId, sentinelByHost } = indexTopology(envelope);
         const { socketByWorkerId, identityByWorkerId } = indexIdentities(envelope);
 
-        const workersByHostBySocket = new Map<string, Map<number, WorkerSnapshot[]>>();
+        const workersByHostBySocket = new Map<string, Map<number, RankSnapshot[]>>();
         const framesByHostBySocket = new Map<string, Map<number, Map<number, WorkerFrame>>>();
         const identitiesByHostBySocket = new Map<string, Map<number, Map<number, WorkerIdentity>>>();
         const structure = new Set<string>();
@@ -95,14 +95,14 @@ export namespace WorldSnapshotMapper {
     }
 
     /** Builds from before gempba's v4.3.0 renames call the coordinator `center`. */
-    function toRole(role: string | undefined): WorkerRole | undefined {
+    function toRole(role: string | undefined): SchedulerRole | undefined {
         if (role === 'coordinator' || role === 'center') {
             return 'coordinator';
         }
         return role === 'worker' ? role : undefined;
     }
 
-    function toAccounting(frame: WorkerFrame): WorkerAccounting {
+    function toAccounting(frame: WorkerFrame): RankAccounting {
         return {
             bytesSentTotal: frame.bytes_sent_total ?? 0,
             bytesRecvTotal: frame.bytes_recv_total ?? 0,
@@ -169,9 +169,9 @@ export namespace WorldSnapshotMapper {
 
     function toWorkerSnapshot(
         frame: WorkerFrame, sentinel: boolean, identity: WorkerIdentity | undefined, elapsedSeconds: number, accounted: boolean
-    ): WorkerSnapshot {
+    ): RankSnapshot {
         return {
-            workerId: frame.worker_id,
+            id: frame.worker_id,
             seqNo: frame.seq_no,
             localMillis: frame.worker_local_ms,
             pid: identity?.pid ?? 0,
@@ -183,17 +183,17 @@ export namespace WorldSnapshotMapper {
             tasksSentTotal: frame.tasks_sent_total,
             tasksRecvTotal: frame.tasks_recv_total,
             schedulerPendingCount: frame.scheduler_pending_count,
-            idleMicrosPerWorker: frame.idle_microseconds_per_worker,
+            idleMicrosPerThread: frame.idle_microseconds_per_worker,
             cpuPct: frame.process_cpu_pct,
             rssBytes: frame.process_rss_bytes,
             threads: frame.process_threads,
             elapsedSeconds,
-            peers: (frame.edges_out ?? []).map(edge => ({ peerWorkerId: edge.to, bytes: edge.bytes, count: edge.count })),
+            peers: (frame.edges_out ?? []).map(edge => ({ peerRank: edge.to, bytes: edge.bytes, count: edge.count })),
             accounting: accounted ? toAccounting(frame) : undefined
         };
     }
 
-    function toSocketSnapshot(socketId: number, topologySocket: TopologySocket | undefined, workers: WorkerSnapshot[],
+    function toSocketSnapshot(socketId: number, topologySocket: TopologySocket | undefined, workers: RankSnapshot[],
         identitiesById: Map<number, WorkerIdentity>, framesById: Map<number, WorkerFrame>): SocketSnapshot {
         const logicalCores = topologySocket?.logical_cores ?? 0;
         const coreUsage: CoreUsageSnapshot[] = [];
@@ -201,7 +201,7 @@ export namespace WorldSnapshotMapper {
             const socketCpuIds = new Set(topologySocket.cpu_ids ?? []);
             for (const [workerId, frame] of framesById) {
                 coreUsage.push({
-                    workerId,
+                    rank: workerId,
                     cpuPct: frame.process_cpu_pct,
                     accessibleCores: countAccessibleCores(identitiesById.get(workerId), socketCpuIds, logicalCores),
                     socketCores: logicalCores
@@ -216,7 +216,7 @@ export namespace WorldSnapshotMapper {
             cpuIds: topologySocket?.cpu_ids ?? [],
             hasTopology: topologySocket !== undefined,
             coreUsage,
-            workers
+            ranks: workers
         };
     }
 
@@ -243,7 +243,7 @@ export namespace WorldSnapshotMapper {
             hasLiveMemory: nodeFrame !== undefined,
             memTotalBytes,
             memUsedBytes,
-            sentinelWorkerId: topology ? topology.sentinel_worker_id : nodeFrame?.sentinel_worker_id ?? 0,
+            sentinelRank: topology ? topology.sentinel_worker_id : nodeFrame?.sentinel_worker_id ?? 0,
             sentinelLocalMillis: nodeFrame?.sentinel_local_ms ?? 0,
             nodeUtilPct,
             sockets

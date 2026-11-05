@@ -2,33 +2,33 @@ import { expect } from 'chai';
 import { NodeSnapshot } from './node-snapshot';
 import { SocketSnapshot } from './socket-snapshot';
 import { StructureKey } from './structure-key';
-import { WorkerSnapshot } from './worker-snapshot';
+import { RankSnapshot } from './rank-snapshot';
 import { WorldSnapshot } from './world-snapshot';
 
-function worker(workerId: number): WorkerSnapshot {
+function rank(id: number): RankSnapshot {
     return {
-        workerId, seqNo: 1, localMillis: 0, pid: 100 + workerId, sentinel: false, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
-        tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0,
+        id, seqNo: 1, localMillis: 0, pid: 100 + id, sentinel: false, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
+        tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0,
         cpuPct: 0, rssBytes: 0, threads: 1, elapsedSeconds: 0, peers: []
     };
 }
 
-function socket(socketId: number, ...workerIds: number[]): SocketSnapshot {
+function socket(socketId: number, ...ids: number[]): SocketSnapshot {
     return {
         socketId, physicalCores: 0, logicalCores: 0, cpuIds: [], hasTopology: false, coreUsage: [],
-        workers: workerIds.map(worker)
+        ranks: ids.map(rank)
     };
 }
 
 function node(host: string, ...sockets: SocketSnapshot[]): NodeSnapshot {
     return {
         host, socketCount: sockets.length, physicalCores: 0, logicalCores: 0, hasLiveMemory: false,
-        memTotalBytes: 0, memUsedBytes: 0, sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct: 0, sockets
+        memTotalBytes: 0, memUsedBytes: 0, sentinelRank: 0, sentinelLocalMillis: 0, nodeUtilPct: 0, sockets
     };
 }
 
 function world(...nodes: NodeSnapshot[]): WorldSnapshot {
-    const keys = nodes.flatMap(n => n.sockets.flatMap(s => s.workers.map(w => StructureKey.keyOf(n.host, s.socketId, w.workerId))));
+    const keys = nodes.flatMap(n => n.sockets.flatMap(s => s.ranks.map(w => StructureKey.keyOf(n.host, s.socketId, w.id))));
     return { schemaVersion: 3, timestampMillis: 1_700_000_000_000, elapsedSeconds: 42, nodes, structure: StructureKey.of(keys) };
 }
 
@@ -37,15 +37,15 @@ describe('WorldSnapshot', () => {
     it('empty has no nodes, no workers and an empty structure', () => {
         const empty = WorldSnapshot.empty();
         expect(WorldSnapshot.totalNodes(empty)).to.equal(0);
-        expect(WorldSnapshot.totalWorkers(empty)).to.equal(0);
+        expect(WorldSnapshot.totalRanks(empty)).to.equal(0);
         expect(empty.structure.keys).to.be.empty;
     });
 
     it('totals count nodes and workers across every socket', () => {
         const snapshot = world(node('a', socket(0, 1, 2), socket(1, 3)), node('b', socket(0, 4)));
         expect(WorldSnapshot.totalNodes(snapshot)).to.equal(2);
-        expect(WorldSnapshot.totalWorkers(snapshot)).to.equal(4);
-        expect(NodeSnapshot.workerCount(snapshot.nodes[0])).to.equal(3);
+        expect(WorldSnapshot.totalRanks(snapshot)).to.equal(4);
+        expect(NodeSnapshot.rankCount(snapshot.nodes[0])).to.equal(3);
     });
 
     it('takes rank 0 for the coordinator of a schema-1 run once it has other processes, and a lone process for none', () => {
@@ -59,7 +59,7 @@ describe('WorldSnapshot', () => {
         const roled = (snapshot: WorldSnapshot, coordinatorId: number): WorldSnapshot => ({
             ...snapshot,
             nodes: snapshot.nodes.map(each => ({ ...each, sockets: each.sockets.map(one => ({
-                ...one, workers: one.workers.map(w => ({ ...w, role: w.workerId === coordinatorId ? 'coordinator' as const : 'worker' as const }))
+                ...one, ranks: one.ranks.map(w => ({ ...w, role: w.id === coordinatorId ? 'coordinator' as const : 'worker' as const }))
             })) }))
         });
         const cluster = world(node('alpha', socket(0, 0, 1)), node('beta', socket(0, 2)));
@@ -75,8 +75,8 @@ describe('WorldSnapshot', () => {
 
     it('finds a worker by id, or nothing', () => {
         const cluster = world(node('alpha', socket(0, 0, 1)), node('beta', socket(0, 2)));
-        expect(WorldSnapshot.workerOf(cluster, 2)?.workerId).to.equal(2);
-        expect(WorldSnapshot.workerOf(cluster, 9)).to.equal(undefined);
+        expect(WorldSnapshot.rankOf(cluster, 2)?.id).to.equal(2);
+        expect(WorldSnapshot.rankOf(cluster, 9)).to.equal(undefined);
     });
 
     it('forHost keeps only that host and rebuilds its structure key', () => {

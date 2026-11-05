@@ -1,4 +1,4 @@
-import { Bytes, NodeSnapshot, NumberText, SocketSnapshot, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { Bytes, NodeSnapshot, NumberText, SocketSnapshot, RankSnapshot, WorldSnapshot } from '@gempba/core';
 
 /** The words of the Cards tree and its peers dialog, worded like the Java dashboard's cards. Pure, so the view only lays them out. */
 export namespace CardsText {
@@ -12,7 +12,7 @@ export namespace CardsText {
 
     /** The short caption of a node's tree row, counting the sockets the tree lists, e.g. `2 sockets · 4 workers`. */
     export function nodeCaption(node: NodeSnapshot): string {
-        return `${plural(node.sockets.length, 'socket')} · ${plural(NodeSnapshot.workerCount(node), 'worker')}`;
+        return `${plural(node.sockets.length, 'socket')} · ${plural(NodeSnapshot.rankCount(node), 'worker')}`;
     }
 
     /** `Socket 0`, or `Socket 0: Xeon Gold 6148` when the topology names it. */
@@ -22,35 +22,35 @@ export namespace CardsText {
 
     /** The short caption of a socket's tree row, e.g. `2 workers`. */
     export function socketCaption(socket: SocketSnapshot): string {
-        return plural(socket.workers.length, 'worker');
+        return plural(socket.ranks.length, 'worker');
     }
 
     /** `Worker 3`, `Worker 3 · sentinel`, or `Worker 0 · coordinator · sentinel`; the view marks the sentinel with a star icon. */
-    export function workerTitle(worker: WorkerSnapshot, coordinator = false): string {
-        return [`Worker ${worker.workerId}`, ...(coordinator ? ['coordinator'] : []), ...(worker.sentinel ? ['sentinel'] : [])].join(' · ');
+    export function workerTitle(worker: RankSnapshot, coordinator = false): string {
+        return [`Worker ${worker.id}`, ...(coordinator ? ['coordinator'] : []), ...(worker.sentinel ? ['sentinel'] : [])].join(' · ');
     }
 
     /** The short caption of a worker's tree row, its CPU as a share of the cores it may use, as its meter shows: `22% CPU · 256.0 MB`. */
-    export function workerCaption(worker: WorkerSnapshot, accessibleCores: number): string {
+    export function workerCaption(worker: RankSnapshot, accessibleCores: number): string {
         return `${NumberText.fixed(worker.cpuPct / Math.max(accessibleCores, 1), 0)}% CPU · ${Bytes.human(worker.rssBytes)}`;
     }
 
     /** e.g. `PID 4100 · frame #17 · on alpha`. */
-    export function workerSubtitle(host: string, worker: WorkerSnapshot): string {
+    export function workerSubtitle(host: string, worker: RankSnapshot): string {
         const parts = worker.pid > 0 ? [`PID ${worker.pid}`] : [];
         parts.push(`frame #${worker.seqNo}`, `on ${host}`);
         return parts.join(' · ');
     }
 
     /** Every outgoing peer of a worker, busiest first, with the node each one runs on. */
-    export function peerRows(worker: WorkerSnapshot, world: WorldSnapshot | undefined): PeerRow[] {
+    export function peerRows(worker: RankSnapshot, world: WorldSnapshot | undefined): PeerRow[] {
         const hostOf = new Map<number, string>();
-        world?.nodes.forEach(node => node.sockets.forEach(socket => socket.workers.forEach(each => hostOf.set(each.workerId, node.host))));
+        world?.nodes.forEach(node => node.sockets.forEach(socket => socket.ranks.forEach(each => hostOf.set(each.id, node.host))));
         return [...worker.peers]
-            .sort((a, b) => b.count - a.count || b.bytes - a.bytes || a.peerWorkerId - b.peerWorkerId)
+            .sort((a, b) => b.count - a.count || b.bytes - a.bytes || a.peerRank - b.peerRank)
             .map(peer => ({
-                peer: `Worker ${peer.peerWorkerId}`,
-                host: hostOf.get(peer.peerWorkerId) ?? '—',
+                peer: `Worker ${peer.peerRank}`,
+                host: hostOf.get(peer.peerRank) ?? '—',
                 tasks: NumberText.grouped(peer.count),
                 bytes: Bytes.human(peer.bytes)
             }));

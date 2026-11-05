@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
 import * as path from 'path';
-import { WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { RankSnapshot, WorldSnapshot } from '@gempba/core';
 import { TelemetryStore } from '../telemetry/telemetry-store';
 import { WorldSnapshotMapper } from '../telemetry/world-snapshot-mapper';
 import { BroadcastEnvelope } from './wire-protocol';
@@ -19,8 +19,8 @@ function linesOf(fixture: string): string[] {
 const [FULL, PAUSED, SNAPSHOT_WHILE_PAUSED] = linesOf('schema2-run.ndjson');
 const [PRE_RENAME_FULL] = linesOf('schema2-pre-rename-run.ndjson');
 
-function workersOf(world: WorldSnapshot): WorkerSnapshot[] {
-    return world.nodes.flatMap(node => node.sockets.flatMap(socket => socket.workers));
+function workersOf(world: WorldSnapshot): RankSnapshot[] {
+    return world.nodes.flatMap(node => node.sockets.flatMap(socket => socket.ranks));
 }
 
 describe('Telemetry schema 2', () => {
@@ -103,8 +103,8 @@ describe('Telemetry schema 2', () => {
             expect(coordinator.accounting).to.include({
                 coordinatorStateMsgsTotal: 5, coordinatorScoreProposalsTotal: 6, coordinatorScoreBroadcastsTotal: 7, coordinatorFullMicros: 8
             });
-            expect([worker.workerId, worker.localMillis, worker.tasksStartedTotal, worker.idleMicrosPerWorker, worker.sentinel]).to.deep.equal([1, 50, 9, 60, true]);
-            expect([world.nodes[0].sentinelWorkerId, world.nodes[0].sentinelLocalMillis]).to.deep.equal([1, 70]);
+            expect([worker.id, worker.localMillis, worker.tasksStartedTotal, worker.idleMicrosPerThread, worker.sentinel]).to.deep.equal([1, 50, 9, 60, true]);
+            expect([world.nodes[0].sentinelRank, world.nodes[0].sentinelLocalMillis]).to.deep.equal([1, 70]);
         });
 
         it('takes the v4.3.0 name when a line carries both', () => {
@@ -120,13 +120,13 @@ describe('Telemetry schema 2', () => {
                 expect(world.nodes.map(node => node.host)).to.deep.equal(['DESKTOP']);
                 expect(workersOf(world).map(worker => worker.role)).to.deep.equal(['coordinator', 'worker', 'worker', 'worker']);
                 expect([0, 1].map(id => WorldSnapshot.isCoordinator(world, id))).to.deep.equal([true, false]);
-                expect(WorldSnapshot.workerOf(world, 0)!.accounting!.coordinatorStateMsgsTotal).to.be.above(0);
+                expect(WorldSnapshot.rankOf(world, 0)!.accounting!.coordinatorStateMsgsTotal).to.be.above(0);
                 expect(workersOf(world).filter(worker => worker.sentinel)).to.have.lengthOf(1);
-                const worker = WorldSnapshot.workerOf(world, 1)!;
+                const worker = WorldSnapshot.rankOf(world, 1)!;
                 expect(worker.localMillis).to.be.above(0);
-                expect(worker.idleMicrosPerWorker).to.be.above(0);
+                expect(worker.idleMicrosPerThread).to.be.above(0);
             }
-            expect(Object.keys(WorldSnapshot.workerOf(before, 1)!)).to.deep.equal(Object.keys(WorldSnapshot.workerOf(after, 1)!));
+            expect(Object.keys(WorldSnapshot.rankOf(before, 1)!)).to.deep.equal(Object.keys(WorldSnapshot.rankOf(after, 1)!));
         });
     });
 
@@ -145,11 +145,11 @@ describe('Telemetry schema 2', () => {
         it('carries each worker\'s time accounting', () => {
             const envelope = BroadcastEnvelope.parse(FULL);
             const world = WorldSnapshotMapper.toWorldSnapshot(envelope);
-            const coordinator = WorldSnapshot.workerOf(world, 0)!;
+            const coordinator = WorldSnapshot.rankOf(world, 0)!;
             expect(coordinator.accounting).to.include({
                 assignCount: envelope.workers![0].assign_count, coordinatorStateMsgsTotal: envelope.workers![0].coordinator_state_msgs_total
             });
-            const worker = WorldSnapshot.workerOf(world, 1)!;
+            const worker = WorldSnapshot.rankOf(world, 1)!;
             expect(worker.tasksStartedTotal).to.equal(envelope.workers![1].tasks_started_total);
             expect(worker.accounting).to.include({
                 schedRunningMicros: envelope.workers![1].sched_running_microseconds,
@@ -163,7 +163,7 @@ describe('Telemetry schema 2', () => {
                 + '"identities":[{"worker_id":0,"hostname":"h"},{"worker_id":1,"hostname":"h"}]},'
                 + '"workers":[{"worker_id":0,"seq_no":1,"tasks_local_total":5},{"worker_id":1,"seq_no":1,"tasks_local_total":9}]}';
             const world = WorldSnapshotMapper.toWorldSnapshot(BroadcastEnvelope.parse(line));
-            const worker = WorldSnapshot.workerOf(world, 1)!;
+            const worker = WorldSnapshot.rankOf(world, 1)!;
             expect([worker.tasksStartedTotal, worker.accounting, worker.role]).to.deep.equal([9, undefined, undefined]);
             expect([world.runId, world.run, world.paused, world.final]).to.deep.equal([undefined, undefined, false, false]);
             expect(WorldSnapshot.isCoordinator(world, 0)).to.equal(true);
@@ -188,7 +188,7 @@ describe('Telemetry schema 2', () => {
             const snapshot = store.ingest(BroadcastEnvelope.parse(SNAPSHOT_WHILE_PAUSED));
             expect(snapshot.paused).to.equal(true);
             expect(snapshot.timestampMillis).to.equal(BroadcastEnvelope.parse(SNAPSHOT_WHILE_PAUSED).ts);
-            expect(WorldSnapshot.totalWorkers(snapshot)).to.equal(4);
+            expect(WorldSnapshot.totalRanks(snapshot)).to.equal(4);
         });
 
         it('maps a paused line as is before any data, and forgets the last data on reset', () => {

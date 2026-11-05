@@ -1,6 +1,6 @@
 import {
     Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, SocketSnapshot, TaskWords, WorkerHistoryStore,
-    WorkerSeries, WorkerSnapshot, WorldSnapshot
+    WorkerSeries, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { Trend } from '@gempba/ui/lib/common/trend';
 import { CardsText } from './cards-text';
@@ -107,7 +107,7 @@ export namespace CardsPanel {
     export function forNode(node: NodeSnapshot, histories: Histories): Panel {
         const series = histories.node(node.host);
         const throughput = histories.throughput(node.host);
-        const workers = node.sockets.flatMap(socket => socket.workers);
+        const workers = node.sockets.flatMap(socket => socket.ranks);
         const allocated = NodeUtilization.allocatedCores(node);
         const busy = NodeUtilization.coresBusy(workers);
         const memTotal = series.memTotalLatest > 0 ? series.memTotalLatest : node.memTotalBytes;
@@ -142,7 +142,7 @@ export namespace CardsPanel {
     }
 
     export function forSocket(world: WorldSnapshot | undefined, node: NodeSnapshot, socket: SocketSnapshot): Panel {
-        const busy = NodeUtilization.coresBusy(socket.workers);
+        const busy = NodeUtilization.coresBusy(socket.ranks);
         const cores = socket.logicalCores;
         return {
             title: CardsText.socketTitle(socket),
@@ -152,17 +152,17 @@ export namespace CardsPanel {
                 : undefined,
             heroes: [
                 { label: 'Cores busy', value: NumberText.fixed(busy, 1), unit: cores > 0 ? `of ${cores}` : undefined },
-                { label: 'Workers', value: String(socket.workers.length) }
+                { label: 'Workers', value: String(socket.ranks.length) }
             ],
             charts: [],
             strips: socket.cpuIds.length > 0 ? [strip(node, socket)] : [],
             bars: [{
                 title: 'Workers',
-                rows: socket.workers.map(worker => {
+                rows: socket.ranks.map(worker => {
                     const accessible = accessibleCores(worker, socket);
                     const fraction = worker.cpuPct / (100 * accessible);
                     return {
-                        label: CardsText.workerTitle(worker, WorldSnapshot.isCoordinator(world, worker.workerId)), fraction, tone: 'cpu',
+                        label: CardsText.workerTitle(worker, WorldSnapshot.isCoordinator(world, worker.id)), fraction, tone: 'cpu',
                         valueText: `${NumberText.fixed(fraction * 100, 0)}% of ${plural(accessible, 'core')}`
                     };
                 })
@@ -171,12 +171,12 @@ export namespace CardsPanel {
         };
     }
 
-    export function forWorker(world: WorldSnapshot | undefined, socket: SocketSnapshot, worker: WorkerSnapshot, histories: Histories): Panel {
-        const series = histories.worker(worker.workerId);
+    export function forWorker(world: WorldSnapshot | undefined, socket: SocketSnapshot, worker: RankSnapshot, histories: Histories): Panel {
+        const series = histories.worker(worker.id);
         const accessible = accessibleCores(worker, socket);
         const idle = latest(series.idlePct);
-        const host = world?.nodes.find(node => node.sockets.some(each => each.workers.some(other => other.workerId === worker.workerId)))?.host;
-        const coordinator = WorldSnapshot.isCoordinator(world, worker.workerId);
+        const host = world?.nodes.find(node => node.sockets.some(each => each.ranks.some(other => other.id === worker.id)))?.host;
+        const coordinator = WorldSnapshot.isCoordinator(world, worker.id);
         // gempba's process has one thread beyond its pool, which runs the tasks; a source that counts differently never shows more running than threads
         const pool = Math.max(worker.threads - 1, worker.tasksRunning, 1);
         const memory: Hero = { label: 'Memory', ...bytesValue(worker.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' };
@@ -203,7 +203,7 @@ export namespace CardsPanel {
         const peers = CardsText.peerRows(worker, world).slice(0, TOP_PEERS);
         if (peers.length > 0) {
             const busiest = Math.max(...worker.peers.map(peer => peer.count), 1);
-            const counts = new Map<string, number>(worker.peers.map(peer => [`Worker ${peer.peerWorkerId}`, peer.count]));
+            const counts = new Map<string, number>(worker.peers.map(peer => [`Worker ${peer.peerRank}`, peer.count]));
             bars.push({
                 title: 'Busiest peers',
                 peers: true,
@@ -242,14 +242,14 @@ export namespace CardsPanel {
             totals: coordinator ? moved : [
                 { label: TaskWords.STARTED, value: Rates.countWithRate(worker.tasksStartedTotal, worker.elapsedSeconds), hint: TaskWords.STARTED_HINT },
                 ...moved,
-                { label: 'Pool idle', value: `${Durations.format(worker.idleMicrosPerWorker)} per thread` }
+                { label: 'Pool idle', value: `${Durations.format(worker.idleMicrosPerThread)} per thread` }
             ]
         };
     }
 
     /** The cores a worker may run on in its socket, as core usage counts them; at least 1. */
-    export function accessibleCores(worker: WorkerSnapshot, socket: SocketSnapshot): number {
-        const usage = socket.coreUsage.find(entry => entry.workerId === worker.workerId);
+    export function accessibleCores(worker: RankSnapshot, socket: SocketSnapshot): number {
+        const usage = socket.coreUsage.find(entry => entry.rank === worker.id);
         if (usage) {
             return Math.max(usage.accessibleCores, 1);
         }
@@ -265,7 +265,7 @@ export namespace CardsPanel {
         if (node.logicalCores > 0) {
             facts.push(cores(node.physicalCores, node.logicalCores));
         }
-        facts.push(`sentinel: worker ${node.sentinelWorkerId}`);
+        facts.push(`sentinel: worker ${node.sentinelRank}`);
         return facts.join(' · ');
     }
 
@@ -297,7 +297,7 @@ export namespace CardsPanel {
     }
 
     /** The run's average rate, all tasks over the elapsed time. */
-    function runAverage(workers: readonly WorkerSnapshot[]): string | undefined {
+    function runAverage(workers: readonly RankSnapshot[]): string | undefined {
         return Rates.runAverage(workers.reduce((sum, worker) => sum + worker.tasksStartedTotal, 0), workers[0]?.elapsedSeconds ?? 0);
     }
 

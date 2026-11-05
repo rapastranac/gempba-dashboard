@@ -3,7 +3,7 @@ import { CompositeTreeNode, TreeImpl, TreeNode } from '@theia/core/lib/browser/t
 import { ExpandableTreeNode } from '@theia/core/lib/browser/tree/tree-expansion';
 import { SelectableTreeNode } from '@theia/core/lib/browser/tree/tree-selection';
 import { injectable } from '@theia/core/shared/inversify';
-import { NodeSnapshot, NodeUtilization, SocketSnapshot, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeSnapshot, NodeUtilization, SocketSnapshot, RankSnapshot, WorldSnapshot } from '@gempba/core';
 import { CardsPanel } from '../common/cards-panel';
 import { CardsText } from '../common/cards-text';
 
@@ -68,7 +68,7 @@ export class CardsTree extends TreeImpl {
                 return node ? node.sockets.map(each => this.socketRow(parent, node, each)) : [];
             case 'socket': {
                 const socket = node?.sockets.find(candidate => candidate.socketId === parent.socketId);
-                return socket ? socket.workers.map(each => this.workerRow(parent, parent.host, socket, each, WorldSnapshot.isCoordinator(snapshot, each.workerId))) : [];
+                return socket ? socket.ranks.map(each => this.workerRow(parent, parent.host, socket, each, WorldSnapshot.isCoordinator(snapshot, each.id))) : [];
             }
             default:
                 return [];
@@ -84,15 +84,15 @@ export class CardsTree extends TreeImpl {
     }
 
     protected socketRow(parent: CompositeTreeNode, node: NodeSnapshot, socket: SocketSnapshot): CardsGroupNode {
-        const holdsSentinel = socket.workers.some(worker => worker.workerId === node.sentinelWorkerId);
-        const busy = NodeUtilization.coresBusy(socket.workers);
+        const holdsSentinel = socket.ranks.some(worker => worker.id === node.sentinelRank);
+        const busy = NodeUtilization.coresBusy(socket.ranks);
         return this.group(parent, `socket:${node.host}/${socket.socketId}`, { kind: 'socket', host: node.host, socketId: socket.socketId },
             CardsText.socketTitle(socket), CardsText.socketCaption(socket), codicon('circuit-board'), holdsSentinel,
             socket.logicalCores > 0 ? busy / socket.logicalCores : undefined);
     }
 
-    protected workerRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, worker: WorkerSnapshot, coordinator: boolean): CardsTreeNode {
-        const id = CardsTreeNode.workerId(host, worker.workerId);
+    protected workerRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, worker: RankSnapshot, coordinator: boolean): CardsTreeNode {
+        const id = CardsTreeNode.workerId(host, worker.id);
         const name = CardsText.workerTitle(worker, coordinator);
         const accessible = CardsPanel.accessibleCores(worker, socket);
         const description = CardsText.workerCaption(worker, accessible);
@@ -103,7 +103,7 @@ export class CardsTree extends TreeImpl {
             return Object.assign(existing, { parent, name, description, icon, cpuFraction });
         }
         const row: CardsTreeNode = {
-            id, parent, name, description, icon, cpuFraction, kind: 'worker', host, socketId: socket.socketId, workerId: worker.workerId, visible: true, selected: false
+            id, parent, name, description, icon, cpuFraction, kind: 'worker', host, socketId: socket.socketId, workerId: worker.id, visible: true, selected: false
         };
         return row;
     }

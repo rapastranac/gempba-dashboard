@@ -1,4 +1,4 @@
-import { WorkerSnapshot } from '../model/worker-snapshot';
+import { RankSnapshot } from '../model/rank-snapshot';
 import { CounterRate } from './counter-rate';
 import { RingSeries } from './ring-series';
 import { WorkerSeries } from './worker-series';
@@ -16,7 +16,7 @@ export class WorkerTrack {
     protected readonly tasksPerSecond: RingSeries;
     protected readonly idlePct: RingSeries;
     protected readonly rssBytes: RingSeries;
-    protected last: WorkerSnapshot | undefined;
+    protected last: RankSnapshot | undefined;
     /** The task counts of its recent frames, on its own clock, oldest first. */
     protected counts: { millis: number, tasks: number }[] = [];
 
@@ -28,7 +28,7 @@ export class WorkerTrack {
     }
 
     /** Records a frame the worker has not sent before, and returns whether it was one. */
-    record(worker: WorkerSnapshot): boolean {
+    record(worker: RankSnapshot): boolean {
         const last = this.last;
         if (last?.seqNo === worker.seqNo) {
             return false;
@@ -37,7 +37,7 @@ export class WorkerTrack {
         this.rssBytes.push(worker.rssBytes);
         // a lower sequence number means the worker restarted, and its counters with it
         if (last && worker.seqNo > last.seqNo) {
-            const idleMicros = CounterRate.perSecond(last.idleMicrosPerWorker, worker.idleMicrosPerWorker, worker.localMillis - last.localMillis);
+            const idleMicros = CounterRate.perSecond(last.idleMicrosPerThread, worker.idleMicrosPerThread, worker.localMillis - last.localMillis);
             if (idleMicros !== undefined) {
                 // idle microseconds per second of wall time, as a percent
                 this.idlePct.push(Math.min(idleMicros / 10_000, 100));

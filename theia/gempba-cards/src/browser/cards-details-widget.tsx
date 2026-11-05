@@ -2,7 +2,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { codicon } from '@theia/core/lib/browser/widgets/widget';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
-import { ConnectionState, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { ConnectionState, RankSnapshot, WorldSnapshot } from '@gempba/core';
 import { NodeHistoryService, TelemetryService, WorkerHistoryService } from '@gempba/telemetry/lib/common';
 import { Gauge, HeatStrip, HeroStat, LiveIndicator, LivenessWatch, MeterBar, Panel, Sparkline } from '@gempba/ui/lib/browser';
 import { Liveness } from '@gempba/ui/lib/common/liveness';
@@ -15,7 +15,7 @@ import { PeersDialog } from './peers-dialog';
 interface Shown {
     readonly panel: CardsPanel.Panel;
     readonly icon: string;
-    readonly worker?: WorkerSnapshot;
+    readonly worker?: RankSnapshot;
 }
 
 /**
@@ -105,13 +105,13 @@ export class CardsDetailsWidget extends ReactWidget {
         </div>;
     }
 
-    protected renderViewAll(worker: WorkerSnapshot): React.ReactNode {
+    protected renderViewAll(worker: RankSnapshot): React.ReactNode {
         return <button className='theia-button secondary gempba-cards-view-all'
             title='Every outgoing peer, the tasks sent to it and the bytes, as of now; reopen for fresh numbers.'
             onClick={() => this.openPeers(worker)}>View all…</button>;
     }
 
-    protected openPeers(worker: WorkerSnapshot): void {
+    protected openPeers(worker: RankSnapshot): void {
         new PeersDialog(worker, this.snapshot).open();
     }
 
@@ -144,7 +144,7 @@ export class CardsDetailsWidget extends ReactWidget {
         if (row.kind === 'socket') {
             return { panel: CardsPanel.forSocket(this.snapshot, node, socket), icon: codicon('circuit-board') };
         }
-        const worker = socket.workers.find(candidate => candidate.workerId === row.workerId);
+        const worker = socket.ranks.find(candidate => candidate.id === row.workerId);
         return worker && { panel: CardsPanel.forWorker(this.snapshot, socket, worker, this.histories), icon: codicon(worker.sentinel ? 'star-full' : 'gear'), worker };
     }
 }

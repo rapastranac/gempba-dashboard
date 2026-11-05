@@ -31,7 +31,7 @@ export namespace CoreHeat {
     export function loadByCpu(node: NodeSnapshot): Map<number, number> {
         const load = new Map<number, number>();
         for (const socket of node.sockets) {
-            for (const worker of socket.workers) {
+            for (const worker of socket.ranks) {
                 const cpuIds = worker.allowedCpuIds.length > 0 ? worker.allowedCpuIds : socket.cpuIds;
                 if (cpuIds.length === 0) {
                     continue;

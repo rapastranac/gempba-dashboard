@@ -88,7 +88,7 @@ export namespace GridTiles {
                 cpuHistory: series.cpu,
                 tasks: { label: TaskWords.STARTED, ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks', hint: TaskWords.STARTED_HINT },
                 memory: total > 0 ? memoryFigure(used, total) : undefined,
-                moved: WorldSnapshot.totalWorkers(snapshot) > 1 ? {
+                moved: WorldSnapshot.totalRanks(snapshot) > 1 ? {
                     text: `${NumberText.grouped(moves.sent)} sent · ${NumberText.grouped(moves.received)} received`,
                     hint: `Tasks this node's processes sent to and received from other processes over the run; ${NumberText.grouped(moves.acrossNodes)} of `
                         + 'those sent went to other nodes, across the network.'
@@ -104,7 +104,7 @@ export namespace GridTiles {
         if (!snapshot || nodes.length === 0) {
             return undefined;
         }
-        const workers = nodes.flatMap(node => node.sockets.flatMap(socket => socket.workers));
+        const workers = nodes.flatMap(node => node.sockets.flatMap(socket => socket.ranks));
         const allocated = nodes.reduce((sum, node) => sum + NodeUtilization.allocatedCores(node), 0);
         const throughput = sources.clusterThroughput();
         const unit = Rates.unitFor(Math.max(0, ...throughput));
@@ -123,7 +123,7 @@ export namespace GridTiles {
             }
         ];
         if (workers.length > 1) {
-            figures.push(movedFigure(moves), idleFigure(snapshot, workers.map(worker => worker.workerId), sources));
+            figures.push(movedFigure(moves), idleFigure(snapshot, workers.map(worker => worker.id), sources));
         }
         if (memTotal > 0) {
             figures.push(memoryFigure(memUsed, memTotal));

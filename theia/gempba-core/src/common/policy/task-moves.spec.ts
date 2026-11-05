@@ -1,25 +1,25 @@
 import { expect } from 'chai';
 import { NodeSnapshot } from '../model/node-snapshot';
 import { PeerSnapshot } from '../model/peer-snapshot';
-import { WorkerSnapshot } from '../model/worker-snapshot';
+import { RankSnapshot } from '../model/rank-snapshot';
 import { WorldSnapshot } from '../model/world-snapshot';
 import { TaskMoves } from './task-moves';
 
-function worker(workerId: number, counts: Partial<WorkerSnapshot> = {}, peers: PeerSnapshot[] = []): WorkerSnapshot {
+function worker(workerId: number, counts: Partial<RankSnapshot> = {}, peers: PeerSnapshot[] = []): RankSnapshot {
     return {
-        workerId, seqNo: 1, localMillis: 0, pid: 0, sentinel: false, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0, tasksSentTotal: 0,
-        tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0, cpuPct: 0, rssBytes: 0, threads: 1, elapsedSeconds: 0, peers, ...counts
+        id: workerId, seqNo: 1, localMillis: 0, pid: 0, sentinel: false, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0, tasksSentTotal: 0,
+        tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0, cpuPct: 0, rssBytes: 0, threads: 1, elapsedSeconds: 0, peers, ...counts
     };
 }
 
-function node(host: string, ...workers: WorkerSnapshot[]): NodeSnapshot {
+function node(host: string, ...workers: RankSnapshot[]): NodeSnapshot {
     return {
-        host, socketCount: 1, physicalCores: 4, logicalCores: 4, hasLiveMemory: false, memTotalBytes: 0, memUsedBytes: 0, sentinelWorkerId: 0,
-        sentinelLocalMillis: 0, nodeUtilPct: 0, sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 4, cpuIds: [], hasTopology: false, coreUsage: [], workers }]
+        host, socketCount: 1, physicalCores: 4, logicalCores: 4, hasLiveMemory: false, memTotalBytes: 0, memUsedBytes: 0, sentinelRank: 0,
+        sentinelLocalMillis: 0, nodeUtilPct: 0, sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 4, cpuIds: [], hasTopology: false, coreUsage: [], ranks: workers }]
     };
 }
 
-const peer = (peerWorkerId: number, count: number): PeerSnapshot => ({ peerWorkerId, count, bytes: count * 100 });
+const peer = (peerWorkerId: number, count: number): PeerSnapshot => ({ peerRank: peerWorkerId, count, bytes: count * 100 });
 
 // gempba's own report for a four-rank run: the coordinator sent the root to rank 1, which handed most of it on
 const RUN: WorldSnapshot = {

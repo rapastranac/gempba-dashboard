@@ -1,15 +1,15 @@
 import { expect } from 'chai';
 import {
-    NodeHistoryStore, NodeSeries, NodeSnapshot, SocketSnapshot, StructureKey, TaskWords, WorkerHistoryStore, WorkerSeries, WorkerSnapshot, WorldSnapshot
+    NodeHistoryStore, NodeSeries, NodeSnapshot, SocketSnapshot, StructureKey, TaskWords, WorkerHistoryStore, WorkerSeries, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { CardsPanel } from './cards-panel';
 
 const GiB = 1024 ** 3;
 
-function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
+function worker(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
     return {
-        workerId: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
-        tasksStartedTotal: 12_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 0,
+        id: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
+        tasksStartedTotal: 12_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerThread: 0,
         cpuPct: 300, rssBytes: 256 * 1024 ** 2, threads: 5, elapsedSeconds: 100, peers: [], ...overrides
     };
 }
@@ -17,14 +17,14 @@ function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
 function socket(overrides: Partial<SocketSnapshot> = {}): SocketSnapshot {
     return {
         socketId: 0, name: 'Xeon', physicalCores: 4, logicalCores: 8, cpuIds: [0, 1, 2, 3, 4, 5, 6, 7], hasTopology: true,
-        coreUsage: [{ workerId: 3, cpuPct: 300, accessibleCores: 4, socketCores: 8 }], workers: [worker()], ...overrides
+        coreUsage: [{ rank: 3, cpuPct: 300, accessibleCores: 4, socketCores: 8 }], ranks: [worker()], ...overrides
     };
 }
 
 function node(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
     return {
         host: 'alpha', socketCount: 1, physicalCores: 4, logicalCores: 8, hasLiveMemory: true, memTotalBytes: 16 * GiB,
-        memUsedBytes: 4 * GiB, sentinelWorkerId: 3, sentinelLocalMillis: 0, nodeUtilPct: 75, sockets: [socket()], ...overrides
+        memUsedBytes: 4 * GiB, sentinelRank: 3, sentinelLocalMillis: 0, nodeUtilPct: 75, sockets: [socket()], ...overrides
     };
 }
 
@@ -65,7 +65,7 @@ describe('CardsPanel', () => {
         });
 
         it('counts every core when no worker is restricted', () => {
-            const unrestricted = node({ sockets: [socket({ workers: [worker({ allowedCpuIds: [] })] })] });
+            const unrestricted = node({ sockets: [socket({ ranks: [worker({ allowedCpuIds: [] })] })] });
             expect(CardsPanel.forNode(unrestricted, histories()).heroes[1].unit).to.equal('of 8');
         });
 
@@ -98,7 +98,7 @@ describe('CardsPanel', () => {
         });
 
         it('has a heat strip per socket with topology, a cell per CPU in the socket\'s order', () => {
-            const strips = CardsPanel.forNode(node({ sockets: [socket(), socket({ socketId: 1, cpuIds: [], hasTopology: false, workers: [] })] }), histories()).strips;
+            const strips = CardsPanel.forNode(node({ sockets: [socket(), socket({ socketId: 1, cpuIds: [], hasTopology: false, ranks: [] })] }), histories()).strips;
             expect(strips.map(strip => strip.title)).to.deep.equal(['Socket 0: Xeon']);
             // worker 3 runs 300% over its four allowed CPUs, 0-3
             expect(strips[0].cells.map(cell => [cell.key, cell.loadPct])).to.deep.equal([[0, 75], [1, 75], [2, 75], [3, 75], [4, 0], [5, 0], [6, 0], [7, 0]]);
@@ -106,7 +106,7 @@ describe('CardsPanel', () => {
         });
 
         it('marks an oversubscribed CPU in its cell', () => {
-            const crowded = node({ sockets: [socket({ workers: [worker({ allowedCpuIds: [0], cpuPct: 150 })], coreUsage: [] })] });
+            const crowded = node({ sockets: [socket({ ranks: [worker({ allowedCpuIds: [0], cpuPct: 150 })], coreUsage: [] })] });
             const cell = CardsPanel.forNode(crowded, histories()).strips[0].cells[0];
             expect([cell.oversubscribed, cell.title]).to.deep.equal([true, 'CPU 0: 150%, oversubscribed (estimated)']);
         });
@@ -123,7 +123,7 @@ describe('CardsPanel', () => {
         });
 
         it('has a bar per worker, its CPU as a share of the cores it may use, as its gauge reads', () => {
-            const two = socket({ workers: [worker(), worker({ workerId: 4, cpuPct: 50, allowedCpuIds: [] })] });
+            const two = socket({ ranks: [worker(), worker({ id: 4, cpuPct: 50, allowedCpuIds: [] })] });
             expect(CardsPanel.forSocket(undefined, node(), two).bars[0].rows).to.deep.equal([
                 { label: 'Worker 3', fraction: 0.75, valueText: '75% of 4 cores', tone: 'cpu' },
                 { label: 'Worker 4', fraction: 50 / 800, valueText: '6% of 8 cores', tone: 'cpu' }
@@ -169,12 +169,12 @@ describe('CardsPanel', () => {
         it('shows a queue only where gempba reports one: at the centralized coordinator', () => {
             expect(CardsPanel.forWorker(undefined, socket(), worker({ schedulerPendingCount: 0 }), histories()).heroes.map(hero => hero.label))
                 .to.not.include('Queued');
-            const coordinator = CardsPanel.forWorker(undefined, socket(), worker({ workerId: 0, schedulerPendingCount: 1200 }), histories());
+            const coordinator = CardsPanel.forWorker(undefined, socket(), worker({ id: 0, schedulerPendingCount: 1200 }), histories());
             expect(coordinator.heroes[3]).to.deep.equal({ label: 'Queued', value: '1,200', unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
         });
 
         it('totals what no figure shows: tasks started, sent and received with their run averages, and the pool\'s idle time', () => {
-            const totals = CardsPanel.forWorker(undefined, socket(), worker({ tasksSentTotal: 30, idleMicrosPerWorker: 4_500_000 }), histories()).totals;
+            const totals = CardsPanel.forWorker(undefined, socket(), worker({ tasksSentTotal: 30, idleMicrosPerThread: 4_500_000 }), histories()).totals;
             expect(totals).to.deep.equal([
                 { label: 'Tasks started', value: '12,000 · 120 tasks/s on average', hint: TaskWords.STARTED_HINT },
                 { label: 'Tasks sent', value: '30 · 18 tasks/min on average', hint: TaskWords.SENT_HINT },
@@ -184,8 +184,8 @@ describe('CardsPanel', () => {
         });
 
         it('shows the coordinator as the coordinator: no tasks started, idle time or pool; its CPU, memory, and the tasks it sent and received', () => {
-            const coordinator = worker({ workerId: 0, tasksStartedTotal: 0, tasksSentTotal: 1, schedulerPendingCount: 0 });
-            const shared = socket({ workers: [coordinator, worker()] });
+            const coordinator = worker({ id: 0, tasksStartedTotal: 0, tasksSentTotal: 1, schedulerPendingCount: 0 });
+            const shared = socket({ ranks: [coordinator, worker()] });
             const panel = CardsPanel.forWorker(world(node({ sockets: [shared] })), shared, coordinator, histories());
             expect([panel.title, panel.subtitle]).to.deep.equal(['Worker 0 · coordinator', 'schedules the run, runs no tasks · PID 4100 · frame #17 · on alpha']);
             expect(panel.heroes.map(hero => hero.label)).to.deep.equal(['Memory']);
@@ -195,7 +195,7 @@ describe('CardsPanel', () => {
         });
 
         it('marks the coordinator among the workers of a socket', () => {
-            const shared = socket({ workers: [worker({ workerId: 0 }), worker()] });
+            const shared = socket({ ranks: [worker({ id: 0 }), worker()] });
             const labels = CardsPanel.forSocket(world(node({ sockets: [shared] })), node({ sockets: [shared] }), shared).bars[0].rows.map(row => row.label);
             expect(labels).to.deep.equal(['Worker 0 · coordinator', 'Worker 3']);
         });
@@ -206,8 +206,8 @@ describe('CardsPanel', () => {
         });
 
         it('lists its five busiest peers, with their nodes, against the busiest', () => {
-            const peers = [1, 2, 4, 5, 6, 7].map(id => ({ peerWorkerId: id, count: id * 10, bytes: id * 1024 }));
-            const other = node({ host: 'beta', sockets: [socket({ workers: [worker({ workerId: 7 })] })] });
+            const peers = [1, 2, 4, 5, 6, 7].map(id => ({ peerRank: id, count: id * 10, bytes: id * 1024 }));
+            const other = node({ host: 'beta', sockets: [socket({ ranks: [worker({ id: 7 })] })] });
             const busiest = CardsPanel.forWorker(world(node(), other), socket(), worker({ peers }), histories()).bars[1];
             expect([busiest.title, busiest.peers]).to.deep.equal(['Busiest peers', true]);
             expect(busiest.rows.map(row => [row.label, row.fraction, row.valueText])).to.deep.equal([

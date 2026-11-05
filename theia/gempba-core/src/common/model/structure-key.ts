@@ -16,8 +16,8 @@ export namespace StructureKey {
         return { keys: [] };
     }
 
-    export function keyOf(host: string, socketId: number, workerId: number): string {
-        return `${host}|${socketId}|${workerId}`;
+    export function keyOf(host: string, socketId: number, rank: number): string {
+        return `${host}|${socketId}|${rank}`;
     }
 
     export function equals(a: StructureKey, b: StructureKey): boolean {

@@ -31,9 +31,9 @@ export class WorkerHistoryStore {
             let rated = false;
             let changed = false;
             for (const socket of node.sockets) {
-                for (const worker of socket.workers) {
-                    seen.add(worker.workerId);
-                    const track = this.trackOf(worker.workerId);
+                for (const worker of socket.ranks) {
+                    seen.add(worker.id);
+                    const track = this.trackOf(worker.id);
                     changed = track.record(worker) || changed;
                     const rate = track.latestTasksPerSecond();
                     if (rate !== undefined) {

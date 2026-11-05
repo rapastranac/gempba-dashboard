@@ -1,7 +1,7 @@
 import { NodeSnapshot } from './node-snapshot';
 import { RunSetup } from './run-setup';
 import { StructureKey } from './structure-key';
-import { WorkerSnapshot } from './worker-snapshot';
+import { RankSnapshot } from './rank-snapshot';
 
 /**
  * The immutable read-model for one telemetry frame: the single value the UI renders from.
@@ -40,8 +40,8 @@ export namespace WorldSnapshot {
         return snapshot.nodes.length;
     }
 
-    export function totalWorkers(snapshot: WorldSnapshot): number {
-        return snapshot.nodes.reduce((total, node) => total + NodeSnapshot.workerCount(node), 0);
+    export function totalRanks(snapshot: WorldSnapshot): number {
+        return snapshot.nodes.reduce((total, node) => total + NodeSnapshot.rankCount(node), 0);
     }
 
     /**
@@ -49,23 +49,23 @@ export namespace WorldSnapshot {
      * says. Telemetry schema 1 declares no roles; its two schedulers always put the coordinator on rank 0, once the run
      * has other processes. A schema-2 run without roles has none.
      */
-    export function isCoordinator(snapshot: WorldSnapshot | undefined, workerId: number): boolean {
+    export function isCoordinator(snapshot: WorldSnapshot | undefined, id: number): boolean {
         if (!snapshot) {
             return false;
         }
-        const role = workerOf(snapshot, workerId)?.role;
+        const role = rankOf(snapshot, id)?.role;
         if (role !== undefined) {
             return role === 'coordinator';
         }
-        return snapshot.schemaVersion < SCHEMA_WITH_ROLES && workerId === SCHEMA_1_COORDINATOR_ID && totalWorkers(snapshot) > 1;
+        return snapshot.schemaVersion < SCHEMA_WITH_ROLES && id === SCHEMA_1_COORDINATOR_ID && totalRanks(snapshot) > 1;
     }
 
-    export function workerOf(snapshot: WorldSnapshot, workerId: number): WorkerSnapshot | undefined {
+    export function rankOf(snapshot: WorldSnapshot, id: number): RankSnapshot | undefined {
         for (const node of snapshot.nodes) {
             for (const socket of node.sockets) {
-                const worker = socket.workers.find(each => each.workerId === workerId);
-                if (worker) {
-                    return worker;
+                const rank = socket.ranks.find(each => each.id === id);
+                if (rank) {
+                    return rank;
                 }
             }
         }
@@ -82,7 +82,7 @@ export namespace WorldSnapshot {
         }
         const nodes = snapshot.nodes.filter(node => node.host === host);
         const keys = nodes.flatMap(node => node.sockets.flatMap(socket =>
-            socket.workers.map(worker => StructureKey.keyOf(node.host, socket.socketId, worker.workerId))));
+            socket.ranks.map(rank => StructureKey.keyOf(node.host, socket.socketId, rank.id))));
         return { ...snapshot, nodes, structure: StructureKey.of(keys) };
     }
 }

@@ -29,7 +29,7 @@ export interface RunMarker {
  * since the process started telemetry; a key that doesn't apply to the rank, such as a coordinator-only one on a worker,
  * reads 0. Times marked `Ms` are milliseconds since the scheduler run started, 0 until the event first happens.
  */
-export interface WorkerAccounting {
+export interface RankAccounting {
     readonly bytesSentTotal: number;
     readonly bytesRecvTotal: number;
     /** Time in the MPI calls that send tasks: how long the sender stalled, not wire latency. */

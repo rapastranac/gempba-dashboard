@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import { NodeSnapshot } from '../model/node-snapshot';
 import { StructureKey } from '../model/structure-key';
-import { WorkerSnapshot } from '../model/worker-snapshot';
+import { RankSnapshot } from '../model/rank-snapshot';
 import { WorldSnapshot } from '../model/world-snapshot';
 import { WorkerHistoryStore } from './worker-history-store';
 import { WorkerSeries } from './worker-series';
@@ -15,20 +15,20 @@ interface Frame {
     readonly rssBytes?: number;
 }
 
-function worker(workerId: number, frame: Frame): WorkerSnapshot {
+function worker(workerId: number, frame: Frame): RankSnapshot {
     return {
-        workerId, seqNo: frame.seqNo, localMillis: frame.localMillis, pid: 0, sentinel: false, allowedCpuIds: [],
+        id: workerId, seqNo: frame.seqNo, localMillis: frame.localMillis, pid: 0, sentinel: false, allowedCpuIds: [],
         tasksStartedTotal: frame.tasks ?? 0, tasksRunning: 0, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0,
-        idleMicrosPerWorker: frame.idleMicros ?? 0, cpuPct: frame.cpuPct ?? 0, rssBytes: frame.rssBytes ?? 0, threads: 1,
+        idleMicrosPerThread: frame.idleMicros ?? 0, cpuPct: frame.cpuPct ?? 0, rssBytes: frame.rssBytes ?? 0, threads: 1,
         elapsedSeconds: 0, peers: []
     };
 }
 
-function node(host: string, ...workers: WorkerSnapshot[]): NodeSnapshot {
+function node(host: string, ...workers: RankSnapshot[]): NodeSnapshot {
     return {
         host, socketCount: 1, physicalCores: 0, logicalCores: 0, hasLiveMemory: false, memTotalBytes: 0, memUsedBytes: 0,
-        sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct: 0,
-        sockets: [{ socketId: 0, physicalCores: 0, logicalCores: 0, cpuIds: [], hasTopology: false, coreUsage: [], workers }]
+        sentinelRank: 0, sentinelLocalMillis: 0, nodeUtilPct: 0,
+        sockets: [{ socketId: 0, physicalCores: 0, logicalCores: 0, cpuIds: [], hasTopology: false, coreUsage: [], ranks: workers }]
     };
 }
 

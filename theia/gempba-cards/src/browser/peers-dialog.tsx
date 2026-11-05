@@ -1,6 +1,6 @@
 import { ReactDialog } from '@theia/core/lib/browser/dialogs/react-dialog';
 import * as React from '@theia/core/shared/react';
-import { Peers, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { Peers, RankSnapshot, WorldSnapshot } from '@gempba/core';
 import { DataTable } from '@gempba/ui/lib/browser';
 import { CardsText } from '../common/cards-text';
 
@@ -15,8 +15,8 @@ export class PeersDialog extends ReactDialog<void> {
     protected readonly rows: CardsText.PeerRow[];
     protected readonly total: string;
 
-    constructor(worker: WorkerSnapshot, world: WorldSnapshot | undefined) {
-        super({ title: `Outgoing peers — Worker ${worker.workerId}`, maxWidth: 640 });
+    constructor(worker: RankSnapshot, world: WorldSnapshot | undefined) {
+        super({ title: `Outgoing peers — Worker ${worker.id}`, maxWidth: 640 });
         this.rows = CardsText.peerRows(worker, world);
         this.total = `Total: ${Peers.summarize(worker.peers)}`;
         this.appendAcceptButton('OK');

@@ -1,27 +1,27 @@
 import { expect } from 'chai';
 import { NodeSnapshot } from '../model/node-snapshot';
 import { SocketSnapshot } from '../model/socket-snapshot';
-import { WorkerSnapshot } from '../model/worker-snapshot';
+import { RankSnapshot } from '../model/rank-snapshot';
 import { CoreHeat } from './core-heat';
 
-function worker(workerId: number, cpuPct: number, allowedCpuIds: number[] = []): WorkerSnapshot {
+function worker(workerId: number, cpuPct: number, allowedCpuIds: number[] = []): RankSnapshot {
     return {
-        workerId, seqNo: 1, localMillis: 0, pid: 0, sentinel: false, allowedCpuIds, tasksStartedTotal: 0, tasksRunning: 0,
-        tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0, cpuPct, rssBytes: 0, threads: 1,
+        id: workerId, seqNo: 1, localMillis: 0, pid: 0, sentinel: false, allowedCpuIds, tasksStartedTotal: 0, tasksRunning: 0,
+        tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0, cpuPct, rssBytes: 0, threads: 1,
         elapsedSeconds: 0, peers: []
     };
 }
 
-function socket(socketId: number, cpuIds: number[], ...workers: WorkerSnapshot[]): SocketSnapshot {
+function socket(socketId: number, cpuIds: number[], ...workers: RankSnapshot[]): SocketSnapshot {
     return {
-        socketId, physicalCores: cpuIds.length, logicalCores: cpuIds.length, cpuIds, hasTopology: cpuIds.length > 0, coreUsage: [], workers
+        socketId, physicalCores: cpuIds.length, logicalCores: cpuIds.length, cpuIds, hasTopology: cpuIds.length > 0, coreUsage: [], ranks: workers
     };
 }
 
 function node(...sockets: SocketSnapshot[]): NodeSnapshot {
     return {
         host: 'h', socketCount: sockets.length, physicalCores: 0, logicalCores: 0, hasLiveMemory: false, memTotalBytes: 0, memUsedBytes: 0,
-        sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct: 0, sockets
+        sentinelRank: 0, sentinelLocalMillis: 0, nodeUtilPct: 0, sockets
     };
 }
 

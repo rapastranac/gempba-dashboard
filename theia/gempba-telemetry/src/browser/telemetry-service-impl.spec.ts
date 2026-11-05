@@ -3,7 +3,7 @@ import { expect } from 'chai';
 import { Emitter } from '@theia/core/lib/common/event';
 import { Container } from '@theia/core/shared/inversify';
 import {
-    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, WorkerSnapshot, WorldSnapshot
+    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { TelemetryService } from '../common/telemetry-service';
@@ -13,15 +13,15 @@ import { TelemetryServiceImpl } from './telemetry-service-impl';
 
 /** One node "h" whose worker 7 sent frame `seqNo` at `millis`, with a node frame its sentinel took at `millis`. */
 function snapshot(host: string, seqNo = 1, millis = 0): WorldSnapshot {
-    const worker: WorkerSnapshot = {
-        workerId: 7, seqNo, localMillis: millis, pid: 0, sentinel: true, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
-        tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0, cpuPct: 90, rssBytes: 0, threads: 1,
+    const worker: RankSnapshot = {
+        id: 7, seqNo, localMillis: millis, pid: 0, sentinel: true, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
+        tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0, cpuPct: 90, rssBytes: 0, threads: 1,
         elapsedSeconds: 0, peers: []
     };
     const node: NodeSnapshot = {
         host, socketCount: 1, physicalCores: 4, logicalCores: 4, hasLiveMemory: true, memTotalBytes: 100, memUsedBytes: 25,
-        sentinelWorkerId: 7, sentinelLocalMillis: millis, nodeUtilPct: 50,
-        sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 4, cpuIds: [0, 1, 2, 3], hasTopology: true, coreUsage: [], workers: [worker] }]
+        sentinelRank: 7, sentinelLocalMillis: millis, nodeUtilPct: 50,
+        sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 4, cpuIds: [0, 1, 2, 3], hasTopology: true, coreUsage: [], ranks: [worker] }]
     };
     return { ...WorldSnapshot.empty(), timestampMillis: 1, nodes: [node] };
 }

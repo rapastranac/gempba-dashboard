@@ -97,7 +97,7 @@ describe('WorldSnapshotMapper', () => {
         const model = WorldSnapshotMapper.toWorldSnapshot(undefined);
         expect(model).to.deep.equal(WorldSnapshot.empty());
         expect(WorldSnapshot.totalNodes(model)).to.equal(0);
-        expect(WorldSnapshot.totalWorkers(model)).to.equal(0);
+        expect(WorldSnapshot.totalRanks(model)).to.equal(0);
     });
 
     it('carries the frame scalars and totals', () => {
@@ -106,7 +106,7 @@ describe('WorldSnapshotMapper', () => {
         expect(model.timestampMillis).to.equal(1_700_000_000_000);
         expect(model.elapsedSeconds).to.equal(42);
         expect(WorldSnapshot.totalNodes(model)).to.equal(1);
-        expect(WorldSnapshot.totalWorkers(model)).to.equal(3);
+        expect(WorldSnapshot.totalRanks(model)).to.equal(3);
     });
 
     it('resolves the node header fields', () => {
@@ -118,7 +118,7 @@ describe('WorldSnapshotMapper', () => {
         expect(node.hasLiveMemory).to.be.true;
         expect(node.memTotalBytes).to.equal(64 * GiB);
         expect(node.memUsedBytes).to.equal(40 * GiB);
-        expect(node.sentinelWorkerId).to.equal(10);
+        expect(node.sentinelRank).to.equal(10);
     });
 
     it('keeps the sentinel\'s clock from the node frame', () => {
@@ -146,23 +146,23 @@ describe('WorldSnapshotMapper', () => {
         expect(s0.logicalCores).to.equal(4);
         expect(s0.cpuIds).to.deep.equal([0, 1, 2, 3]);
         expect(s0.hasTopology).to.be.true;
-        expect(s0.workers.map(w => w.workerId)).to.deep.equal([10, 12]);
-        expect(s1.workers.map(w => w.workerId)).to.deep.equal([11]);
+        expect(s0.ranks.map(w => w.id)).to.deep.equal([10, 12]);
+        expect(s1.ranks.map(w => w.id)).to.deep.equal([11]);
     });
 
     it('core usage intersects allowed cpus with the socket cpus', () => {
         const node = firstNode(twoSocketEnvelope());
         // worker 10: {0,1} ∩ {0,1,2,3} = 2; worker 12: empty list → all 4.
-        expect(node.sockets[0].coreUsage.map(u => [u.workerId, u.accessibleCores, u.socketCores]))
+        expect(node.sockets[0].coreUsage.map(u => [u.rank, u.accessibleCores, u.socketCores]))
             .to.have.deep.members([[10, 2, 4], [12, 4, 4]]);
         // worker 11: no allowed list → all 4.
-        expect(node.sockets[1].coreUsage.map(u => [u.workerId, u.accessibleCores])).to.deep.equal([[11, 4]]);
+        expect(node.sockets[1].coreUsage.map(u => [u.rank, u.accessibleCores])).to.deep.equal([[11, 4]]);
     });
 
     it('maps worker counters and peers', () => {
         const node = firstNode(twoSocketEnvelope());
-        const w10 = node.sockets[0].workers[0];
-        expect(w10.workerId).to.equal(10);
+        const w10 = node.sockets[0].ranks[0];
+        expect(w10.id).to.equal(10);
         expect(w10.seqNo).to.equal(5);
         expect(w10.pid).to.equal(1000);
         expect(w10.sentinel).to.be.true;
@@ -173,8 +173,8 @@ describe('WorldSnapshotMapper', () => {
         expect(w10.rssBytes).to.equal(500_000);
         expect(w10.threads).to.equal(8);
         expect(w10.elapsedSeconds).to.equal(42);
-        expect(w10.peers).to.deep.equal([{ peerWorkerId: 11, bytes: 4096, count: 3 }]);
-        const w11 = node.sockets[1].workers[0];
+        expect(w10.peers).to.deep.equal([{ peerRank: 11, bytes: 4096, count: 3 }]);
+        const w11 = node.sockets[1].ranks[0];
         expect(w11.sentinel).to.be.false;
         expect(w11.peers).to.be.empty;
     });
@@ -183,13 +183,13 @@ describe('WorldSnapshotMapper', () => {
         const base = twoSocketEnvelope();
         const workers = base.workers!.map(w => ({ ...w, worker_local_ms: 9_000 + w.worker_id }));
         const [s0, s1] = firstNode({ ...base, workers }).sockets;
-        expect(s0.workers.map(w => [w.workerId, w.localMillis, w.allowedCpuIds])).to.deep.equal([[10, 9_010, [0, 1]], [12, 9_012, []]]);
+        expect(s0.ranks.map(w => [w.id, w.localMillis, w.allowedCpuIds])).to.deep.equal([[10, 9_010, [0, 1]], [12, 9_012, []]]);
         // worker 11 has no allowed list: unrestricted.
-        expect(s1.workers.map(w => [w.workerId, w.localMillis, w.allowedCpuIds])).to.deep.equal([[11, 9_011, []]]);
+        expect(s1.ranks.map(w => [w.id, w.localMillis, w.allowedCpuIds])).to.deep.equal([[11, 9_011, []]]);
     });
 
     it('a worker without identity may run anywhere', () => {
-        const worker = WorldSnapshotMapper.toWorldSnapshot(envelope(undefined, [frame(99, 1, 10, 1000)], undefined)).nodes[0].sockets[0].workers[0];
+        const worker = WorldSnapshotMapper.toWorldSnapshot(envelope(undefined, [frame(99, 1, 10, 1000)], undefined)).nodes[0].sockets[0].ranks[0];
         expect([worker.pid, worker.allowedCpuIds]).to.deep.equal([0, []]);
     });
 
@@ -232,7 +232,7 @@ describe('WorldSnapshotMapper', () => {
         expect(WorldSnapshot.totalNodes(full)).to.equal(2);
         const only0 = WorldSnapshot.forHost(full, 'n0');
         expect(only0.nodes.map(n => n.host)).to.deep.equal(['n0']);
-        expect(WorldSnapshot.totalWorkers(only0)).to.equal(3);
+        expect(WorldSnapshot.totalRanks(only0)).to.equal(3);
         expect(only0.structure.keys).to.have.members(['n0|0|10', 'n0|0|12', 'n0|1|11']);
         const none = WorldSnapshot.forHost(full, 'does-not-exist');
         expect(none.nodes).to.be.empty;
