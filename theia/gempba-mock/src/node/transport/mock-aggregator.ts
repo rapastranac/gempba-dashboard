@@ -19,8 +19,8 @@ export interface MockAggregatorOptions {
 /**
  * The mock's stand-in for gempba's aggregator, the telemetry server on rank 0: it advances the run with the wall clock and, every broadcast interval,
  * writes the run's latest frames to every client, the first one the moment a client connects. Control lines from any
- * client set the run's intervals, clamped as gempba clamps them, and apply at once. When it stops, as gempba's process
- * exits, it closes every client; in schema 2 each one first gets the run's final line.
+ * client set the run's interval, clamped as gempba clamps it, and apply at once. When it stops, as gempba's process
+ * exits, it closes every client, each first getting the run's final line.
  */
 export class MockAggregator {
 
@@ -54,8 +54,8 @@ export class MockAggregator {
 
     /**
      * Stops broadcasting and closes every client once it has what it was sent, as gempba's process does when it exits.
-     * In schema 2 that is the run's final line: every rank's last frame, marked `"final":true` even while paused, so a
-     * consumer can tell a finished run from a lost connection. gempba 4.2 sends none.
+     * That is the run's final line: every rank's last frame, marked `"final":true` even while paused, so a consumer can
+     * tell a finished run from a lost connection.
      */
     stop(): void {
         if (!this.running) {
@@ -65,7 +65,7 @@ export class MockAggregator {
         clearTimeout(this.timer);
         this.timer = undefined;
         const streams = [...this.clientsNow.keys()];
-        if (streams.length > 0 && this.mock.schema === 2) {
+        if (streams.length > 0) {
             this.mock.snapshot();
             const final = this.mock.line(Date.now(), { final: true });
             streams.forEach(stream => this.send(stream, final));
@@ -130,7 +130,7 @@ export class MockAggregator {
 
     protected schedule(): void {
         clearTimeout(this.timer);
-        this.timer = setTimeout(() => this.tick(), this.mock.broadcastIntervalMs);
+        this.timer = setTimeout(() => this.tick(), this.mock.intervalMs);
     }
 
     protected tick(): void {
@@ -158,8 +158,8 @@ export class MockAggregator {
     }
 
     /**
-     * Answers a control line as the gempba the fidelity imitates: v4.2.0 knows its two intervals alone; v4.3.0 takes the
-     * one interval under either name, ignores the node interval, and pauses, resumes, snapshots and marks.
+     * Answers a control line as gempba v4.3.0 does: it takes the one interval under either of its names, ignores the node
+     * interval, and pauses, resumes, snapshots and marks.
      */
     protected control(line: string, who: string): void {
         const message = ControlLine.parse(line);
@@ -167,25 +167,16 @@ export class MockAggregator {
             this.log(`Ignored a malformed control line from ${who}`);
             return;
         }
-        const schema = this.mock.schema;
-        if (schema === 1 && message.kind !== ControlKind.SetWorkerIntervalMs && message.kind !== ControlKind.SetNodeIntervalMs) {
-            this.log(`Ignored ${message.kind} from ${who}: gempba 4.2 doesn't know it`);
-            return;
-        }
         if (ControlLine.isInterval(message)) {
-            if (schema === 2 && message.kind === ControlKind.SetNodeIntervalMs) {
+            if (message.kind === ControlKind.SetNodeIntervalMs) {
                 this.log(`Ignored ${message.kind} from ${who}: gempba 4.3 drives node frames at the one interval`);
                 return;
             }
             const applied = RefreshInterval.clamp(message.value);
             const clamped = applied === message.value ? '' : ` (clamped from ${message.value})`;
-            if (message.kind === ControlKind.SetNodeIntervalMs) {
-                this.mock.setIntervals(this.mock.workerIntervalMs, applied);
-            } else {
-                this.mock.setIntervals(applied, this.mock.nodeIntervalMs);
-            }
+            this.mock.setIntervalMs(applied);
             this.log(`${message.kind} → ${applied} ms${clamped}, from ${who}`);
-            // the broadcast may follow the worker rate; a shorter one starts now rather than after the old wait
+            // the broadcast follows the interval; a shorter one starts now rather than after the old wait
             if (this.running) {
                 this.schedule();
             }

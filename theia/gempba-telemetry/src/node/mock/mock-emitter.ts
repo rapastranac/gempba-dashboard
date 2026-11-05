@@ -6,16 +6,15 @@ import { BroadcastEnvelope, ControlKind, ControlLine } from '../protocol/wire-pr
 
 export interface MockEmitterOptions {
     readonly frames: readonly BroadcastEnvelope[];
-    readonly workerIntervalMs?: number;
-    readonly nodeIntervalMs?: number;
+    readonly intervalMs?: number;
     /** Reports each control line applied, with the clamped value. */
     readonly onControl?: (kind: ControlKind, appliedMs: number) => void;
 }
 
 /**
- * A stand-in for a gempba run's telemetry stream, for tests: replays a recording to every client, one frame per
- * worker interval, looping at the end. Like gempba it stamps the current time, keeps node frames only on
- * node ticks, and applies control lines clamped to the server's bounds.
+ * A stand-in for a gempba run's telemetry stream, for tests: replays a recording to every client, one line per
+ * interval, looping at the end. Like gempba v4.3.0 it stamps the current time, drives every frame at the one interval,
+ * and applies it, clamped to the server's bounds, under either of its control names.
  */
 export class MockEmitter {
 
@@ -31,23 +30,17 @@ export class MockEmitter {
 
     protected readonly server = net.createServer(socket => this.stream(socket));
     protected readonly peers = new Set<net.Socket>();
-    protected workerInterval: number;
-    protected nodeInterval: number;
+    protected interval: number;
 
     constructor(protected readonly options: MockEmitterOptions) {
         if (options.frames.length === 0) {
             throw new Error('MockEmitter needs at least one frame');
         }
-        this.workerInterval = clamp(options.workerIntervalMs ?? RefreshInterval.DEFAULT_MS);
-        this.nodeInterval = clamp(options.nodeIntervalMs ?? RefreshInterval.DEFAULT_NODE_MS);
+        this.interval = clamp(options.intervalMs ?? RefreshInterval.DEFAULT_MS);
     }
 
-    get workerIntervalMs(): number {
-        return this.workerInterval;
-    }
-
-    get nodeIntervalMs(): number {
-        return this.nodeInterval;
+    get intervalMs(): number {
+        return this.interval;
     }
 
     /** Resolves with the bound port; port 0 lets the OS pick a free one. */
@@ -66,17 +59,11 @@ export class MockEmitter {
     protected stream(socket: net.Socket): void {
         this.peers.add(socket);
         let cursor = 0;
-        let lastNodeTick = -Infinity;
         let timer: NodeJS.Timeout | undefined;
         const tick = () => {
-            const now = Date.now();
-            const nodeTick = now - lastNodeTick >= this.nodeInterval;
-            if (nodeTick) {
-                lastNodeTick = now;
-            }
             const frame = this.options.frames[cursor++ % this.options.frames.length];
-            socket.write(JSON.stringify({ ...frame, ts: now, nodes: nodeTick ? frame.nodes : [] }) + '\n');
-            timer = setTimeout(tick, this.workerInterval);
+            socket.write(JSON.stringify({ ...frame, ts: Date.now() }) + '\n');
+            timer = setTimeout(tick, this.interval);
         };
         let buffered = '';
         socket.setEncoding('utf8');
@@ -99,17 +86,12 @@ export class MockEmitter {
 
     protected control(line: string): void {
         const message = ControlLine.parse(line);
-        // the recordings it replays are schema 1's, whose only controls are the two intervals
-        if (!message || !ControlLine.isInterval(message)) {
+        // gempba v4.3.0 drives node frames at the one interval, so it ignores a node interval
+        if (!message || !ControlLine.isInterval(message) || message.kind === ControlKind.SetNodeIntervalMs) {
             return;
         }
-        const applied = clamp(message.value);
-        if (message.kind === ControlKind.SetWorkerIntervalMs) {
-            this.workerInterval = applied;
-        } else {
-            this.nodeInterval = applied;
-        }
-        this.options.onControl?.(message.kind, applied);
+        this.interval = clamp(message.value);
+        this.options.onControl?.(message.kind, this.interval);
     }
 }
 

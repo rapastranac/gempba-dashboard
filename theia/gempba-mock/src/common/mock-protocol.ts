@@ -42,8 +42,8 @@ export interface MockStatus {
     /** The running or ended run's configuration. */
     readonly config?: MockConfig;
     readonly clients: number;
-    readonly workerIntervalMs?: number;
-    readonly nodeIntervalMs?: number;
+    /** How often every frame is sent, as the dashboard set it. */
+    readonly intervalMs?: number;
     readonly ranks?: number;
     /** What the Connection view needs to reach the running mock. */
     readonly reach?: MockReach;

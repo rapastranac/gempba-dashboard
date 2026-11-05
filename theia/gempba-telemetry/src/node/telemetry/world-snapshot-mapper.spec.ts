@@ -102,7 +102,6 @@ describe('WorldSnapshotMapper', () => {
 
     it('carries the frame scalars and totals', () => {
         const model = WorldSnapshotMapper.toWorldSnapshot(twoSocketEnvelope());
-        expect(model.schemaVersion).to.equal(7);
         expect(model.timestampMillis).to.equal(1_700_000_000_000);
         expect(model.elapsedSeconds).to.equal(42);
         expect(WorldSnapshot.totalNodes(model)).to.equal(1);
@@ -236,7 +235,7 @@ describe('WorldSnapshotMapper', () => {
         expect(only0.structure.keys).to.have.members(['n0|0|10', 'n0|0|12', 'n0|1|11']);
         const none = WorldSnapshot.forHost(full, 'does-not-exist');
         expect(none.nodes).to.be.empty;
-        expect(none.schemaVersion).to.equal(7);
+        expect(none.elapsedSeconds).to.equal(full.elapsedSeconds);
     });
 
     it('four cores pegged over a four-core allocation is 100', () => {

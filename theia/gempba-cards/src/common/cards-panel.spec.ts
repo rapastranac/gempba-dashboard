@@ -9,6 +9,7 @@ const GiB = 1024 ** 3;
 
 function rank(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
     return {
+        role: 'worker', accounting: RankAccounting.none(),
         id: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
         tasksStartedTotal: 12_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerThread: 0,
         cpuPct: 300, rssBytes: 256 * 1024 ** 2, threads: 5, elapsedSeconds: 100, peers: [], ...overrides
@@ -38,7 +39,7 @@ function histories(overrides: Partial<{ node: NodeSeries, rank: RankSeries, thro
 }
 
 function world(...nodes: NodeSnapshot[]): WorldSnapshot {
-    return { schemaVersion: 1, timestampMillis: 0, elapsedSeconds: 100, nodes, structure: StructureKey.empty() };
+    return { runId: '', paused: false, final: false, timestampMillis: 0, elapsedSeconds: 100, nodes, structure: StructureKey.empty() };
 }
 
 describe('CardsPanel', () => {
@@ -116,7 +117,7 @@ describe('CardsPanel', () => {
     describe('a socket', () => {
 
         it('gauges its CPU and heads with the cores busy and its ranks', () => {
-            const panel = CardsPanel.forSocket(undefined, node(), socket());
+            const panel = CardsPanel.forSocket(node(), socket());
             expect([panel.title, panel.subtitle]).to.deep.equal(['Socket 0: Xeon', 'on alpha · 4 physical / 8 logical cores · CPUs 0–7']);
             expect(panel.gauge).to.deep.equal({ label: 'CPU of the socket', fraction: 3 / 8, valueText: '38%', tone: 'cpu' });
             expect(panel.heroes).to.deep.equal([{ label: 'Cores busy', value: '3.0', unit: 'of 8' }, { label: 'Ranks', value: '1' }]);
@@ -125,14 +126,14 @@ describe('CardsPanel', () => {
 
         it('has a bar per rank, its CPU as a share of the cores it may use, as its gauge reads', () => {
             const two = socket({ ranks: [rank(), rank({ id: 4, cpuPct: 50, allowedCpuIds: [] })] });
-            expect(CardsPanel.forSocket(undefined, node(), two).bars[0].rows).to.deep.equal([
+            expect(CardsPanel.forSocket(node(), two).bars[0].rows).to.deep.equal([
                 { label: 'Rank 3', fraction: 0.75, valueText: '75% of 4 cores', tone: 'cpu' },
                 { label: 'Rank 4', fraction: 50 / 800, valueText: '6% of 8 cores', tone: 'cpu' }
             ]);
         });
 
         it('has no gauge without topology', () => {
-            expect(CardsPanel.forSocket(undefined, node(), socket({ logicalCores: 0, cpuIds: [], hasTopology: false })).gauge).to.equal(undefined);
+            expect(CardsPanel.forSocket(node(), socket({ logicalCores: 0, cpuIds: [], hasTopology: false })).gauge).to.equal(undefined);
         });
     });
 
@@ -174,36 +175,24 @@ describe('CardsPanel', () => {
             expect(coordinator.heroes[3]).to.deep.equal({ label: 'Queued', value: '1,200', unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
         });
 
-        it('totals what no figure shows: tasks started, sent and received with their run averages, and the pool\'s idle time', () => {
+        it('totals what no figure shows: tasks started, sent and received with their run averages, the bytes moved, and the pool\'s idle time', () => {
             const totals = CardsPanel.forRank(undefined, socket(), rank({ tasksSentTotal: 30, idleMicrosPerThread: 4_500_000 }), histories()).totals;
-            expect(totals).to.deep.equal([
-                { label: 'Tasks started', value: '12,000 · 120 tasks/s on average', hint: TaskWords.STARTED_HINT },
-                { label: 'Tasks sent', value: '30 · 18 tasks/min on average', hint: TaskWords.SENT_HINT },
-                { label: 'Tasks received', value: '0', hint: TaskWords.RECEIVED_HINT },
-                { label: 'Pool idle', value: '4.5 s per thread' }
+            expect(totals.map(total => [total.label, total.value])).to.deep.equal([
+                ['Tasks started', '12,000 · 120 tasks/s on average'], ['Tasks sent', '30 · 18 tasks/min on average'], ['Tasks received', '0'],
+                ['Bytes sent', '0 B in 0 µs'], ['Bytes received', '0 B in 0 µs'], ['Pool idle', '4.5 s per thread: 0 µs starved, 0 µs imbalanced']
             ]);
-        });
-
-        it('shows the coordinator as the coordinator: no tasks started, idle time or pool; its CPU, memory, and the tasks it sent and received', () => {
-            const coordinator = rank({ id: 0, tasksStartedTotal: 0, tasksSentTotal: 1, schedulerPendingCount: 0 });
-            const shared = socket({ ranks: [coordinator, rank()] });
-            const panel = CardsPanel.forRank(world(node({ sockets: [shared] })), shared, coordinator, histories());
-            expect([panel.title, panel.subtitle]).to.deep.equal(['Rank 0 · coordinator', 'schedules the run, runs no tasks · PID 4100 · frame #17 · on alpha']);
-            expect(panel.heroes.map(hero => hero.label)).to.deep.equal(['Memory']);
-            expect(panel.charts.map(chart => chart.title)).to.deep.equal(['CPU']);
-            expect(panel.bars).to.deep.equal([]);
-            expect(panel.totals.map(total => [total.label, total.value])).to.deep.equal([['Tasks sent', '1 · 0.60 tasks/min on average'], ['Tasks received', '0']]);
+            expect(totals.slice(0, 3).map(total => total.hint)).to.deep.equal([TaskWords.STARTED_HINT, TaskWords.SENT_HINT, TaskWords.RECEIVED_HINT]);
         });
 
         it('marks the coordinator among the ranks of a socket', () => {
-            const shared = socket({ ranks: [rank({ id: 0 }), rank()] });
-            const labels = CardsPanel.forSocket(world(node({ sockets: [shared] })), node({ sockets: [shared] }), shared).bars[0].rows.map(row => row.label);
-            expect(labels).to.deep.equal(['Rank 0 · coordinator', 'Rank 3']);
+            const shared = socket({ ranks: [rank({ id: 0, role: 'coordinator' }), rank()] });
+            const labels = CardsPanel.forSocket(node({ sockets: [shared] }), shared).bars[0].rows.map(row => row.label);
+            expect(labels).to.deep.equal(['Rank 0 · coordinator · aggregator', 'Rank 3']);
         });
 
-        describe('in schema 2, by what it counts', () => {
+        describe('by what it counts', () => {
 
-            /** A schema-2 rank: its declared role and the counters it filled, the rest at 0. */
+            /** A rank: its declared role and the counters it filled, the rest at 0. */
             function counted(role: SchedulerRole, overrides: Partial<RankSnapshot>, accounting: Partial<RankAccounting>): RankSnapshot {
                 return rank({ role, accounting: { ...RankAccounting.none(), bytesSentTotal: 2048, sendMicrosTotal: 1500, ...accounting }, ...overrides });
             }
@@ -214,7 +203,7 @@ describe('CardsPanel', () => {
                 { idleMicrosStarved: 3_000_000, idleMicrosImbalanced: 1_500_000, schedRunningMicros: 8_000_000, schedWaitingMicros: 2_000_000 });
             const panelOf = (subject: RankSnapshot) => {
                 const shared = socket({ ranks: [subject] });
-                return CardsPanel.forRank({ ...world(node({ sockets: [shared] })), schemaVersion: 2 }, shared, subject, histories());
+                return CardsPanel.forRank(world(node({ sockets: [shared] })), shared, subject, histories());
             };
             const labels = (items: readonly { label: string }[]) => items.map(item => item.label);
 

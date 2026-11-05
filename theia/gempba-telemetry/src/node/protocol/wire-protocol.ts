@@ -1,11 +1,8 @@
 /**
  * The gempba telemetry wire contract: one {@link BroadcastEnvelope} per newline-terminated JSON line,
- * and {@link ControlLine}s written back on the same socket. Schemas 1 (gempba up to v4.2.0) and 2 (v4.3.0) read alike;
- * gempba documents both in its `docs/telemetry/wire-format.md`. Schema 2 adds the run's id, setup, pause and end, each
- * rank's role and the time accounting, and renames keys: a process is a rank (`ranks`, `rank`, `sentinel_rank`,
- * `rank_local_ms`), idle time is per thread, `tasks_local_total` is `tasks_started_total`, and the role and counters
- * once called center are the coordinator's. Each key is read by its v4.3.0 name first, then by its older one, which
- * schema 1 and builds from before the rename send; the fields below take the v4.3.0 names. Field names stay snake_case
+ * and {@link ControlLine}s written back on the same socket, as gempba v4.3.0 sends and takes them: telemetry schema 2,
+ * which gempba documents in its `docs/telemetry/wire-format.md`. Keys are read by their names, never gated by a line's
+ * `version`, so a line from an older gempba reads as whatever of it matches. Field names stay snake_case
  * as on the wire; only the WorldSnapshotMapper translates them into the camelCase read-model. Parsing mirrors the
  * Java/Jackson contract: unknown fields are ignored, missing numbers read as 0, and missing objects or
  * lists stay undefined (a missing topology node `sockets` means something different from an empty one).
@@ -23,7 +20,7 @@ export interface BroadcastEnvelope {
     /** True only on the line rank 0, the aggregator, sends at shutdown, with the run's totals, before it closes; schema 2. */
     readonly final?: boolean;
     readonly topology?: Topology;
-    /** Every rank's frame, whatever its role: `ranks`, or `workers` before the rename. */
+    /** Every rank's frame, whatever its role. */
     readonly ranks?: readonly RankFrame[];
     readonly nodes?: readonly NodeFrame[];
 }
@@ -91,11 +88,11 @@ export interface RankFrame {
     readonly rank: number;
     readonly seq_no: number;
     readonly rank_local_ms: number;
-    /** Subtrees handed to a pool thread, received ones included, counted at hand-off; schema 1 calls it `tasks_local_total`. */
+    /** Subtrees handed to a pool thread, received ones included, counted at hand-off. */
     readonly tasks_started_total: number;
     readonly tasks_sent_total: number;
     readonly tasks_recv_total: number;
-    // the counters below are schema 2's, and read 0 from a schema-1 line
+    // the time accounting and the scheduler's counters; a key a line leaves out reads 0
     readonly bytes_sent_total?: number;
     readonly bytes_recv_total?: number;
     readonly send_microseconds_total?: number;
@@ -123,7 +120,7 @@ export interface RankFrame {
     readonly tasks_running: number;
     /** IPC scheduler queue depth; a different layer from tasks_running. */
     readonly scheduler_pending_count: number;
-    /** Cumulative idle time, already averaged across the pool's threads: `idle_microseconds_per_worker` before the rename. */
+    /** Cumulative idle time, already averaged across the pool's threads. */
     readonly idle_microseconds_per_thread: number;
     /** Percent of one core: 400 means four cores pegged. */
     readonly process_cpu_pct: number;
@@ -153,10 +150,6 @@ export interface NodeFrame {
     /** Job memory-cgroup limit; 0 when unlimited. */
     readonly cgroup_mem_limit_bytes: number;
     readonly sockets?: readonly SocketStats[];
-    /** Schema 1 only, and always zero. */
-    readonly net_aggregate?: NetStats;
-    /** Schema 1 only, and always zero. */
-    readonly disk_aggregate?: DiskStats;
 }
 
 export interface SocketStats {
@@ -164,18 +157,6 @@ export interface SocketStats {
     readonly cpu_pct: number;
     readonly mem_total_bytes: number;
     readonly mem_used_bytes: number;
-}
-
-export interface NetStats {
-    readonly bytes_in: number;
-    readonly bytes_out: number;
-    readonly packets_in: number;
-    readonly packets_out: number;
-}
-
-export interface DiskStats {
-    readonly read_bytes: number;
-    readonly write_bytes: number;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -229,7 +210,7 @@ export namespace BroadcastEnvelope {
             paused: bool(json.paused),
             final: bool(json.final),
             topology: nested(json.topology, Topology.fromJson),
-            ranks: list(json.ranks ?? json.workers, RankFrame.fromJson),
+            ranks: list(json.ranks, RankFrame.fromJson),
             nodes: list(json.nodes, NodeFrame.fromJson)
         };
     }
@@ -277,11 +258,11 @@ export namespace TopologyNode {
         const json = objectOf(value);
         return {
             hostname: str(json.hostname),
-            sentinel_rank: num(json.sentinel_rank ?? json.sentinel_worker_id),
+            sentinel_rank: num(json.sentinel_rank),
             total_physical_cores: num(json.total_physical_cores),
             total_logical_cores: num(json.total_logical_cores),
             mem_total_bytes: num(json.mem_total_bytes),
-            ranks: list(json.ranks ?? json.worker_ids, num),
+            ranks: list(json.ranks, num),
             sockets: list(json.sockets, TopologySocket.fromJson)
         };
     }
@@ -304,7 +285,7 @@ export namespace RankIdentity {
     export function fromJson(value: unknown): RankIdentity {
         const json = objectOf(value);
         return {
-            rank: num(json.rank ?? json.worker_id),
+            rank: num(json.rank),
             hostname: str(json.hostname),
             pid: num(json.pid),
             primary_socket: num(json.primary_socket),
@@ -318,10 +299,10 @@ export namespace RankFrame {
     export function fromJson(value: unknown): RankFrame {
         const json = objectOf(value);
         return {
-            rank: num(json.rank ?? json.worker_id),
+            rank: num(json.rank),
             seq_no: num(json.seq_no),
-            rank_local_ms: num(json.rank_local_ms ?? json.worker_local_ms),
-            tasks_started_total: num(json.tasks_started_total ?? json.tasks_local_total),
+            rank_local_ms: num(json.rank_local_ms),
+            tasks_started_total: num(json.tasks_started_total),
             tasks_sent_total: num(json.tasks_sent_total),
             tasks_recv_total: num(json.tasks_recv_total),
             bytes_sent_total: num(json.bytes_sent_total),
@@ -340,16 +321,16 @@ export namespace RankFrame {
             assign_count: num(json.assign_count),
             assign_latency_microseconds_max: num(json.assign_latency_microseconds_max),
             available_microseconds_queue_empty: num(json.available_microseconds_queue_empty),
-            coordinator_state_msgs_total: num(json.coordinator_state_msgs_total ?? json.center_state_msgs_total),
-            coordinator_score_proposals_total: num(json.coordinator_score_proposals_total ?? json.center_score_proposals_total),
-            coordinator_score_broadcasts_total: num(json.coordinator_score_broadcasts_total ?? json.center_score_broadcasts_total),
+            coordinator_state_msgs_total: num(json.coordinator_state_msgs_total),
+            coordinator_score_proposals_total: num(json.coordinator_score_proposals_total),
+            coordinator_score_broadcasts_total: num(json.coordinator_score_broadcasts_total),
             score_proposals_sent: num(json.score_proposals_sent),
             last_score_improvement_ms: num(json.last_score_improvement_ms),
-            coordinator_full_microseconds: num(json.coordinator_full_microseconds ?? json.center_full_microseconds),
+            coordinator_full_microseconds: num(json.coordinator_full_microseconds),
             telemetry_microseconds_total: num(json.telemetry_microseconds_total),
             tasks_running: num(json.tasks_running),
             scheduler_pending_count: num(json.scheduler_pending_count),
-            idle_microseconds_per_thread: num(json.idle_microseconds_per_thread ?? json.idle_microseconds_per_worker),
+            idle_microseconds_per_thread: num(json.idle_microseconds_per_thread),
             process_cpu_pct: num(json.process_cpu_pct),
             process_rss_bytes: num(json.process_rss_bytes),
             process_threads: num(json.process_threads),
@@ -369,7 +350,7 @@ export namespace NodeFrame {
     export function fromJson(value: unknown): NodeFrame {
         const json = objectOf(value);
         return {
-            sentinel_rank: num(json.sentinel_rank ?? json.sentinel_worker_id),
+            sentinel_rank: num(json.sentinel_rank),
             sentinel_local_ms: num(json.sentinel_local_ms),
             hostname: str(json.hostname),
             socket_count: num(json.socket_count),
@@ -378,9 +359,7 @@ export namespace NodeFrame {
             mem_avail_bytes: num(json.mem_avail_bytes),
             cgroup_mem_used_bytes: num(json.cgroup_mem_used_bytes),
             cgroup_mem_limit_bytes: num(json.cgroup_mem_limit_bytes),
-            sockets: list(json.sockets, SocketStats.fromJson),
-            net_aggregate: nested(json.net_aggregate, NetStats.fromJson),
-            disk_aggregate: nested(json.disk_aggregate, DiskStats.fromJson)
+            sockets: list(json.sockets, SocketStats.fromJson)
         };
     }
 }
@@ -397,32 +376,13 @@ export namespace SocketStats {
     }
 }
 
-export namespace NetStats {
-    export function fromJson(value: unknown): NetStats {
-        const json = objectOf(value);
-        return {
-            bytes_in: num(json.bytes_in),
-            bytes_out: num(json.bytes_out),
-            packets_in: num(json.packets_in),
-            packets_out: num(json.packets_out)
-        };
-    }
-}
-
-export namespace DiskStats {
-    export function fromJson(value: unknown): DiskStats {
-        const json = objectOf(value);
-        return { read_bytes: num(json.read_bytes), write_bytes: num(json.write_bytes) };
-    }
-}
-
 /** The control lines a client writes back on the telemetry socket; gempba clamps an interval itself. */
 export enum ControlKind {
-    /** Schema 2's one interval for every frame, from gempba v4.3.0. */
+    /** The one interval gempba v4.3.0 drives every frame and its broadcast at. */
     SetIntervalMs = 'set_interval_ms',
-    /** Schema 1's rank-frame interval; gempba v4.3.0 takes it as `set_interval_ms`, until v5.0.0 drops it. */
+    /** An older name gempba v4.3.0 still takes as `set_interval_ms`, until v5.0.0 drops it. */
     SetWorkerIntervalMs = 'set_worker_interval_ms',
-    /** Schema 1's node-frame interval; gempba v4.3.0 accepts it and does nothing. */
+    /** An older control gempba v4.3.0 accepts and ignores. */
     SetNodeIntervalMs = 'set_node_interval_ms',
     /** From gempba v4.3.0: the ranks stop sending frames while their counters keep counting, and the stream sends header-only lines. */
     Pause = 'pause',

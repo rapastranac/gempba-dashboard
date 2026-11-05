@@ -8,20 +8,19 @@ import { RankSnapshot } from './rank-snapshot';
  * Raw magnitudes only; wire types never reach it.
  */
 export interface WorldSnapshot {
-    readonly schemaVersion: number;
     readonly timestampMillis: number;
     readonly elapsedSeconds: number;
     /** First-seen host order. */
     readonly nodes: readonly NodeSnapshot[];
     readonly structure: StructureKey;
-    /** The id telemetry drew for this run, telling runs apart; absent before telemetry schema 2. */
-    readonly runId?: string;
-    /** How the run is set up; absent before telemetry schema 2. */
+    /** The id telemetry drew for this run, telling runs apart; empty before any line. */
+    readonly runId: string;
+    /** How the run is set up; absent until a full line arrives. */
     readonly run?: RunSetup;
     /** Whether telemetry is paused: the data is the latest gempba sent before or during the pause. */
-    readonly paused?: boolean;
+    readonly paused: boolean;
     /** Whether this is the run's last line, sent at shutdown with its totals. */
-    readonly final?: boolean;
+    readonly final: boolean;
     /**
      * Whether the line carried its header alone, as gempba's do while paused: the data is the last line's again, and
      * no new frame. A snapshot or the final line sent while paused carries frames, and leaves this unset.
@@ -31,17 +30,11 @@ export interface WorldSnapshot {
 
 export namespace WorldSnapshot {
 
-    /** Telemetry schema 1's two schedulers always put their coordinator on rank 0. */
-    export const SCHEMA_1_COORDINATOR_ID = 0;
-
     /** Telemetry's aggregator, which collects every rank's frames and serves the stream, in every run and whatever the scheduler. */
     export const AGGREGATOR_RANK = 0;
 
-    /** The first telemetry schema whose ranks declare their scheduler role. */
-    export const SCHEMA_WITH_ROLES = 2;
-
     export function empty(): WorldSnapshot {
-        return { schemaVersion: 0, timestampMillis: 0, elapsedSeconds: 0, nodes: [], structure: StructureKey.empty() };
+        return { timestampMillis: 0, elapsedSeconds: 0, nodes: [], structure: StructureKey.empty(), runId: '', paused: false, final: false };
     }
 
     export function totalNodes(snapshot: WorldSnapshot): number {
@@ -52,20 +45,9 @@ export namespace WorldSnapshot {
         return snapshot.nodes.reduce((total, node) => total + NodeSnapshot.rankCount(node), 0);
     }
 
-    /**
-     * Whether the rank is the scheduler's coordinator, which hands out work and runs no tasks, as its declared role
-     * says. Telemetry schema 1 declares no roles; its two schedulers always put the coordinator on rank 0, once the run
-     * has other processes. A schema-2 run without roles has none.
-     */
+    /** Whether the rank is the scheduler's coordinator, which hands out work and runs no tasks, as its declared role says. */
     export function isCoordinator(snapshot: WorldSnapshot | undefined, id: number): boolean {
-        if (!snapshot) {
-            return false;
-        }
-        const role = rankOf(snapshot, id)?.role;
-        if (role !== undefined) {
-            return role === 'coordinator';
-        }
-        return snapshot.schemaVersion < SCHEMA_WITH_ROLES && id === SCHEMA_1_COORDINATOR_ID && totalRanks(snapshot) > 1;
+        return snapshot !== undefined && rankOf(snapshot, id)?.role === 'coordinator';
     }
 
     export function rankOf(snapshot: WorldSnapshot, id: number): RankSnapshot | undefined {

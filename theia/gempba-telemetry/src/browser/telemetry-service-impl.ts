@@ -67,11 +67,11 @@ export class TelemetryServiceImpl implements TelemetryService {
     @postConstruct()
     protected init(): void {
         this.receiver.snapshots(snapshot => {
-            if (snapshot.runId !== undefined && this.runId !== undefined && snapshot.runId !== this.runId) {
+            if (snapshot.runId !== '' && this.runId !== undefined && snapshot.runId !== this.runId) {
                 // gempba restarted on the same port: its charts start afresh, as a new Listen's do
                 this.forget();
             }
-            this.runId = snapshot.runId ?? this.runId;
+            this.runId = snapshot.runId || this.runId;
             const now = Date.now();
             this.latestLineAt = now;
             if (!snapshot.headerOnly) {

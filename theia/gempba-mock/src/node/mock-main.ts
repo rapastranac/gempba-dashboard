@@ -21,7 +21,7 @@ const USAGE = `Usage: npm run mock -- [options]
   --scheduler semi-centralized|centralized
   --coordinator N          the rank the scheduler's coordinator runs on (0)
   --no-roles               declare no roles: no coordinator, every rank a worker
-  --load PCT --fidelity gempba-4.3|gempba-4.2|full --seed N
+  --load PCT --fidelity gempba-4.3|full --seed N
   --bench                  time building and serializing frames, then exit`;
 
 const { values } = parseArgs({
@@ -87,7 +87,7 @@ if (values.bench) {
 
 /** Builds and serializes a minute of frames at the worker rate after a minute's warm-up, and reports the cost of one. */
 function bench({ shape: benchShape, scheduler, live, seed }: MockConfig): void {
-    const run = new MockRun(benchShape, scheduler, live, seed, { workerIntervalMs: 50, nodeIntervalMs: 1000 });
+    const run = new MockRun(benchShape, scheduler, live, seed, 50);
     run.advanceTo(60_000);
     const frames = 1200;
     let bytes = 0;

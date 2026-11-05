@@ -27,15 +27,14 @@ export namespace CardsText {
 
     /**
      * `Rank 3`, `Rank 3 · sentinel`, or `Rank 0 · coordinator · aggregator · sentinel`: the coordinator as the scheduler
-     * declares it, the aggregator on rank 0 from telemetry schema 2 on, and the sentinel, which the view marks with a star
-     * icon too. A worker carries no tag, as almost every rank is one.
+     * declares it, the aggregator on rank 0, and the sentinel, which the view marks with a star icon too. A worker carries
+     * no tag, as almost every rank is one.
      */
-    export function rankTitle(rank: RankSnapshot, world: WorldSnapshot | undefined): string {
-        const aggregator = rank.id === WorldSnapshot.AGGREGATOR_RANK && (world?.schemaVersion ?? 0) >= WorldSnapshot.SCHEMA_WITH_ROLES;
+    export function rankTitle(rank: RankSnapshot): string {
         return [
             `Rank ${rank.id}`,
-            ...(WorldSnapshot.isCoordinator(world, rank.id) ? ['coordinator'] : []),
-            ...(aggregator ? ['aggregator'] : []),
+            ...(rank.role === 'coordinator' ? ['coordinator'] : []),
+            ...(rank.id === WorldSnapshot.AGGREGATOR_RANK ? ['aggregator'] : []),
             ...(rank.sentinel ? ['sentinel'] : [])
         ].join(' · ');
     }

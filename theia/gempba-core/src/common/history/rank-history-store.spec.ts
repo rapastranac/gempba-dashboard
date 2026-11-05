@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import { NodeSnapshot } from '../model/node-snapshot';
 import { StructureKey } from '../model/structure-key';
 import { RankSnapshot } from '../model/rank-snapshot';
+import { RankAccounting } from '../model/run-setup';
 import { WorldSnapshot } from '../model/world-snapshot';
 import { RankHistoryStore } from './rank-history-store';
 import { RankSeries } from './rank-series';
@@ -17,6 +18,7 @@ interface Frame {
 
 function rank(id: number, frame: Frame): RankSnapshot {
     return {
+        role: 'worker', accounting: RankAccounting.none(),
         id: id, seqNo: frame.seqNo, localMillis: frame.localMillis, pid: 0, sentinel: false, allowedCpuIds: [],
         tasksStartedTotal: frame.tasks ?? 0, tasksRunning: 0, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0,
         idleMicrosPerThread: frame.idleMicros ?? 0, cpuPct: frame.cpuPct ?? 0, rssBytes: frame.rssBytes ?? 0, threads: 1,
@@ -33,7 +35,7 @@ function node(host: string, ...ranks: RankSnapshot[]): NodeSnapshot {
 }
 
 function world(...nodes: NodeSnapshot[]): WorldSnapshot {
-    return { schemaVersion: 1, timestampMillis: 0, elapsedSeconds: 0, nodes, structure: StructureKey.empty() };
+    return { runId: '', paused: false, final: false, timestampMillis: 0, elapsedSeconds: 0, nodes, structure: StructureKey.empty() };
 }
 
 /** Rank 1 on host "h". */

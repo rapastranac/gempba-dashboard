@@ -68,7 +68,7 @@ export class CardsTree extends TreeImpl {
                 return node ? node.sockets.map(each => this.socketRow(parent, node, each)) : [];
             case 'socket': {
                 const socket = node?.sockets.find(candidate => candidate.socketId === parent.socketId);
-                return socket ? socket.ranks.map(each => this.rankRow(parent, parent.host, socket, each, snapshot)) : [];
+                return socket ? socket.ranks.map(each => this.rankRow(parent, parent.host, socket, each)) : [];
             }
             default:
                 return [];
@@ -91,9 +91,9 @@ export class CardsTree extends TreeImpl {
             socket.logicalCores > 0 ? busy / socket.logicalCores : undefined);
     }
 
-    protected rankRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, rank: RankSnapshot, world: WorldSnapshot): CardsTreeNode {
+    protected rankRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, rank: RankSnapshot): CardsTreeNode {
         const id = CardsTreeNode.rankId(host, rank.id);
-        const name = CardsText.rankTitle(rank, world);
+        const name = CardsText.rankTitle(rank);
         const accessible = CardsPanel.accessibleCores(rank, socket);
         const description = CardsText.rankCaption(rank, accessible);
         const icon = codicon(rank.sentinel ? 'star-full' : 'gear');

@@ -33,7 +33,7 @@ describe('Telemetry pipeline against the mock emitter', () => {
     const snapshots: WorldSnapshot[] = [];
 
     before(async () => {
-        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), workerIntervalMs: 80, nodeIntervalMs: 50 });
+        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), intervalMs: 80 });
         const port = await emitter.listen();
         const store = new TelemetryStore();
         const listener: FrameListener = {
@@ -86,7 +86,7 @@ describe('Telemetry pipeline against the mock emitter', () => {
     });
 
     it('a control line from the client changes the emitter cadence', async () => {
-        expect(client.sendControl(ControlKind.SetWorkerIntervalMs, 75)).to.equal(true);
-        await eventually(() => emitter.workerIntervalMs === 75);
+        expect(client.sendControl(ControlKind.SetIntervalMs, 75)).to.equal(true);
+        await eventually(() => emitter.intervalMs === 75);
     });
 });

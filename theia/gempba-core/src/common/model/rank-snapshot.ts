@@ -15,8 +15,8 @@ export interface RankSnapshot {
     /** 0 when unknown. */
     readonly pid: number;
     readonly sentinel: boolean;
-    /** The rank's declared scheduler role; absent before telemetry schema 2. */
-    readonly role?: SchedulerRole;
+    /** The rank's scheduler role, as its scheduler declares it; a rank whose scheduler declares none is a worker. */
+    readonly role: SchedulerRole;
     /** The CPUs the rank may run on; empty when unrestricted or unknown. */
     readonly allowedCpuIds: readonly number[];
     /** Subtrees handed to a pool thread, received ones included, counted at hand-off. */
@@ -31,6 +31,6 @@ export interface RankSnapshot {
     readonly threads: number;
     readonly elapsedSeconds: number;
     readonly peers: readonly PeerSnapshot[];
-    /** Where the rank's time and its tasks' bytes go; absent before telemetry schema 2. */
-    readonly accounting?: RankAccounting;
+    /** Where the rank's time and its tasks' bytes go. */
+    readonly accounting: RankAccounting;
 }

@@ -4,9 +4,9 @@ import { BroadcastEnvelope, ControlKind } from '../protocol/wire-protocol';
 import { FrameListener } from './frame-listener';
 import { TelemetryClient } from './telemetry-client';
 
-const SAMPLE_FRAME = '{"version":1,"ts":1700000000000,"topology":{"nodes":[],"identities":[]},"workers":[{"worker_id":0,"seq_no":1,'
-    + '"worker_local_ms":0,"tasks_local_total":42,"tasks_sent_total":0,"tasks_recv_total":0,"tasks_running":0,"scheduler_pending_count":0,'
-    + '"idle_microseconds_per_worker":0,"process_cpu_pct":0.0,"process_rss_bytes":0,"process_threads":1,"edges_out":[]}],"nodes":[]}';
+const SAMPLE_FRAME = '{"version":2,"ts":1700000000000,"topology":{"nodes":[],"identities":[]},"ranks":[{"rank":0,"seq_no":1,'
+    + '"rank_local_ms":0,"tasks_started_total":42,"tasks_sent_total":0,"tasks_recv_total":0,"tasks_running":0,"scheduler_pending_count":0,'
+    + '"idle_microseconds_per_thread":0,"process_cpu_pct":0.0,"process_rss_bytes":0,"process_threads":1,"edges_out":[]}],"nodes":[]}';
 
 class RecordingListener implements FrameListener {
     readonly events: string[] = [];

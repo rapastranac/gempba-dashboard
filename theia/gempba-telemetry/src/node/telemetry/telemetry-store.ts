@@ -38,7 +38,7 @@ export class TelemetryStore {
         this.lastRunId = undefined;
     }
 
-    /** A run id other than the last one seen: gempba restarted on the same port. Schema 1 has no id to tell. */
+    /** A run id other than the last one seen: gempba restarted on the same port. */
     protected isAnotherRun(runId: string | undefined): boolean {
         return runId !== undefined && this.lastRunId !== undefined && runId !== this.lastRunId;
     }

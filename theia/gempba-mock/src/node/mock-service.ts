@@ -47,8 +47,8 @@ export class MockService implements MockServer {
             return this.ended ? { ...MockStatus.stopped(), ended: true, config: this.config } : MockStatus.stopped();
         }
         return {
-            running: true, ended: false, config: this.config, clients: this.aggregator.clients, workerIntervalMs: run.workerIntervalMs,
-            nodeIntervalMs: run.nodeIntervalMs, ranks: run.topology.ranks.length, reach: this.reach, warnings: this.warnings
+            running: true, ended: false, config: this.config, clients: this.aggregator.clients, intervalMs: run.intervalMs,
+            ranks: run.topology.ranks.length, reach: this.reach, warnings: this.warnings
         };
     }
 

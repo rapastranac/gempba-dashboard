@@ -1,10 +1,12 @@
 import { expect } from 'chai';
 import { NodeSnapshot } from '../model/node-snapshot';
 import { RankSnapshot } from '../model/rank-snapshot';
+import { RankAccounting } from '../model/run-setup';
 import { NodeUtilization } from './node-utilization';
 
 function rank(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
     return {
+        role: 'worker', accounting: RankAccounting.none(),
         id: 3, seqNo: 1, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
         tasksStartedTotal: 0, tasksRunning: 0, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0,
         cpuPct: 300, rssBytes: 0, threads: 5, elapsedSeconds: 0, peers: [], ...overrides

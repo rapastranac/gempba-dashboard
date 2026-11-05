@@ -33,9 +33,9 @@ describe('MockConfig', () => {
         expect(MockConfig.of({ shape: { ranksPerNode: 3, workersPerNode: 6 } }).shape.ranksPerNode).to.equal(3);
     });
 
-    it('reads a run saved as gempba, before schema 2, as gempba 4.2', () => {
-        expect(MockConfig.of({ live: { fidelity: 'gempba' } }).live.fidelity).to.equal('gempba-4.2');
+    it('sends gempba 4.3\'s telemetry by default, and takes it for a fidelity it no longer offers', () => {
         expect(MockConfig.defaults().live.fidelity).to.equal('gempba-4.3');
+        expect(MockConfig.of({ live: { fidelity: 'gempba-4.2' } }).live.fidelity).to.equal('gempba-4.3');
     });
 
     it('checks the ports, and the SSH ones only when SSH is used', () => {

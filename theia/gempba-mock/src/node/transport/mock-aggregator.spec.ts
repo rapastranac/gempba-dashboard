@@ -1,6 +1,5 @@
 import { expect } from 'chai';
 import * as net from 'net';
-import { RefreshRates } from '@gempba/core';
 import { TelemetryClient } from '@gempba/telemetry/lib/node/client/telemetry-client';
 import { BroadcastEnvelope, ControlKind } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { MockConfig, MockLive, MockShape } from '../../common/mock-config';
@@ -43,10 +42,10 @@ describe('MockAggregator', () => {
     let ended: boolean;
     const clients: { close(): void }[] = [];
 
-    async function serve(live: Partial<MockLive> = {}, shape: Partial<MockShape> = {}, rates?: RefreshRates, options: MockAggregatorOptions = {}): Promise<void> {
+    async function serve(live: Partial<MockLive> = {}, shape: Partial<MockShape> = {}, intervalMs?: number, options: MockAggregatorOptions = {}): Promise<void> {
         logged = [];
         ended = false;
-        const run = new MockRun({ ...defaults.shape, ...shape }, defaults.scheduler, { ...defaults.live, ...live }, 42, rates);
+        const run = new MockRun({ ...defaults.shape, ...shape }, defaults.scheduler, { ...defaults.live, ...live }, 42, intervalMs);
         aggregator = new MockAggregator(run, { ...options, log: message => logged.push(message), onEnded: () => ended = true });
         aggregator.start();
         endpoint = new MockTcpEndpoint(aggregator);
@@ -93,14 +92,14 @@ describe('MockAggregator', () => {
         telemetry.start();
         await until(() => frames.length > 0);
         expect(telemetry.sendControl(ControlKind.SetWorkerIntervalMs, 10)).to.equal(true);
-        await until(() => aggregator.run.workerIntervalMs === 50);
+        await until(() => aggregator.run.intervalMs === 50);
         expect(logged.some(message => message.startsWith('set_worker_interval_ms → 50 ms (clamped from 10), from TCP client'))).to.equal(true);
         const counted = frames.length;
         await new Promise(resolve => setTimeout(resolve, 600));
         expect(frames.length - counted).to.be.at.least(5);
         telemetry.sendControl(ControlKind.SetNodeIntervalMs, 2000);
         await until(() => logged.some(message => message.startsWith('Ignored set_node_interval_ms')));
-        expect(aggregator.run.nodeIntervalMs, 'gempba 4.3 ignores the node interval').to.equal(1000);
+        expect(aggregator.run.intervalMs, 'gempba 4.3 ignores the node interval').to.equal(50);
     });
 
     it('pauses, marks, snapshots and resumes when a client asks, as gempba 4.3 does', async () => {
@@ -110,7 +109,7 @@ describe('MockAggregator', () => {
         const write = (control: object) => client.socket.write(JSON.stringify(control) + '\n');
         const parsed = () => client.lines.map(line => BroadcastEnvelope.parse(line));
         write({ kind: 'set_interval_ms', value: 100 });
-        await until(() => aggregator.run.workerIntervalMs === 100);
+        await until(() => aggregator.run.intervalMs === 100);
         write({ kind: 'pause' });
         await until(() => parsed().some(line => line.paused && line.ranks === undefined));
         write({ kind: 'mark', label: 'phase 2' });
@@ -123,20 +122,9 @@ describe('MockAggregator', () => {
         await until(() => parsed().slice(seen).some(line => line.paused === false && line.ranks !== undefined));
     });
 
-    it('answers as gempba 4.2 in schema 1: its two intervals, and nothing else', async () => {
-        await serve({ fidelity: 'gempba-4.2' });
-        const client = lineClient();
-        await until(() => client.lines.length > 0);
-        client.socket.write('{"kind":"set_interval_ms","value":100}\n{"kind":"pause"}\n{"kind":"set_node_interval_ms","value":2000}\n');
-        await until(() => aggregator.run.nodeIntervalMs === 2000);
-        expect(logged.filter(message => message.startsWith('Ignored')).map(message => message.split(' from ')[0]))
-            .to.deep.equal(['Ignored set_interval_ms', 'Ignored pause']);
-        expect([aggregator.run.workerIntervalMs, aggregator.run.paused]).to.deep.equal([500, false]);
-    });
-
     it('drops a client that falls behind, and keeps serving the others', async function (): Promise<void> {
         this.timeout(15_000);
-        await serve({ fidelity: 'full' }, { nodes: 16, ranksPerNode: 32 }, { workerIntervalMs: 50, nodeIntervalMs: 1000 }, { maxBufferedBytes: 512 * 1024 });
+        await serve({ fidelity: 'full' }, { nodes: 16, ranksPerNode: 32 }, 50, { maxBufferedBytes: 512 * 1024 });
         const stalled = lineClient();
         stalled.socket.pause();
         const healthy = lineClient();
@@ -204,14 +192,5 @@ describe('MockAggregator', () => {
         await until(() => client.closed);
         const last = BroadcastEnvelope.parse(client.lines[client.lines.length - 1]);
         expect([last.paused, last.final, last.ranks?.length]).to.deep.equal([true, true, aggregator.run.topology.ranks.length]);
-    });
-
-    it('sends no final line in schema 1, as gempba 4.2 has none', async () => {
-        await serve({ fidelity: 'gempba-4.2' });
-        const client = lineClient();
-        await until(() => client.lines.length > 0);
-        aggregator.fault('end-run');
-        await until(() => client.closed);
-        expect(client.lines.some(line => line.includes('final'))).to.equal(false);
     });
 });
