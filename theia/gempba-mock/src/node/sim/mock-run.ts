@@ -1,9 +1,8 @@
 import { randomUUID } from 'crypto';
-import { RefreshInterval, RefreshRates, SchedulerRole } from '@gempba/core';
-import { Schema1Frame, Schema1NodeFrame } from './schema1-lines';
+import { RefreshInterval, SchedulerRole } from '@gempba/core';
 import { RunMarkerFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { Schema2Frame, Schema2NodeFrame, Schema2Topology } from './schema2-lines';
-import { MockFidelity, MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
+import { MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
 import { CoordinatorQueue, QueuedTask } from './coordinator-queue';
 import { MockRandom } from './mock-random';
@@ -45,9 +44,8 @@ interface RankState {
     nextSampleMs: number;
     /** What it last sent; gempba's aggregator repeats it until the rank sends a new one. */
     sample?: RankSample;
-    /** The sample written in the schema `frameSchema`, kept until it is sampled again or the schema changes. */
+    /** The sample written as gempba writes it, kept until the rank is sampled again. */
     frameJson?: string;
-    frameSchema?: number;
     phase: MockRun.Phase;
     /** When it last reported itself available: the coordinator hears of it from the next step on. */
     availableSinceMs: number;
@@ -63,7 +61,7 @@ interface RankState {
     baseRss: number;
     efficiency: number;
     edges: Map<number, Edge>;
-    /** What schema 2 counts beyond schema 1; the coordinator's counters stay 0 on a worker, and the workers' on the coordinator. */
+    /** Where its time and its tasks' bytes go; the coordinator's counters stay 0 on a worker, and the workers' on the coordinator. */
     acct: Accounting;
     /** When the coordinator reserved it as a push target: where the assignment's latency starts. */
     assignedAtMs?: number;
@@ -79,7 +77,6 @@ interface NodeState {
     nextSampleMs: number;
     sample?: NodeSample;
     frameJson?: string;
-    frameSchema?: number;
     pageCache: number;
 }
 
@@ -110,7 +107,7 @@ interface Accounting {
     telemetryMicros: number;
 }
 
-/** What a rank's frame says, taken when it is sampled; either schema writes it. */
+/** What a rank's frame says, taken when it is sampled. */
 interface RankSample {
     readonly id: number;
     readonly seqNo: number;
@@ -129,7 +126,7 @@ interface RankSample {
     readonly acct: Readonly<Accounting>;
 }
 
-/** What a node's frame says, taken when its sentinel samples it; either schema writes it. */
+/** What a node's frame says, taken when its sentinel samples it. */
 interface NodeSample {
     readonly sentinel: number;
     readonly localMs: number;
@@ -154,17 +151,15 @@ interface NodeSample {
  *   sends it one task, a subtree of its own, with nothing else in flight; nothing queues anywhere;
  * - centralized: running workers send spare tasks to the coordinator while it isn't full, and it hands the biggest it holds
  *   to each available worker; its queue is the only pending count.
- * The counters follow from that, so they agree with one another as gempba's do. Frames are sampled at the worker and
- * node intervals, one interval for both in schema 2, and written once in the schema the fidelity asks for; a line is
- * the latest frame of every rank and node with the topology, as gempba's aggregator broadcasts them.
+ * The counters follow from that, so they agree with one another as gempba's do. Every rank's and node's frames are
+ * sampled at the one interval and written once; a line is the latest frame of every rank and node with the topology,
+ * as gempba's aggregator broadcasts them.
  */
 export class MockRun {
 
     static readonly STEP_MS = 50;
     /** The release whose telemetry schema 2 the mocker sends. */
     static readonly GEMPBA_VERSION = '4.3.0';
-    /** gempba up to v4.2.0 broadcasts on a fixed interval, whatever the worker rate (its center_tcp_server.cpp). */
-    static readonly GEMPBA_BROADCAST_MS = 500;
     /** gempba's CENTER_NBSTORED_TASKS_PER_PROCESS: past this many tasks per process, the centralized coordinator says it is full. */
     static readonly COORDINATOR_TASKS_PER_PROCESS = 1000;
     /** gempba's MAX_MEMORY_MB: past this much memory, the centralized coordinator says it is full too. */
@@ -199,13 +194,11 @@ export class MockRun {
     protected model: MockScenarioModel;
     protected scenarioStartMs = 0;
     protected time = 0;
-    protected workerInterval: number;
-    protected nodeInterval: number;
+    protected interval: number;
     protected nextPid = 41_000;
     protected pairingCursor = 0;
     protected endedNow = false;
     protected topologyJson?: string;
-    protected topologySchema?: number;
     protected frameOrder?: number[];
     protected readonly runSeed: number;
     protected pausedNow = false;
@@ -214,14 +207,13 @@ export class MockRun {
     readonly runId = randomUUID();
 
     constructor(protected readonly shape: MockShape, readonly scheduler: MockScheduler, live: MockLive, seed: number,
-        rates: RefreshRates = RefreshRates.defaults(), protected readonly roles: MockRoles = { coordinatorRank: 0, declared: true }) {
+        intervalMs: number = RefreshInterval.DEFAULT_MS, protected readonly roles: MockRoles = { coordinatorRank: 0, declared: true }) {
         this.random = new MockRandom(seed);
         this.noise = new MockRandom(seed + 0x5eed);
         this.runSeed = seed;
         this.liveNow = live;
         this.model = MockScenarioModel.of(live.scenario);
-        this.workerInterval = RefreshInterval.clamp(rates.workerIntervalMs);
-        this.nodeInterval = RefreshInterval.clamp(rates.nodeIntervalMs);
+        this.interval = RefreshInterval.clamp(intervalMs);
         this.topologyNow = MockTopology.of(shape);
         this.nodes = this.topologyNow.nodes.map(node => ({
             clockBaseMs: this.random.int(1_000_000, 900_000_000), stalledUntilMs: 0, lastSampleMs: 0, nextSampleMs: 0,
@@ -251,27 +243,14 @@ export class MockRun {
         return this.liveNow;
     }
 
-    get workerIntervalMs(): number {
-        return this.workerInterval;
-    }
-
-    get nodeIntervalMs(): number {
-        return this.nodeInterval;
-    }
-
-    /** gempba up to v4.2.0 broadcasts every 500 ms; from v4.3.0, at the one interval every frame follows. */
-    get broadcastIntervalMs(): number {
-        return this.schema === 1 ? MockRun.GEMPBA_BROADCAST_MS : this.workerInterval;
+    /** How often every rank and node sends a frame and the aggregator broadcasts, as gempba v4.3.0 drives them all. */
+    get intervalMs(): number {
+        return this.interval;
     }
 
     /** Whether its ranks stopped sending frames; their counters keep counting. */
     get paused(): boolean {
         return this.pausedNow;
-    }
-
-    /** The telemetry schema the fidelity sends; it can change while the mocker runs. */
-    get schema(): 1 | 2 {
-        return MockFidelity.schema(this.liveNow.fidelity);
     }
 
     /** A new scenario starts from its beginning; the load and fidelity apply from the next step. */
@@ -280,13 +259,7 @@ export class MockRun {
             this.model = MockScenarioModel.of(live.scenario);
             this.scenarioStartMs = this.time;
         }
-        const schema = this.schema;
         this.liveNow = live;
-        if (this.schema !== schema) {
-            // gempba v4.2.0 has no pause
-            this.pausedNow = this.pausedNow && this.schema === 2;
-            this.rearm();
-        }
     }
 
     /** Its ranks stop sending frames while the run goes on, as gempba v4.3.0's do on a pause control. */
@@ -323,10 +296,9 @@ export class MockRun {
         return true;
     }
 
-    /** Applies the intervals at once: a sample due sooner under the new interval is brought forward. */
-    setIntervals(workerMs: number, nodeMs: number): void {
-        this.workerInterval = RefreshInterval.clamp(workerMs);
-        this.nodeInterval = RefreshInterval.clamp(nodeMs);
+    /** Applies the interval at once: a sample due sooner under it is brought forward. */
+    setIntervalMs(ms: number): void {
+        this.interval = RefreshInterval.clamp(ms);
         this.rearm();
     }
 
@@ -355,25 +327,17 @@ export class MockRun {
      * While paused it is the header alone, unless it is a snapshot or the run's final line, which carry the frames.
      */
     line(nowEpochMs: number, kind: { readonly full?: boolean, readonly final?: boolean } = {}): string {
-        const schema = this.schema;
         const clock = `"ts":${nowEpochMs},"elapsed_seconds":${Math.floor(this.time / 1000)}`;
         const final = kind.final === true;
-        if (schema === 2 && this.pausedNow && !kind.full && !final) {
+        if (this.pausedNow && !kind.full && !final) {
             return `{"version":2,"run_id":"${this.runId}",${clock},"paused":true,"final":false}`;
         }
-        if (this.topologySchema !== schema) {
-            this.topologyJson = undefined;
-            this.topologySchema = schema;
-        }
         const pidOf = (id: number) => this.ranks.get(id)?.pid ?? 0;
-        this.topologyJson ??= JSON.stringify(schema === 1 ? MockTopology.toSchema1(this.topologyNow, pidOf) : this.topologySchema2(pidOf));
+        this.topologyJson ??= JSON.stringify(this.topologyFrame(pidOf));
         // node by node, as gempba's aggregator walks its topology
         this.frameOrder ??= [...this.topologyNow.ranks].sort((a, b) => a.nodeIndex - b.nodeIndex || a.id - b.id).map(place => place.id);
-        const ranks = this.frameOrder.map(id => this.ranks.get(id)).map(rank => rank && this.rankJson(rank, schema)).filter(frame => frame !== undefined);
-        const nodes = this.nodes.map(node => this.nodeJson(node, schema)).filter(frame => frame !== undefined);
-        if (schema === 1) {
-            return `{"version":1,${clock},"topology":${this.topologyJson},"workers":[${ranks.join(',')}],"nodes":[${nodes.join(',')}]}`;
-        }
+        const ranks = this.frameOrder.map(id => this.ranks.get(id)).map(rank => rank && this.rankJson(rank)).filter(frame => frame !== undefined);
+        const nodes = this.nodes.map(node => this.nodeJson(node)).filter(frame => frame !== undefined);
         return `{"version":2,"run_id":"${this.runId}",${clock},"paused":${this.pausedNow},"final":${final},`
             + `"topology":${this.topologyJson},"ranks":[${ranks.join(',')}],"nodes":[${nodes.join(',')}]}`;
     }
@@ -695,26 +659,21 @@ export class MockRun {
         return this.scheduler === 'centralized' && this.roles.declared;
     }
 
-    /** A sample due sooner under the intervals now in force is brought forward. */
+    /** A sample due sooner under the interval now in force is brought forward. */
     protected rearm(): void {
         for (const rank of this.ranks.values()) {
-            rank.nextSampleMs = Math.max(this.time, Math.min(rank.nextSampleMs, rank.lastSampleMs + this.workerInterval));
+            rank.nextSampleMs = Math.max(this.time, Math.min(rank.nextSampleMs, rank.lastSampleMs + this.interval));
         }
         for (const node of this.nodes) {
-            node.nextSampleMs = Math.max(this.time, Math.min(node.nextSampleMs, node.lastSampleMs + this.nodeEvery));
+            node.nextSampleMs = Math.max(this.time, Math.min(node.nextSampleMs, node.lastSampleMs + this.interval));
         }
-    }
-
-    /** Node frames keep their own interval in schema 1, and follow the one interval in schema 2, as gempba v4.3.0 drives them. */
-    protected get nodeEvery(): number {
-        return this.schema === 1 ? this.nodeInterval : this.workerInterval;
     }
 
     protected roleOf(id: number): SchedulerRole {
         return this.roles.declared && id === this.roles.coordinatorRank ? 'coordinator' : 'worker';
     }
 
-    protected topologySchema2(pidOf: (id: number) => number): Schema2Topology {
+    protected topologyFrame(pidOf: (id: number) => number): Schema2Topology {
         return {
             ...MockTopology.toSchema2(this.topologyNow, pidOf, id => this.roleOf(id)),
             run: {
@@ -730,30 +689,26 @@ export class MockRun {
         };
     }
 
-    /** The rank's latest sample in the schema asked for, written once per sample and schema. */
-    protected rankJson(rank: RankState, schema: number): string | undefined {
+    /** The rank's latest sample as gempba writes it, written once per sample. */
+    protected rankJson(rank: RankState): string | undefined {
         const sample = rank.sample;
         if (!sample) {
             return undefined;
         }
-        if (rank.frameJson === undefined || rank.frameSchema !== schema) {
-            const frame = schema === 1 ? schema1Frame(sample) : schema2Frame(sample);
+        if (rank.frameJson === undefined) {
+            const frame = schema2Frame(sample);
             // the edges last, as gempba writes them
             rank.frameJson = `${JSON.stringify(frame).slice(0, -1)},"edges_out":${sample.edgesJson}}`;
-            rank.frameSchema = schema;
         }
         return rank.frameJson;
     }
 
-    protected nodeJson(node: NodeState, schema: number): string | undefined {
+    protected nodeJson(node: NodeState): string | undefined {
         const sample = node.sample;
         if (!sample) {
             return undefined;
         }
-        if (node.frameJson === undefined || node.frameSchema !== schema) {
-            node.frameJson = JSON.stringify(schema === 1 ? schema1NodeFrame(sample) : schema2NodeFrame(sample));
-            node.frameSchema = schema;
-        }
+        node.frameJson ??= JSON.stringify(schema2NodeFrame(sample));
         return node.frameJson;
     }
 
@@ -787,7 +742,7 @@ export class MockRun {
         rank.seqNo += 1;
         rank.lastSampleMs = this.time;
         // a rank's samples drift apart from the others', as separate processes' do
-        rank.nextSampleMs = first ? this.time + this.random.int(1, this.workerInterval) : nextAfter(rank.nextSampleMs, this.workerInterval, this.time);
+        rank.nextSampleMs = first ? this.time + this.random.int(1, this.interval) : nextAfter(rank.nextSampleMs, this.interval, this.time);
         rank.edgesJson ??= JSON.stringify([...rank.edges.entries()].sort(([a], [b]) => a - b).map(([to, edge]) => ({ to, bytes: edge.bytes, count: edge.count })));
         // rank 0 is telemetry's aggregator in every run: it gathers every rank's frame and serves the stream
         rank.acct.telemetryMicros += rank.place.id === 0 ? 1500 + 400 * this.ranks.size : this.noise.int(25, 60);
@@ -809,7 +764,7 @@ export class MockRun {
             return;
         }
         node.lastSampleMs = this.time;
-        node.nextSampleMs = node.sample === undefined ? this.time + this.random.int(1, this.nodeEvery) : nextAfter(node.nextSampleMs, this.nodeEvery, this.time);
+        node.nextSampleMs = node.sample === undefined ? this.time + this.random.int(1, this.interval) : nextAfter(node.nextSampleMs, this.interval, this.time);
         const local = this.topologyNow.ranks.filter(rank => rank.nodeIndex === index).map(rank => this.ranks.get(rank.id)!);
         const rss = local.reduce((sum, rank) => sum + rank.rssBytes, 0);
         const total = place.memTotalBytes;
@@ -908,14 +863,6 @@ export namespace MockRun {
     export type Phase = 'running' | 'available' | 'assigned';
 }
 
-function schema1Frame(sample: RankSample): Schema1Frame {
-    return {
-        worker_id: sample.id, seq_no: sample.seqNo, worker_local_ms: sample.localMs, tasks_started_total: sample.tasksStarted,
-        tasks_sent_total: sample.sent, tasks_recv_total: sample.recv, tasks_running: sample.running, scheduler_pending_count: sample.pending,
-        idle_microseconds_per_worker: sample.idleMicros, process_cpu_pct: sample.cpuPct, process_rss_bytes: sample.rssBytes, process_threads: sample.threads
-    };
-}
-
 /** Every key gempba v4.3.0 writes, in its order. */
 function schema2Frame(sample: RankSample): Schema2Frame {
     const acct = sample.acct;
@@ -935,22 +882,10 @@ function schema2Frame(sample: RankSample): Schema2Frame {
     };
 }
 
-/** gempba v4.2.0 still sends the network and disk aggregates, always as zeros (node_probe.cpp). */
-function schema1NodeFrame(sample: NodeSample): Schema1NodeFrame {
-    return {
-        sentinel_worker_id: sample.sentinel, ...nodeFields(sample),
-        net_aggregate: { bytes_in: 0, bytes_out: 0, packets_in: 0, packets_out: 0 }, disk_aggregate: { read_bytes: 0, write_bytes: 0 }
-    };
-}
-
+/** Every key gempba v4.3.0 writes in a node frame, in its order. */
 function schema2NodeFrame(sample: NodeSample): Schema2NodeFrame {
-    return { sentinel_rank: sample.sentinel, ...nodeFields(sample) };
-}
-
-/** The node frame's keys both schemas share, in gempba's order after the sentinel's. */
-function nodeFields(sample: NodeSample): Omit<Schema2NodeFrame, 'sentinel_rank'> {
     return {
-        sentinel_local_ms: sample.localMs, hostname: sample.host, socket_count: sample.socketCount, logical_cores: sample.logicalCores,
+        sentinel_rank: sample.sentinel, sentinel_local_ms: sample.localMs, hostname: sample.host, socket_count: sample.socketCount, logical_cores: sample.logicalCores,
         mem_total_bytes: sample.memTotalBytes, mem_avail_bytes: sample.memAvailBytes, cgroup_mem_used_bytes: sample.cgroupUsedBytes,
         cgroup_mem_limit_bytes: sample.cgroupLimitBytes,
         sockets: sample.sockets.map(socket => ({
