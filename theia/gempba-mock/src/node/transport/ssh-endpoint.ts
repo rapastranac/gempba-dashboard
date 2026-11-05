@@ -2,7 +2,7 @@ import * as net from 'net';
 import { Duplex } from 'stream';
 import { Connection, ParsedKey, PublicKeyAuthContext, Server, ServerChannel } from 'ssh2';
 import { ConnectionMode } from '@gempba/core';
-import { MockCenter } from './mock-center';
+import { MockAggregator } from './mock-aggregator';
 
 export interface MockSshOptions {
     /** HOST: the server is the VM gempba runs on. JUMP: it is the login node, and gempba runs on a compute node behind it. */
@@ -28,7 +28,7 @@ interface Hop {
 /**
  * Host and Jump modes: a real SSH server on a loopback port, standing in for the VM or the login node.
  * - Auth is publickey, optionally followed by a keyboard-interactive passcode with three tries.
- * - Host mode forwards `direct-tcpip` to the gempba port into the mock center, as sshd on the VM would.
+ * - Host mode forwards `direct-tcpip` to the gempba port into the mock's telemetry, as sshd on the VM would.
  * - Jump mode runs the dashboard's `ssh -N -L` hop over `exec`, refusing an unknown compute node the way ssh does, and
  *   forwards only through a running hop.
  */
@@ -41,7 +41,7 @@ export class MockSshEndpoint {
     protected readonly connections = new Set<Connection>();
     protected readonly hops = new Map<number, Hop>();
 
-    constructor(protected readonly center: MockCenter, protected readonly options: MockSshOptions) {
+    constructor(protected readonly aggregator: MockAggregator, protected readonly options: MockSshOptions) {
         this.server = new Server({ hostKeys: [options.hostKey], ident: 'GempbaMock' }, (client, info) => this.serve(client, `${info.ip}:${info.port}`));
     }
 
@@ -110,7 +110,7 @@ export class MockSshEndpoint {
                 const stream = accept();
                 hop?.streams.add(stream);
                 stream.on('close', () => hop?.streams.delete(stream));
-                this.center.attach(stream, hop ? `${user} through the hop to ${hop.node}` : `${user} over SSH`);
+                this.aggregator.attach(stream, hop ? `${user} through the hop to ${hop.node}` : `${user} over SSH`);
             });
             client.on('session', accept => {
                 const session = accept();

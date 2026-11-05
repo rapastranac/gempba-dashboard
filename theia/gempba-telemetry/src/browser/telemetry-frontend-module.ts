@@ -8,9 +8,9 @@ import { CommandContribution } from '@theia/core/lib/common/command';
 import { MenuContribution } from '@theia/core/lib/common/menu';
 import { PreferenceContribution } from '@theia/core/lib/common/preferences/preference-schema';
 import { ContainerModule } from '@theia/core/shared/inversify';
-import { NodeHistoryStore, WorkerHistoryStore } from '@gempba/core';
+import { NodeHistoryStore, RankHistoryStore } from '@gempba/core';
 import { TELEMETRY_SERVICE_PATH, TelemetryServer } from '../common/telemetry-protocol';
-import { NodeHistoryService, TelemetryService, WorkerHistoryService } from '../common/telemetry-service';
+import { NodeHistoryService, TelemetryService, RankHistoryService } from '../common/telemetry-service';
 import { NodeLinkFallbackOpener } from './node-link-fallback-opener';
 import { RateChipContribution } from './rate-chip-contribution';
 import { RateControlsContribution } from './rate-controls-contribution';
@@ -28,8 +28,8 @@ export default new ContainerModule(bind => {
 
     bind(NodeHistoryStore).toDynamicValue(() => new NodeHistoryStore()).inSingletonScope();
     bind(NodeHistoryService).toService(NodeHistoryStore);
-    bind(WorkerHistoryStore).toDynamicValue(() => new WorkerHistoryStore()).inSingletonScope();
-    bind(WorkerHistoryService).toService(WorkerHistoryStore);
+    bind(RankHistoryStore).toDynamicValue(() => new RankHistoryStore()).inSingletonScope();
+    bind(RankHistoryService).toService(RankHistoryStore);
     bind(PreferenceContribution).toConstantValue({ schema: RatePreferences.SCHEMA });
     bind(RateSettings).to(PreferenceRateSettings).inSingletonScope();
     bind(TelemetryServiceImpl).toSelf().inSingletonScope();

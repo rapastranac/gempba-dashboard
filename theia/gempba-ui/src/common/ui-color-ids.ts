@@ -26,6 +26,8 @@ export namespace UiColors {
     export const LIVE_ACTIVE = 'gempba.live.active';
     export const LIVE_STALE = 'gempba.live.stale';
     export const LIVE_OFF = 'gempba.live.off';
+    export const LIVE_PAUSED = 'gempba.live.paused';
+    export const LIVE_ENDED = 'gempba.live.ended';
 
     /** Each gempba color and the standard theme color it follows by default. */
     export const DEFAULTS: ReadonlyArray<readonly [id: string, follows: string, description: string]> = [
@@ -50,6 +52,8 @@ export namespace UiColors {
         [HEAT_HIGH, 'charts.red', 'A fully busy CPU in a heat strip.'],
         [LIVE_ACTIVE, 'charts.green', 'The live indicator while frames arrive.'],
         [LIVE_STALE, 'charts.yellow', 'The live indicator while frames are late, and a rate gempba did not take.'],
-        [LIVE_OFF, 'disabledForeground', 'The live indicator while not streaming.']
+        [LIVE_OFF, 'disabledForeground', 'The live indicator while not streaming.'],
+        [LIVE_PAUSED, 'charts.purple', 'The live indicator while gempba is paused.'],
+        [LIVE_ENDED, 'charts.foreground', 'The live indicator once the run has sent its final line.']
     ];
 }

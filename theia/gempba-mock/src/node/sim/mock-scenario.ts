@@ -16,12 +16,12 @@ export interface MockScenarioModel {
     readonly endsWhenDrained: boolean;
     /** The share of its pool a worker keeps busy, from 0 to 1, before the load setting. */
     loadFactor(timeMs: number): number;
-    /** The tasks in the whole tree the center seeds, for a cluster that finishes `tasksPerSecond` together; Infinity for an endless one. */
+    /** The tasks in the whole tree the coordinator seeds, for a cluster that finishes `tasksPerSecond` together; Infinity for an endless one. */
     seedTasks(tasksPerSecond: number): number;
     /** How long, on average, a branch the worker cuts off an endless root keeps one worker busy. */
-    branchSeconds(workerId: number): number;
+    branchSeconds(id: number): number;
     /** The chance, each step, that the worker gives away a task when it has one to spare and somewhere to send it. */
-    sendChance(workerId: number): number;
+    sendChance(id: number): number;
 }
 
 export namespace MockScenarioModel {
@@ -34,8 +34,8 @@ export namespace MockScenarioModel {
     export const BURST_BUSY_MS = 20_000;
 
     /** Imbalanced: one worker in four holds the work, rarely gives any, and then only small subtrees. */
-    export function isRich(workerId: number): boolean {
-        return workerId % 4 === 1;
+    export function isRich(id: number): boolean {
+        return id % 4 === 1;
     }
 
     export function of(scenario: MockScenario): MockScenarioModel {
@@ -55,8 +55,8 @@ export namespace MockScenarioModel {
             case 'imbalanced':
                 return {
                     ...fast(), ...endless, loadFactor: () => 1,
-                    branchSeconds: workerId => isRich(workerId) ? 0.2 : 120,
-                    sendChance: workerId => isRich(workerId) ? 0.05 : 1
+                    branchSeconds: id => isRich(id) ? 0.2 : 120,
+                    sendChance: id => isRich(id) ? 0.05 : 1
                 };
             case 'bursty':
                 return { ...fast(), ...endless, ...sharing, loadFactor: time => time % BURST_PERIOD_MS < BURST_BUSY_MS ? 1 : 0.1 };

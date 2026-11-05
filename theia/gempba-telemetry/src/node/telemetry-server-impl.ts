@@ -15,12 +15,13 @@ import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
  * and pending opens from a superseded session are dropped.
  * A local gempba needs no session: listening while disconnected streams it directly, and stopping that stream
  * disconnects. Connect is for the modes that authenticate. An SSH session that drops on its own cannot recover
- * without authenticating again, so it disconnects and says so instead of retrying the stream.
+ * without authenticating again, so it disconnects and says so instead of retrying the stream. A stream that closes
+ * after the run's final line says the run ended, and waits for the next run on the same port.
  */
 @injectable()
 export class TelemetryServerImpl implements TelemetryServer {
 
-    /** gempba's center TCP server binds loopback only; a tunnel's local end is loopback too. */
+    /** gempba's telemetry server, on rank 0, binds loopback only; a tunnel's local end is loopback too. */
     static readonly LOOPBACK = '127.0.0.1';
 
     @inject(ContributionProvider) @named(TunnelProvider)
@@ -36,8 +37,9 @@ export class TelemetryServerImpl implements TelemetryServer {
     protected forward: Forward | undefined;
     protected telemetry: TelemetryClient | undefined;
     protected readonly store = new TelemetryStore();
-    protected workerIntervalMs = RefreshInterval.DEFAULT_WORKER_MS;
-    protected nodeIntervalMs = RefreshInterval.DEFAULT_NODE_MS;
+    /** Whether the stream's latest line was the run's final one: gempba closes the connection after it. */
+    protected runEnded = false;
+    protected intervalMs = RefreshInterval.DEFAULT_MS;
 
     setClient(client: TelemetryServerClient | undefined): void {
         this.client = client;
@@ -101,6 +103,7 @@ export class TelemetryServerImpl implements TelemetryServer {
         }
         this.forward = forward;
         this.store.reset();
+        this.runEnded = false;
         const address = `${TelemetryServerImpl.LOOPBACK}:${forward.port}`;
         this.telemetry = new TelemetryClient(TelemetryServerImpl.LOOPBACK, forward.port, this.frameListener(epoch, address));
         this.setState(ConnectionState.LISTENING);
@@ -166,16 +169,15 @@ export class TelemetryServerImpl implements TelemetryServer {
         }
     }
 
-    async pushRates(workerIntervalMs: number, nodeIntervalMs: number): Promise<void> {
-        this.workerIntervalMs = workerIntervalMs;
-        this.nodeIntervalMs = nodeIntervalMs;
-        const rates = `worker=${workerIntervalMs} ms, node=${nodeIntervalMs} ms`;
+    async pushInterval(intervalMs: number): Promise<void> {
+        this.intervalMs = intervalMs;
+        const rate = RefreshInterval.label(intervalMs);
         if (!this.telemetry) {
-            this.status(`rates saved (${rates}); they are sent on the next connect`);
-        } else if (this.sendRates(this.telemetry)) {
-            this.status(`rates pushed (${rates})`);
+            this.status(`refresh rate saved (${rate}); it is sent on the next connect`);
+        } else if (this.sendInterval(this.telemetry)) {
+            this.status(`refresh rate pushed (${rate})`);
         } else {
-            this.status('rates not sent, the connection is down; they are sent on reconnect');
+            this.status('refresh rate not sent, the connection is down; it is sent on reconnect');
         }
     }
 
@@ -188,27 +190,37 @@ export class TelemetryServerImpl implements TelemetryServer {
         return {
             onConnected: () => {
                 if (epoch === this.epoch && this.telemetry) {
-                    this.sendRates(this.telemetry);
+                    this.sendInterval(this.telemetry);
                     this.status(`connected to ${address}`);
                 }
             },
             onFrame: frame => {
                 if (epoch === this.epoch) {
-                    this.client?.onSnapshot(this.store.ingest(frame));
+                    const snapshot = this.store.ingest(frame);
+                    this.runEnded = snapshot.final === true;
+                    this.client?.onSnapshot(snapshot);
                 }
             },
             onDisconnected: cause => {
-                if (epoch === this.epoch) {
-                    this.status(`disconnected from ${address} (${cause ? cause.message : 'peer closed'}); retrying…`);
+                if (epoch !== this.epoch) {
+                    return;
                 }
+                // schema 1 has no final line, so a gempba 4.2 run that ends reads as a lost connection
+                this.status(this.runEnded
+                    ? `the run ended; waiting for the next run on ${address}`
+                    : `disconnected from ${address} (${cause ? cause.message : 'peer closed'}); retrying…`);
             }
         };
     }
 
-    protected sendRates(telemetry: TelemetryClient): boolean {
-        const worker = telemetry.sendControl(ControlKind.SetWorkerIntervalMs, this.workerIntervalMs);
-        const node = telemetry.sendControl(ControlKind.SetNodeIntervalMs, this.nodeIntervalMs);
-        return worker && node;
+    /**
+     * Sends the one rate under both of gempba 4.2's control names, which every gempba 4.x takes: 4.3 drives every frame
+     * at it and ignores the node one, and 4.2 gets the same interval for both kinds of frame.
+     */
+    protected sendInterval(telemetry: TelemetryClient): boolean {
+        const ranks = telemetry.sendControl(ControlKind.SetWorkerIntervalMs, this.intervalMs);
+        const nodes = telemetry.sendControl(ControlKind.SetNodeIntervalMs, this.intervalMs);
+        return ranks && nodes;
     }
 
     protected stopListening(): void {

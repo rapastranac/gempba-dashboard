@@ -92,6 +92,12 @@ export class MockWidget extends ReactWidget {
             <section>
                 <h3>Cluster</h3>
                 {this.select('Scheduler', MockLabels.SCHEDULERS, this.draft.scheduler, running, scheduler => this.edit({ scheduler }))}
+                <label className='gempba-mock-check' title='Off, the scheduler declares nothing, as a custom one may: no coordinator, and every rank, rank 0 included, a worker'>
+                    <input type='checkbox' checked={this.draft.declareRoles} disabled={running} onChange={e => this.edit({ declareRoles: e.target.checked })} />
+                    Declare roles
+                </label>
+                {this.field('Coordinator on rank', this.draft.coordinatorRank, running || !this.draft.declareRoles, coordinatorRank => this.edit({ coordinatorRank }),
+                    { hint: 'The rank the scheduler\'s coordinator runs on: 0, as gempba\'s schedulers put it, or another, as other schedulers may; every other rank runs tasks' })}
                 {this.draft.mode !== ConnectionMode.JUMP
                     && <p className='gempba-mock-hint'>One node: {this.draft.mode === ConnectionMode.LOCAL ? 'this machine' : 'the VM'}. Jump reaches a cluster.</p>}
                 {(Object.keys(MockConfig.SHAPE_BOUNDS) as MockShape.Count[]).filter(key => key !== 'nodes' || this.draft.mode === ConnectionMode.JUMP)
@@ -214,8 +220,8 @@ const COUNTS: { readonly [K in MockShape.Count]: { readonly label: string, reado
     nodes: { label: 'Nodes', hint: 'Compute nodes behind the login node' },
     socketsPerNode: { label: 'Sockets per node' },
     coresPerSocket: { label: 'Cores per socket', hint: 'Physical cores; SMT doubles the logical CPUs' },
-    workersPerNode: { label: 'Workers per node', hint: 'gempba processes, one MPI rank each; rank 0 is the center' },
-    poolThreads: { label: 'Pool threads', hint: '0 gives each worker one thread per CPU it may use' },
+    ranksPerNode: { label: 'Ranks per node', hint: 'gempba processes, one MPI rank each; rank 0 is the coordinator' },
+    poolThreads: { label: 'Pool threads', hint: '0 gives each rank one thread per CPU it may use' },
     memPerNodeGiB: { label: 'Memory (GiB)', hint: 'The memory of each node' },
     cgroupGiB: { label: 'Cgroup (GiB)', hint: 'The job\'s memory-cgroup limit on each node; 0 runs outside a memory cgroup' }
 };

@@ -40,20 +40,20 @@ describe('RememberedSettings', () => {
         expect([rates.workerIntervalMs, rates.nodeIntervalMs]).to.deep.equal([250, 2000]);
     });
 
-    it('moves the rates changed from their defaults over to the hub', () => {
-        expect(RememberedSettings.ratesToMove(RememberedSettings.withRates(defaults, 250, 2000))).to.deep.equal({ workerIntervalMs: 250, nodeIntervalMs: 2000 });
-        expect(RememberedSettings.ratesToMove(RememberedSettings.withRates(defaults, 250, 1000))).to.deep.equal({ workerIntervalMs: 250 });
-        expect(RememberedSettings.ratesToMove(RememberedSettings.withRates(defaults, 500, 3000))).to.deep.equal({ nodeIntervalMs: 3000 });
+    it('moves a worker rate changed from its default over to the hub, as its one refresh rate, and no node rate', () => {
+        expect(RememberedSettings.rateToMove(RememberedSettings.withRates(defaults, 250, 2000))).to.equal(250);
+        expect(RememberedSettings.rateToMove(RememberedSettings.withRates(defaults, 250, 1000))).to.equal(250);
+        expect(RememberedSettings.rateToMove(RememberedSettings.withRates(defaults, 500, 3000))).to.equal(undefined);
     });
 
     it('moves a hand-edited rate within gempba\'s bounds', () => {
-        expect(RememberedSettings.ratesToMove(RememberedSettings.withRates(defaults, 10, 10_000_000))).to.deep.equal({ workerIntervalMs: 50, nodeIntervalMs: 600_000 });
+        expect(RememberedSettings.rateToMove(RememberedSettings.withRates(defaults, 10, 10_000_000))).to.equal(50);
     });
 
     it('moves nothing from default rates, so moved rates never move twice', () => {
-        expect(RememberedSettings.ratesToMove(defaults)).to.deep.equal({});
+        expect(RememberedSettings.rateToMove(defaults)).to.equal(undefined);
         const moved = RememberedSettings.withoutRates(RememberedSettings.withRates(defaults, 250, 2000));
-        expect(RememberedSettings.ratesToMove(moved)).to.deep.equal({});
+        expect(RememberedSettings.rateToMove(moved)).to.equal(undefined);
         expect([moved.workerIntervalMs, moved.nodeIntervalMs]).to.deep.equal([defaults.workerIntervalMs, defaults.nodeIntervalMs]);
     });
 });

@@ -8,7 +8,7 @@
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/rapastranac/gempba-dashboard)
 
-A desktop telemetry dashboard for the [GemPBA](https://github.com/rapastranac/gempba) parallel branch-and-bound framework: live nodes, sockets, workers, and how hard your allocation is actually working.
+A desktop telemetry dashboard for the [GemPBA](https://github.com/rapastranac/gempba) parallel branch-and-bound framework: live nodes, sockets, ranks, and how hard your allocation is actually working.
 
 ---
 
@@ -32,7 +32,7 @@ The builds are not yet code-signed, so the OS will warn the first time:
 
 ### Requirements
 
-- A reachable GemPBA center to connect to (direct TCP, or tunnelled over SSH).
+- A GemPBA run's telemetry to connect to (direct TCP, or tunnelled over SSH).
 - For the SSH-tunnel option, an `ssh` client on `PATH`, built in on macOS, Linux, and Windows 10+.
 
 ## Build from source

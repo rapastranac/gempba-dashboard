@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { BroadcastEnvelope, ControlKind, ControlLine, WorkerFrame, WorkerIdentity } from './wire-protocol';
+import { BroadcastEnvelope, ControlKind, ControlLine, RankFrame, RankIdentity } from './wire-protocol';
 
 const CANONICAL_ENVELOPE = `{
   "version": 1,
@@ -66,7 +66,7 @@ describe('wire protocol', () => {
         expect(topologyNode.total_physical_cores).to.equal(16);
         expect(topologyNode.total_logical_cores).to.equal(32);
         expect(topologyNode.mem_total_bytes).to.equal(274_877_906_944);
-        expect(topologyNode.worker_ids).to.deep.equal([0, 1, 2]);
+        expect(topologyNode.ranks).to.deep.equal([0, 1, 2]);
         expect(topologyNode.sockets).to.have.lengthOf(2);
         expect(topologyNode.sockets![0].name).to.equal('Test CPU 9000');
         expect(topologyNode.sockets![0].logical_cores).to.equal(16);
@@ -79,15 +79,15 @@ describe('wire protocol', () => {
         expect(identities[1].allowed_cpu_ids).to.deep.equal([0, 1, 2, 3]);
         expect(identities[2].primary_socket).to.equal(1);
 
-        const worker = envelope.workers![0];
-        expect(envelope.workers).to.have.lengthOf(1);
-        expect(worker.worker_id).to.equal(0);
-        expect(worker.tasks_local_total).to.equal(12_450);
+        const rank = envelope.ranks![0];
+        expect(envelope.ranks).to.have.lengthOf(1);
+        expect(rank.rank).to.equal(0);
+        expect(rank.tasks_started_total).to.equal(12_450);
         // The two queue-like counters live at different layers and must map independently.
-        expect(worker.tasks_running).to.equal(6);
-        expect(worker.scheduler_pending_count).to.equal(4);
-        expect(worker.process_cpu_pct).to.equal(87.3);
-        expect(worker.edges_out).to.deep.equal([{ to: 1, bytes: 9_120_000, count: 619 }]);
+        expect(rank.tasks_running).to.equal(6);
+        expect(rank.scheduler_pending_count).to.equal(4);
+        expect(rank.process_cpu_pct).to.equal(87.3);
+        expect(rank.edges_out).to.deep.equal([{ to: 1, bytes: 9_120_000, count: 619 }]);
 
         const node = envelope.nodes![0];
         expect(envelope.nodes).to.have.lengthOf(1);
@@ -106,14 +106,14 @@ describe('wire protocol', () => {
             "version": 1, "ts": 0, "topology": { "nodes": [], "identities": [] },
             "workers": [], "nodes": [], "future_field": "the dashboard should not crash on this"
         }`);
-        expect(envelope.workers).to.be.empty;
+        expect(envelope.ranks).to.be.empty;
         expect(envelope.nodes).to.be.empty;
         expect(envelope).not.to.have.property('future_field');
     });
 
     it('an identity with a full cpu id list round-trips without a 64-CPU cap', () => {
         const allowed = Array.from({ length: 68 }, (_, i) => i);
-        const identity = WorkerIdentity.fromJson(JSON.parse(JSON.stringify({
+        const identity = RankIdentity.fromJson(JSON.parse(JSON.stringify({
             worker_id: 0, hostname: 'host-a', pid: 1234, primary_socket: 0, allowed_cpu_ids: allowed
         })));
         expect(identity.allowed_cpu_ids).to.have.lengthOf(68);
@@ -121,13 +121,13 @@ describe('wire protocol', () => {
     });
 
     it('an empty edges_out round-trips', () => {
-        const frame = WorkerFrame.fromJson(JSON.parse(`{
+        const frame = RankFrame.fromJson(JSON.parse(`{
             "worker_id": 5, "seq_no": 1, "worker_local_ms": 0, "tasks_local_total": 0, "tasks_sent_total": 0,
             "tasks_recv_total": 0, "tasks_running": 0, "scheduler_pending_count": 0,
             "idle_microseconds_per_worker": 0, "process_cpu_pct": 0.0, "process_rss_bytes": 0,
             "process_threads": 1, "edges_out": []
         }`));
-        expect(frame.worker_id).to.equal(5);
+        expect(frame.rank).to.equal(5);
         expect(frame.edges_out).to.be.empty;
     });
 });
@@ -149,11 +149,21 @@ describe('ControlLine', () => {
             .to.deep.equal({ kind: ControlKind.SetNodeIntervalMs, value: 750 });
     });
 
+    it('reads gempba 4.3\'s controls: the one interval, pause, resume, snapshot, and a marker with its label', () => {
+        expect(ControlLine.parse('{"kind":"set_interval_ms","value":250}')).to.deep.equal({ kind: ControlKind.SetIntervalMs, value: 250 });
+        expect(['pause', 'resume', 'snapshot'].map(kind => ControlLine.parse(`{"kind":"${kind}"}`)))
+            .to.deep.equal([{ kind: ControlKind.Pause }, { kind: ControlKind.Resume }, { kind: ControlKind.Snapshot }]);
+        expect(ControlLine.parse('{"kind":"mark","label":"phase 2"}')).to.deep.equal({ kind: ControlKind.Mark, label: 'phase 2' });
+        expect(ControlLine.parse(`{"kind":"mark","label":"${'é'.repeat(32)}"}`), '64 bytes').to.deep.equal({ kind: ControlKind.Mark, label: 'é'.repeat(32) });
+        expect(ControlLine.isInterval({ kind: ControlKind.Pause })).to.equal(false);
+    });
+
     it('reads anything malformed or unknown as undefined', () => {
         const lines = [
             'not json', '[]', '{"kind":"set_rate","value":1}', '{"kind":"set_worker_interval_ms"}',
             '{"kind":"set_worker_interval_ms","value":"500"}', '{"kind":"set_worker_interval_ms","value":-1}',
-            '{"kind":"set_worker_interval_ms","value":2.5}', '{"kind":"set_worker_interval_ms","value":true}'
+            '{"kind":"set_worker_interval_ms","value":2.5}', '{"kind":"set_worker_interval_ms","value":true}',
+            '{"kind":"mark"}', '{"kind":"mark","label":""}', `{"kind":"mark","label":"${'é'.repeat(33)}"}`, '{"kind":"mark","label":7}'
         ];
         for (const line of lines) {
             expect(ControlLine.parse(line), line).to.equal(undefined);

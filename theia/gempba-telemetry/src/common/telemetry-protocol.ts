@@ -14,13 +14,13 @@ export interface TelemetryServer extends RpcServer<TelemetryServerClient> {
     availableModes(): Promise<ConnectionMode[]>;
     /** Opens an SSH session, authenticating once; rejects when it cannot. LOCAL needs none. */
     connect(session: SessionSpec): Promise<void>;
-    /** Streams one gempba center over the open session, or on this machine when none is open, replacing any previous target. */
+    /** Streams one gempba run's telemetry over the open session, or on this machine when none is open, replacing any previous target. */
     listen(target: TargetSpec): Promise<void>;
     /** Stops streaming; an SSH session stays open for the next target, a local stream simply ends. */
     stop(): Promise<void>;
     disconnect(): Promise<void>;
-    /** Sends the refresh intervals now if streaming, and on every later (re)connect. */
-    pushRates(workerIntervalMs: number, nodeIntervalMs: number): Promise<void>;
+    /** Sends the refresh rate now if streaming, and on every later (re)connect, for rank and node frames alike. */
+    pushInterval(intervalMs: number): Promise<void>;
 }
 
 /** Backend-to-frontend notifications; the `on` prefix makes them one-way RPC messages. */

@@ -1,13 +1,13 @@
-import { WorkerSnapshot } from '../model/worker-snapshot';
+import { RankSnapshot } from '../model/rank-snapshot';
 import { CounterRate } from './counter-rate';
 import { RingSeries } from './ring-series';
-import { WorkerSeries } from './worker-series';
+import { RankSeries } from './rank-series';
 
-/** One worker's rolling history: a ring per series, the frame its next idle time is measured from, and its recent task counts. */
-export class WorkerTrack {
+/** One rank's rolling history: a ring per series, the frame its next idle time is measured from, and its recent task counts. */
+export class RankTrack {
 
     /**
-     * Tasks per second are measured over this much of the worker's own time, not between two frames: a worker that
+     * Tasks per second are measured over this much of the rank's own time, not between two frames: a rank that
      * finishes a task every few seconds reads a steady rate, rather than 0 with a spike whenever a frame catches one.
      */
     static readonly RATE_WINDOW_MS = 10_000;
@@ -16,7 +16,7 @@ export class WorkerTrack {
     protected readonly tasksPerSecond: RingSeries;
     protected readonly idlePct: RingSeries;
     protected readonly rssBytes: RingSeries;
-    protected last: WorkerSnapshot | undefined;
+    protected last: RankSnapshot | undefined;
     /** The task counts of its recent frames, on its own clock, oldest first. */
     protected counts: { millis: number, tasks: number }[] = [];
 
@@ -27,26 +27,26 @@ export class WorkerTrack {
         this.rssBytes = new RingSeries(capacity);
     }
 
-    /** Records a frame the worker has not sent before, and returns whether it was one. */
-    record(worker: WorkerSnapshot): boolean {
+    /** Records a frame the rank has not sent before, and returns whether it was one. */
+    record(rank: RankSnapshot): boolean {
         const last = this.last;
-        if (last?.seqNo === worker.seqNo) {
+        if (last?.seqNo === rank.seqNo) {
             return false;
         }
-        this.cpu.push(worker.cpuPct);
-        this.rssBytes.push(worker.rssBytes);
-        // a lower sequence number means the worker restarted, and its counters with it
-        if (last && worker.seqNo > last.seqNo) {
-            const idleMicros = CounterRate.perSecond(last.idleMicrosPerWorker, worker.idleMicrosPerWorker, worker.localMillis - last.localMillis);
+        this.cpu.push(rank.cpuPct);
+        this.rssBytes.push(rank.rssBytes);
+        // a lower sequence number means the rank restarted, and its counters with it
+        if (last && rank.seqNo > last.seqNo) {
+            const idleMicros = CounterRate.perSecond(last.idleMicrosPerThread, rank.idleMicrosPerThread, rank.localMillis - last.localMillis);
             if (idleMicros !== undefined) {
                 // idle microseconds per second of wall time, as a percent
                 this.idlePct.push(Math.min(idleMicros / 10_000, 100));
             }
-            while (this.counts.length > 1 && worker.localMillis - this.counts[0].millis > WorkerTrack.RATE_WINDOW_MS) {
+            while (this.counts.length > 1 && rank.localMillis - this.counts[0].millis > RankTrack.RATE_WINDOW_MS) {
                 this.counts.shift();
             }
             const since = this.counts[0];
-            const tasks = since && CounterRate.perSecond(since.tasks, worker.tasksLocalTotal, worker.localMillis - since.millis);
+            const tasks = since && CounterRate.perSecond(since.tasks, rank.tasksStartedTotal, rank.localMillis - since.millis);
             if (tasks !== undefined) {
                 this.tasksPerSecond.push(tasks);
             } else {
@@ -55,17 +55,17 @@ export class WorkerTrack {
         } else {
             this.counts = [];
         }
-        this.counts.push({ millis: worker.localMillis, tasks: worker.tasksLocalTotal });
-        this.last = worker;
+        this.counts.push({ millis: rank.localMillis, tasks: rank.tasksStartedTotal });
+        this.last = rank;
         return true;
     }
 
-    /** The newest tasks-per-second rate, or `undefined` before the worker sent two frames. */
+    /** The newest tasks-per-second rate, or `undefined` before the rank sent two frames. */
     latestTasksPerSecond(): number | undefined {
         return this.tasksPerSecond.latest();
     }
 
-    series(): WorkerSeries {
+    series(): RankSeries {
         return {
             cpu: this.cpu.values(),
             tasksPerSecond: this.tasksPerSecond.values(),

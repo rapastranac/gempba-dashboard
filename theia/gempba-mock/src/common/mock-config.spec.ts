@@ -28,6 +28,16 @@ describe('MockConfig', () => {
         expect(read.seed).to.equal(7);
     });
 
+    it('reads the ranks per node of a run saved before they were called ranks', () => {
+        expect(MockConfig.of({ shape: { workersPerNode: 6 } }).shape.ranksPerNode).to.equal(6);
+        expect(MockConfig.of({ shape: { ranksPerNode: 3, workersPerNode: 6 } }).shape.ranksPerNode).to.equal(3);
+    });
+
+    it('reads a run saved as gempba, before schema 2, as gempba 4.2', () => {
+        expect(MockConfig.of({ live: { fidelity: 'gempba' } }).live.fidelity).to.equal('gempba-4.2');
+        expect(MockConfig.defaults().live.fidelity).to.equal('gempba-4.3');
+    });
+
     it('checks the ports, and the SSH ones only when SSH is used', () => {
         expect(MockConfig.problems({ ...defaults, access: { ...defaults.access, gempbaPort: 70000 } }))
             .to.deep.equal(['The gempba port must be a whole number from 1 to 65535.']);
@@ -45,12 +55,12 @@ describe('MockConfig', () => {
         expect(MockConfig.problems(withShape({ cgroupGiB: 65 }))).to.deep.equal(['The cgroup limit cannot exceed the memory per node.']);
     });
 
-    it('needs the center and at least one worker, and no more workers than gempba handles', () => {
+    it('needs the coordinator and at least one worker, and no more ranks than gempba handles', () => {
         const jump = (shape: Partial<MockShape>) => ({ ...withShape(shape), access: { ...defaults.access, mode: ConnectionMode.JUMP } });
-        expect(MockConfig.problems(withShape({ workersPerNode: 1 })))
-            .to.deep.equal(['The cluster needs from 2 to 4096 workers in all: the center and at least one worker; it has 1.']);
-        expect(MockConfig.problems(jump({ nodes: 64, workersPerNode: 128 }))).to.have.lengthOf(1);
-        expect(MockConfig.problems(jump({ nodes: 16, workersPerNode: 256 }))).to.deep.equal([]);
+        expect(MockConfig.problems(withShape({ ranksPerNode: 1 })))
+            .to.deep.equal(['The cluster needs from 2 to 4096 ranks in all: the coordinator and at least one worker; it has 1.']);
+        expect(MockConfig.problems(jump({ nodes: 64, ranksPerNode: 128 }))).to.have.lengthOf(1);
+        expect(MockConfig.problems(jump({ nodes: 16, ranksPerNode: 256 }))).to.deep.equal([]);
     });
 
     it('runs one node in Local and Host, this machine or the VM, and the cluster typed only in Jump', () => {
@@ -62,6 +72,15 @@ describe('MockConfig', () => {
         expect(MockConfig.problems(withShape({ nodes: 0 })), 'a node count only Jump uses').to.deep.equal([]);
     });
 
+    it('keeps the coordinator on one of the run\'s ranks, rank 0 unless set', () => {
+        expect(MockConfig.of({}).roles).to.deep.equal({ coordinatorRank: 0, declared: true });
+        expect(MockConfig.of({ roles: { coordinatorRank: 3, declared: true } }).roles.coordinatorRank).to.equal(3);
+        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 3, declared: true } })).to.deep.equal([]);
+        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 4, declared: true } })).to.deep.equal(['The coordinator\'s rank must be a whole number from 0 to 3.']);
+        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 4, declared: false } }), 'no coordinator to place').to.deep.equal([]);
+        expect(MockConfig.of({ roles: { declared: false } }).roles.declared).to.equal(false);
+    });
+
     it('checks the load and the seed', () => {
         expect(MockConfig.problems({ ...defaults, live: { ...defaults.live, loadPct: 101 }, seed: 1.5 }))
             .to.deep.equal(['The load must be from 0 to 100 %.', 'The seed must be a whole number.']);
@@ -70,9 +89,9 @@ describe('MockConfig', () => {
 
 describe('MockShape', () => {
 
-    it('counts workers and logical CPUs', () => {
+    it('counts ranks and logical CPUs', () => {
         const shape = { ...MockConfig.defaults().shape, smt: true };
-        expect(MockShape.totalWorkers(shape)).to.equal(8);
+        expect(MockShape.totalRanks(shape)).to.equal(8);
         expect(MockShape.logicalPerSocket(shape)).to.equal(16);
     });
 });

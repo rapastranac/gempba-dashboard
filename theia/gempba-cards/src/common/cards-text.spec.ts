@@ -1,61 +1,81 @@
 import { expect } from 'chai';
-import { NodeSnapshot, SocketSnapshot, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeSnapshot, SocketSnapshot, RankSnapshot, WorldSnapshot } from '@gempba/core';
 import { CardsText } from './cards-text';
 
 const GiB = 1024 ** 3;
 
-function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
+function rank(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
     return {
-        workerId: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
-        tasksLocalTotal: 12450, tasksRunning: 1, tasksSentTotal: 619, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 238,
+        id: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
+        tasksStartedTotal: 12450, tasksRunning: 1, tasksSentTotal: 619, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerThread: 238,
         cpuPct: 87.3, rssBytes: 256 * 1024 ** 2, threads: 12, elapsedSeconds: 100,
-        peers: [{ peerWorkerId: 1, bytes: 4096, count: 3 }], ...overrides
+        peers: [{ peerRank: 1, bytes: 4096, count: 3 }], ...overrides
     };
 }
 
 function socket(overrides: Partial<SocketSnapshot> = {}): SocketSnapshot {
     return {
         socketId: 0, name: 'Xeon', physicalCores: 4, logicalCores: 8, cpuIds: [0, 1, 2, 3, 4, 5, 6, 7], hasTopology: true,
-        coreUsage: [{ workerId: 3, cpuPct: 87.3, accessibleCores: 4, socketCores: 8 }], workers: [worker(), worker({ workerId: 4 })], ...overrides
+        coreUsage: [{ rank: 3, cpuPct: 87.3, accessibleCores: 4, socketCores: 8 }], ranks: [rank(), rank({ id: 4 })], ...overrides
     };
 }
 
 function node(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
     return {
         host: 'alpha', socketCount: 2, physicalCores: 8, logicalCores: 16, hasLiveMemory: true, memTotalBytes: 16 * GiB,
-        memUsedBytes: 4 * GiB, sentinelWorkerId: 0, sentinelLocalMillis: 0, nodeUtilPct: 50, sockets: [], ...overrides
+        memUsedBytes: 4 * GiB, sentinelRank: 0, sentinelLocalMillis: 0, nodeUtilPct: 50, sockets: [], ...overrides
     };
+}
+
+/** One node, one socket, holding these ranks, in the given telemetry schema. */
+function world(schemaVersion: number, ...ranks: RankSnapshot[]): WorldSnapshot {
+    return { ...WorldSnapshot.empty(), schemaVersion, nodes: [node({ sockets: [socket({ ranks })] })] };
 }
 
 describe('CardsText', () => {
 
     it('captions tree rows briefly', () => {
-        expect(CardsText.nodeCaption(node({ sockets: [socket(), socket({ socketId: 1, workers: [] })] }))).to.equal('2 sockets · 2 workers');
+        expect(CardsText.nodeCaption(node({ sockets: [socket(), socket({ socketId: 1, ranks: [] })] }))).to.equal('2 sockets · 2 ranks');
         expect(CardsText.socketTitle(socket())).to.equal('Socket 0: Xeon');
         expect(CardsText.socketTitle(socket({ hasTopology: false }))).to.equal('Socket 0');
-        expect(CardsText.socketCaption(socket({ workers: [worker()] }))).to.equal('1 worker');
-        expect(CardsText.workerTitle(worker())).to.equal('Worker 3');
-        expect(CardsText.workerTitle(worker({ workerId: 0, sentinel: true }))).to.equal('Worker 0 · sentinel');
-        expect(CardsText.workerTitle(worker({ workerId: 0, sentinel: true }), true)).to.equal('Worker 0 · center · sentinel');
-        expect(CardsText.workerCaption(worker(), 4)).to.equal('22% CPU · 256.0 MB');
+        expect(CardsText.socketCaption(socket({ ranks: [rank()] }))).to.equal('1 rank');
+        expect(CardsText.rankTitle(rank(), undefined)).to.equal('Rank 3');
+        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }), undefined)).to.equal('Rank 0 · sentinel');
+        expect(CardsText.rankCaption(rank(), 4)).to.equal('22% CPU · 256.0 MB');
     });
 
-    it('subtitles a worker with its process, frame and node', () => {
-        expect(CardsText.workerSubtitle('alpha', worker())).to.equal('PID 4100 · frame #17 · on alpha');
-        expect(CardsText.workerSubtitle('alpha', worker({ pid: 0 }))).to.equal('frame #17 · on alpha');
+    it('titles a rank with its declared coordinator role, the aggregator on rank 0 and the sentinel', () => {
+        const coordinatorOn = (id: number, ...ids: number[]) => world(2, ...ids.map(each => rank({ id: each, role: each === id ? 'coordinator' : 'worker' })));
+        const zero = rank({ id: 0, sentinel: true, role: 'coordinator' });
+        expect(CardsText.rankTitle(zero, coordinatorOn(0, 0, 1))).to.equal('Rank 0 · coordinator · aggregator · sentinel');
+        const elsewhere = coordinatorOn(2, 0, 1, 2);
+        expect([0, 1, 2].map(id => CardsText.rankTitle(rank({ id, role: id === 2 ? 'coordinator' : 'worker' }), elsewhere)))
+            .to.deep.equal(['Rank 0 · aggregator', 'Rank 1', 'Rank 2 · coordinator']);
+        expect(CardsText.rankTitle(rank({ id: 0, role: 'worker' }), coordinatorOn(-1, 0, 1)), 'no roles declared').to.equal('Rank 0 · aggregator');
+    });
+
+    it('titles schema 1\'s ranks as before: rank 0 the coordinator once the run has others, and no aggregator', () => {
+        const run = world(1, rank({ id: 0, sentinel: true }), rank({ id: 1 }));
+        expect(CardsText.rankTitle(run.nodes[0].sockets[0].ranks[0], run)).to.equal('Rank 0 · coordinator · sentinel');
+        expect(CardsText.rankTitle(run.nodes[0].sockets[0].ranks[1], run)).to.equal('Rank 1');
+    });
+
+    it('subtitles a rank with its process, frame and node', () => {
+        expect(CardsText.rankSubtitle('alpha', rank())).to.equal('PID 4100 · frame #17 · on alpha');
+        expect(CardsText.rankSubtitle('alpha', rank({ pid: 0 }))).to.equal('frame #17 · on alpha');
     });
 
     it('lists outgoing peers busiest first, with the node each runs on', () => {
-        const sender = worker({
-            peers: [{ peerWorkerId: 4, bytes: 2048, count: 3 }, { peerWorkerId: 9, bytes: 1024 ** 2, count: 1200 }, { peerWorkerId: 7, bytes: 10, count: 3 }]
+        const sender = rank({
+            peers: [{ peerRank: 4, bytes: 2048, count: 3 }, { peerRank: 9, bytes: 1024 ** 2, count: 1200 }, { peerRank: 7, bytes: 10, count: 3 }]
         });
         const world = {
-            nodes: [node({ host: 'alpha', sockets: [socket()] }), node({ host: 'beta', sockets: [socket({ workers: [worker({ workerId: 9 })] })] })]
+            nodes: [node({ host: 'alpha', sockets: [socket()] }), node({ host: 'beta', sockets: [socket({ ranks: [rank({ id: 9 })] })] })]
         } as unknown as WorldSnapshot;
         expect(CardsText.peerRows(sender, world)).to.deep.equal([
-            { peer: 'Worker 9', host: 'beta', tasks: '1,200', bytes: '1.0 MB' },
-            { peer: 'Worker 4', host: 'alpha', tasks: '3', bytes: '2.0 KB' },
-            { peer: 'Worker 7', host: '—', tasks: '3', bytes: '10 B' }
+            { peer: 'Rank 9', host: 'beta', tasks: '1,200', bytes: '1.0 MB' },
+            { peer: 'Rank 4', host: 'alpha', tasks: '3', bytes: '2.0 KB' },
+            { peer: 'Rank 7', host: '—', tasks: '3', bytes: '10 B' }
         ]);
     });
 });

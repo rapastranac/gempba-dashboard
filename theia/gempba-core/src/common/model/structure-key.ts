@@ -1,5 +1,5 @@
 /**
- * One `host|socket|worker` key per worker in a frame. Two frames with equal keys added or removed
+ * One `host|socket|rank` key per rank in a frame. Two frames with equal keys added or removed
  * no cards, so a relayout can be skipped. Kept as a sorted array so it survives JSON-RPC.
  */
 export interface StructureKey {
@@ -16,8 +16,8 @@ export namespace StructureKey {
         return { keys: [] };
     }
 
-    export function keyOf(host: string, socketId: number, workerId: number): string {
-        return `${host}|${socketId}|${workerId}`;
+    export function keyOf(host: string, socketId: number, rank: number): string {
+        return `${host}|${socketId}|${rank}`;
     }
 
     export function equals(a: StructureKey, b: StructureKey): boolean {

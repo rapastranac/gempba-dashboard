@@ -1,5 +1,5 @@
 import * as net from 'net';
-import { BroadcastEnvelope, ControlKind, ControlLine } from '../protocol/wire-protocol';
+import { BroadcastEnvelope, ControlLine } from '../protocol/wire-protocol';
 import { FrameListener } from './frame-listener';
 
 export interface TelemetryClientOptions {
@@ -9,7 +9,7 @@ export interface TelemetryClientOptions {
 }
 
 /**
- * Reader of the gempba center's line-delimited JSON stream, with control lines written back on the same
+ * Reader of the line-delimited JSON stream that a gempba run's rank 0, the aggregator, serves, with control lines written back on the same
  * socket. A malformed line is skipped without dropping the connection.
  */
 export class TelemetryClient {
@@ -49,7 +49,7 @@ export class TelemetryClient {
     }
 
     /** False when not connected; true once the line is handed to the socket. */
-    sendControl(kind: ControlKind, value: number): boolean {
+    sendControl(kind: ControlLine.IntervalKind, value: number): boolean {
         const socket = this.socket;
         if (!socket || socket.readyState !== 'open') {
             return false;

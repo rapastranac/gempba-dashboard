@@ -1,5 +1,6 @@
 import {
-    Bytes, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, TaskMoves, TaskWords, WorkerSeries, WorldSnapshot
+    Bytes, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, RankSeries, RankSnapshot, RankWork, Rates, RunSetupText, TaskMoves, TaskWords,
+    WorldSnapshot
 } from '@gempba/core';
 import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { Trend } from '@gempba/ui/lib/common/trend';
@@ -32,18 +33,20 @@ export interface GridTile {
     readonly memory?: GridFigure;
     /** The tasks the node's processes sent to and received from other processes, as a line and a tooltip; absent in a run of one process. */
     readonly moved?: { readonly text: string, readonly hint: string };
-    /** Whether the node's own workers still send new frames, while the stream goes on. */
+    /** Whether the node's own ranks still send new frames, while the stream goes on. */
     readonly liveness: Liveness;
 }
 
 /** The whole cluster above the tiles: the stream's liveness, its size, and its figures summed over the nodes. */
 export interface GridOverview {
     readonly liveness: Liveness;
-    /** `4 nodes · 32 workers`. */
+    /** `4 nodes · 32 ranks`. */
     readonly summary: string;
+    /** How the run is set up, in one line, and its annotations and markers for a tooltip; absent before telemetry schema 2. */
+    readonly setup?: { readonly text: string, readonly details: readonly string[] };
     /** Memory, with a meter, only once a node reports it. */
     readonly figures: readonly GridFigure[];
-    /** Tasks completed by every worker, oldest first, in {@link throughputUnit} for the whole history. */
+    /** Tasks completed by every rank, oldest first, in {@link throughputUnit} for the whole history. */
     readonly throughput: readonly number[];
     readonly throughputUnit: Rates.Unit;
     /** `Tasks completed per second`, or per minute, as the history is counted. */
@@ -60,9 +63,10 @@ export namespace GridTiles {
         node(host: string): NodeSeries;
         throughput(host: string): readonly number[];
         clusterThroughput(): readonly number[];
-        worker(workerId: number): WorkerSeries;
+        rank(id: number): RankSeries;
         nodeFrameAt(host: string): number | undefined;
         lastFrameAt(): number | undefined;
+        lastLineAt(): number | undefined;
     }
 
     /** What liveness is judged against: whether a stream is open, this machine's time, and the worker interval set. */
@@ -88,12 +92,12 @@ export namespace GridTiles {
                 cpuHistory: series.cpu,
                 tasks: { label: TaskWords.STARTED, ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks', hint: TaskWords.STARTED_HINT },
                 memory: total > 0 ? memoryFigure(used, total) : undefined,
-                moved: WorldSnapshot.totalWorkers(snapshot) > 1 ? {
+                moved: WorldSnapshot.totalRanks(snapshot) > 1 ? {
                     text: `${NumberText.grouped(moves.sent)} sent · ${NumberText.grouped(moves.received)} received`,
                     hint: `Tasks this node's processes sent to and received from other processes over the run; ${NumberText.grouped(moves.acrossNodes)} of `
                         + 'those sent went to other nodes, across the network.'
                 } : undefined,
-                liveness: Liveness.of({ ...clock, lastFrameAt: sources.nodeFrameAt(node.host) })
+                liveness: Liveness.of({ ...clock, ...runState(snapshot, sources), lastFrameAt: sources.nodeFrameAt(node.host) })
             };
         });
     }
@@ -104,7 +108,7 @@ export namespace GridTiles {
         if (!snapshot || nodes.length === 0) {
             return undefined;
         }
-        const workers = nodes.flatMap(node => node.sockets.flatMap(socket => socket.workers));
+        const ranks = nodes.flatMap(node => node.sockets.flatMap(socket => socket.ranks));
         const allocated = nodes.reduce((sum, node) => sum + NodeUtilization.allocatedCores(node), 0);
         const throughput = sources.clusterThroughput();
         const unit = Rates.unitFor(Math.max(0, ...throughput));
@@ -114,23 +118,24 @@ export namespace GridTiles {
         const moves = TaskMoves.of(snapshot);
         const figures: GridFigure[] = [
             {
-                label: 'Cores busy', value: NumberText.fixed(NodeUtilization.coresBusy(workers), 1), unit: `of ${allocated}`,
-                hint: 'The cores the workers keep busy, of those allocated to them.'
+                label: 'Cores busy', value: NumberText.fixed(NodeUtilization.coresBusy(ranks), 1), unit: `of ${allocated}`,
+                hint: 'The cores the ranks keep busy, of those allocated to them.'
             },
             {
                 label: TaskWords.STARTED, ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks',
                 detail: Rates.runAverage(moves.started, snapshot.elapsedSeconds), hint: TaskWords.STARTED_HINT
             }
         ];
-        if (workers.length > 1) {
-            figures.push(movedFigure(moves), idleFigure(snapshot, workers.map(worker => worker.workerId), sources));
+        if (ranks.length > 1) {
+            figures.push(movedFigure(moves), idleFigure(snapshot, ranks, sources));
         }
         if (memTotal > 0) {
             figures.push(memoryFigure(memUsed, memTotal));
         }
         return {
-            liveness: Liveness.of({ ...clock, lastFrameAt: sources.lastFrameAt() }),
-            summary: `${plural(nodes.length, 'node')} · ${plural(workers.length, 'worker')}`,
+            liveness: Liveness.of({ ...clock, ...runState(snapshot, sources), lastFrameAt: sources.lastFrameAt() }),
+            summary: `${plural(nodes.length, 'node')} · ${plural(ranks.length, 'rank')}`,
+            ...(snapshot.run ? { setup: { text: RunSetupText.line(snapshot.run), details: RunSetupText.details(snapshot.run) } } : {}),
             figures,
             throughput: throughput.map(rate => Rates.inUnit(rate, unit)),
             throughputUnit: unit,
@@ -152,15 +157,15 @@ export namespace GridTiles {
         };
     }
 
-    /** How much of their pools' time the workers wait for work now, on average, the center left out; a dash before any reading. */
-    function idleFigure(snapshot: WorldSnapshot, workerIds: readonly number[], sources: Sources): GridFigure {
-        const readings = workerIds.filter(id => !WorldSnapshot.isCenter(snapshot, id)).map(id => latest(sources.worker(id).idlePct))
+    /** How much of their pools' time the ranks that run tasks wait for work now, on average; a dash before any reading. */
+    function idleFigure(snapshot: WorldSnapshot, ranks: readonly RankSnapshot[], sources: Sources): GridFigure {
+        const readings = ranks.filter(rank => RankWork.of(snapshot, rank).runsTasks).map(rank => latest(sources.rank(rank.id).idlePct))
             .filter((reading): reading is number => reading !== undefined);
         const mean = readings.length > 0 ? readings.reduce((sum, reading) => sum + reading, 0) / readings.length : undefined;
         return {
             label: 'Idle', value: mean === undefined ? '—' : NumberText.fixed(mean, 0), unit: mean === undefined ? undefined : '%', detail: 'of pool time',
             tone: 'idle',
-            hint: 'How much of the time in their pools the workers spend waiting for work, on average, now; the center, which runs no tasks, is left out. '
+            hint: 'How much of the time in their pools the ranks that run tasks spend waiting for work, on average, now; a coordinator that runs none is left out. '
                 + 'Waiting on other processes, or on the network, shows here.'
         };
     }
@@ -185,4 +190,9 @@ export namespace GridTiles {
     function plural(count: number, noun: string): string {
         return `${NumberText.grouped(count)} ${noun}${count === 1 ? '' : 's'}`;
     }
+}
+
+/** What the latest line says of the run, paused or ended, which every tile shows as the stream does; and when any line arrived. */
+function runState(snapshot: WorldSnapshot, sources: GridTiles.Sources): Pick<Liveness.Stream, 'paused' | 'ended' | 'lastLineAt'> {
+    return { paused: snapshot.paused, ended: snapshot.final, lastLineAt: sources.lastLineAt() };
 }

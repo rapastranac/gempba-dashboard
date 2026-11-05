@@ -23,7 +23,7 @@ export namespace Cpu {
         return `CPUs ${chunks.join(', ')}`;
     }
 
-    /** How a worker uses a socket's cores, e.g. `87.3 % CPU · can use 4 of 8 cores · currently using ≈ 0.87 cores`. */
+    /** How a rank uses a socket's cores, e.g. `87.3 % CPU · can use 4 of 8 cores · currently using ≈ 0.87 cores`. */
     export function coreUsage(cpuPct: number, accessibleHere: number, socketCores: number): string {
         const access = accessibleHere === socketCores
             ? `can use all ${socketCores} cores`

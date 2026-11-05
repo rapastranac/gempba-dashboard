@@ -3,18 +3,18 @@ import { CompositeTreeNode, TreeImpl, TreeNode } from '@theia/core/lib/browser/t
 import { ExpandableTreeNode } from '@theia/core/lib/browser/tree/tree-expansion';
 import { SelectableTreeNode } from '@theia/core/lib/browser/tree/tree-selection';
 import { injectable } from '@theia/core/shared/inversify';
-import { NodeSnapshot, NodeUtilization, SocketSnapshot, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeSnapshot, NodeUtilization, SocketSnapshot, RankSnapshot, WorldSnapshot } from '@gempba/core';
 import { CardsPanel } from '../common/cards-panel';
 import { CardsText } from '../common/cards-text';
 
-export type CardsTreeKind = 'node' | 'socket' | 'worker';
+export type CardsTreeKind = 'node' | 'socket' | 'rank';
 
 /** A row of the Cards tree; `host` ties every row to the node it belongs to. */
 export interface CardsTreeNode extends SelectableTreeNode {
     readonly kind: CardsTreeKind;
     readonly host: string;
     readonly socketId?: number;
-    readonly workerId?: number;
+    readonly rank?: number;
     /** How busy the row's CPU is, from 0 to 1, for the meter beside its caption; absent when unknown. */
     readonly cpuFraction?: number;
 }
@@ -30,17 +30,17 @@ export namespace CardsTreeNode {
         return `node:${host}`;
     }
 
-    export function workerId(host: string, workerId: number): string {
-        return `worker:${host}/${workerId}`;
+    export function rankId(host: string, rank: number): string {
+        return `rank:${host}/${rank}`;
     }
 }
 
 /**
- * The Node → Socket → Worker hierarchy, for navigation only: what a row holds is shown beside the tree. It is
+ * The Node → Socket → Rank hierarchy, for navigation only: what a row holds is shown beside the tree. It is
  * built lazily from the latest snapshot, as Theia asks for the children of the root and of expanded rows only,
  * so collapsed parts of a large cluster cost nothing. Rows keep their ids from one snapshot to the next, so
  * expansion and selection survive every refresh. Like the Java cards, the first node starts expanded, and so
- * does each node's socket that holds its sentinel worker.
+ * does each node's socket that holds its sentinel rank.
  */
 @injectable()
 export class CardsTree extends TreeImpl {
@@ -68,7 +68,7 @@ export class CardsTree extends TreeImpl {
                 return node ? node.sockets.map(each => this.socketRow(parent, node, each)) : [];
             case 'socket': {
                 const socket = node?.sockets.find(candidate => candidate.socketId === parent.socketId);
-                return socket ? socket.workers.map(each => this.workerRow(parent, parent.host, socket, each, WorldSnapshot.isCenter(snapshot, each.workerId))) : [];
+                return socket ? socket.ranks.map(each => this.rankRow(parent, parent.host, socket, each, snapshot)) : [];
             }
             default:
                 return [];
@@ -84,26 +84,26 @@ export class CardsTree extends TreeImpl {
     }
 
     protected socketRow(parent: CompositeTreeNode, node: NodeSnapshot, socket: SocketSnapshot): CardsGroupNode {
-        const holdsSentinel = socket.workers.some(worker => worker.workerId === node.sentinelWorkerId);
-        const busy = NodeUtilization.coresBusy(socket.workers);
+        const holdsSentinel = socket.ranks.some(rank => rank.id === node.sentinelRank);
+        const busy = NodeUtilization.coresBusy(socket.ranks);
         return this.group(parent, `socket:${node.host}/${socket.socketId}`, { kind: 'socket', host: node.host, socketId: socket.socketId },
             CardsText.socketTitle(socket), CardsText.socketCaption(socket), codicon('circuit-board'), holdsSentinel,
             socket.logicalCores > 0 ? busy / socket.logicalCores : undefined);
     }
 
-    protected workerRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, worker: WorkerSnapshot, center: boolean): CardsTreeNode {
-        const id = CardsTreeNode.workerId(host, worker.workerId);
-        const name = CardsText.workerTitle(worker, center);
-        const accessible = CardsPanel.accessibleCores(worker, socket);
-        const description = CardsText.workerCaption(worker, accessible);
-        const icon = codicon(worker.sentinel ? 'star-full' : 'gear');
-        const cpuFraction = worker.cpuPct / (100 * accessible);
+    protected rankRow(parent: CompositeTreeNode, host: string, socket: SocketSnapshot, rank: RankSnapshot, world: WorldSnapshot): CardsTreeNode {
+        const id = CardsTreeNode.rankId(host, rank.id);
+        const name = CardsText.rankTitle(rank, world);
+        const accessible = CardsPanel.accessibleCores(rank, socket);
+        const description = CardsText.rankCaption(rank, accessible);
+        const icon = codicon(rank.sentinel ? 'star-full' : 'gear');
+        const cpuFraction = rank.cpuPct / (100 * accessible);
         const existing = this.getNode(id);
         if (CardsTreeNode.is(existing)) {
             return Object.assign(existing, { parent, name, description, icon, cpuFraction });
         }
         const row: CardsTreeNode = {
-            id, parent, name, description, icon, cpuFraction, kind: 'worker', host, socketId: socket.socketId, workerId: worker.workerId, visible: true, selected: false
+            id, parent, name, description, icon, cpuFraction, kind: 'rank', host, socketId: socket.socketId, rank: rank.id, visible: true, selected: false
         };
         return row;
     }

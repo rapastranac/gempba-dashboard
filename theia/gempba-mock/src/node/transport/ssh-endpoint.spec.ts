@@ -8,7 +8,7 @@ import { ConnectionMode } from '@gempba/core';
 import { BroadcastEnvelope } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { MockConfig } from '../../common/mock-config';
 import { MockRun } from '../sim/mock-run';
-import { MockCenter } from './mock-center';
+import { MockAggregator } from './mock-aggregator';
 import { MockKeys } from './mock-keys';
 import { MockSshEndpoint, MockSshOptions } from './ssh-endpoint';
 import { MockTopology } from '../sim/mock-topology';
@@ -35,10 +35,18 @@ describe('MockKeys', () => {
         expect(parsed.type).to.equal('ssh-ed25519');
     });
 
+    it('draws only key pairs that parse, though ssh2 now and then writes one that does not', () => {
+        for (let i = 0; i < 2048; i++) {
+            const pair = MockKeys.generatePair();
+            expect(utils.parseKey(pair.private)).not.to.be.instanceOf(Error);
+            expect(utils.parseKey(pair.public)).not.to.be.instanceOf(Error);
+        }
+    });
+
     it('reads the user\'s public keys and authorized_keys, skipping what does not parse', () => {
         fs.mkdirSync(path.join(home, '.ssh'));
-        const a = utils.generateKeyPairSync('ed25519').public;
-        const b = utils.generateKeyPairSync('ed25519').public;
+        const a = MockKeys.generatePair().public;
+        const b = MockKeys.generatePair().public;
         fs.writeFileSync(path.join(home, '.ssh', 'id_ed25519.pub'), a + '\n');
         fs.writeFileSync(path.join(home, '.ssh', 'authorized_keys'), `# mine\n${b}\nnot a key\n`);
         fs.writeFileSync(path.join(home, '.ssh', 'id_ed25519'), 'private, never read');
@@ -48,7 +56,7 @@ describe('MockKeys', () => {
 
     it('finds a known_hosts line that holds another key for the mock, plain or hashed', () => {
         const ours = MockKeys.hostKey(MockKeys.dir(home)).parsed;
-        const theirs = (utils.parseKey(utils.generateKeyPairSync('ed25519').private) as ParsedKey).getPublicSSH().toString('base64');
+        const theirs = (utils.parseKey(MockKeys.generatePair().private) as ParsedKey).getPublicSSH().toString('base64');
         const salt = crypto.randomBytes(20);
         const hashed = crypto.createHmac('sha1', salt).update('[127.0.0.1]:2222').digest('base64');
         fs.mkdirSync(path.join(home, '.ssh'));
@@ -64,7 +72,7 @@ describe('MockKeys', () => {
 describe('MockSshEndpoint', () => {
 
     let home: string;
-    let center: MockCenter;
+    let aggregator: MockAggregator;
     let endpoint: MockSshEndpoint;
     let port: number;
     let logged: string[];
@@ -79,10 +87,10 @@ describe('MockSshEndpoint', () => {
         clientKey = fs.readFileSync(client.privatePath, 'utf8');
         const defaults = MockConfig.defaults();
         const run = new MockRun(defaults.shape, defaults.scheduler, defaults.live, 42);
-        center = new MockCenter(run, { log: message => logged.push(message) });
-        center.start();
+        aggregator = new MockAggregator(run, { log: message => logged.push(message) });
+        aggregator.start();
         const hosts = run.topology.nodes.map(node => node.host);
-        endpoint = new MockSshEndpoint(center, {
+        endpoint = new MockSshEndpoint(aggregator, {
             mode, hostKey: MockKeys.hostKey(dir).privateKey, authorizedKeys: [client.parsed], gempbaPort: 9000, isNode: name => hosts.includes(name),
             log: message => logged.push(message), ...options
         });
@@ -158,7 +166,7 @@ describe('MockSshEndpoint', () => {
 
     afterEach(async () => {
         clients.splice(0).forEach(client => client.end());
-        center.stop();
+        aggregator.stop();
         await endpoint.close();
         fs.rmSync(home, { recursive: true, force: true });
     });
@@ -167,7 +175,7 @@ describe('MockSshEndpoint', () => {
         await serve(ConnectionMode.HOST);
         const client = await connect();
         const line = await firstLine(await forward(client, 9000));
-        expect(BroadcastEnvelope.parse(line).workers).to.have.lengthOf(8);
+        expect(BroadcastEnvelope.parse(line).ranks).to.have.lengthOf(8);
         expect(logged.some(message => message.startsWith('tester signed in over SSH from 127.0.0.1:'))).to.equal(true);
         await until(() => logged.includes('tester over SSH connected'));
         let refused: unknown;
@@ -177,12 +185,12 @@ describe('MockSshEndpoint', () => {
 
     it('refuses an unknown key, and everyone when it accepts no key', async () => {
         await serve(ConnectionMode.HOST);
-        const stranger = (utils.generateKeyPairSync('ed25519')).private;
+        const stranger = MockKeys.generatePair().private;
         let failed: unknown;
         await connect({ privateKey: stranger }).catch(error => failed = error);
         expect(String(failed)).to.contain('All configured authentication methods failed');
         await endpoint.close();
-        endpoint = new MockSshEndpoint(center, {
+        endpoint = new MockSshEndpoint(aggregator, {
             mode: ConnectionMode.HOST, hostKey: MockKeys.hostKey(MockKeys.dir(home)).privateKey, authorizedKeys: [], gempbaPort: 9000, isNode: () => true, log: () => undefined
         });
         port = await endpoint.listen(0);

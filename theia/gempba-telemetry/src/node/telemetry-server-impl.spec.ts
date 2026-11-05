@@ -1,5 +1,8 @@
 import '@theia/core/shared/reflect-metadata';
 import { expect } from 'chai';
+import * as fs from 'fs';
+import * as net from 'net';
+import * as path from 'path';
 import { bindContributionProvider } from '@theia/core/lib/common/contribution-provider';
 import { Emitter } from '@theia/core/lib/common/event';
 import { Container, injectable } from '@theia/core/shared/inversify';
@@ -94,10 +97,16 @@ describe('TelemetryServerImpl', () => {
         server.setClient(client);
     });
 
+    const gempbas: net.Server[] = [];
+    const sockets = new Set<net.Socket>();
+
     afterEach(async () => {
         server.dispose();
         await emitter?.close();
         emitter = undefined;
+        sockets.forEach(socket => socket.destroy());
+        sockets.clear();
+        await Promise.all(gempbas.splice(0).map(gempba => new Promise(resolve => gempba.close(resolve))));
     });
 
     async function listenToMock(): Promise<MockEmitter> {
@@ -105,6 +114,21 @@ describe('TelemetryServerImpl', () => {
         await server.listen(TargetSpec.of(undefined, await emitter.listen()));
         return emitter;
     }
+
+    /** A gempba that sends one line to each client and closes the connection, as its process does when it exits. */
+    async function listenToOneLine(line: string): Promise<void> {
+        const gempba = net.createServer(socket => {
+            sockets.add(socket);
+            socket.on('close', () => sockets.delete(socket));
+            socket.end(line + '\n');
+        });
+        gempbas.push(gempba);
+        await new Promise<void>(resolve => gempba.listen(0, '127.0.0.1', resolve));
+        await server.listen(TargetSpec.of(undefined, (gempba.address() as net.AddressInfo).port));
+    }
+
+    /** A full line recorded from a real gempba run of telemetry schema 2. */
+    const RECORDED = fs.readFileSync(path.resolve(__dirname, '../../fixtures/schema2-run.ndjson'), 'utf8').split('\n')[0];
 
     it('lists the modes a tunnel provider is installed for', async () => {
         expect(await server.availableModes()).to.deep.equal([ConnectionMode.LOCAL, ConnectionMode.HOST]);
@@ -137,14 +161,15 @@ describe('TelemetryServerImpl', () => {
         expect(client.statuses.some(text => text.startsWith('connected to 127.0.0.1:'))).to.equal(true);
     });
 
-    it('sends the saved rates on connect and new rates while streaming', async () => {
-        await server.pushRates(200, 2000);
+    it('sends the saved rate on connect and a new one while streaming, for rank and node frames alike', async () => {
+        await server.pushInterval(200);
+        expect(client.statuses.at(-1)).to.equal('refresh rate saved (200 ms); it is sent on the next connect');
         const mock = await listenToMock();
-        await eventually(() => mock.workerIntervalMs === 200 && mock.nodeIntervalMs === 2000);
+        await eventually(() => mock.workerIntervalMs === 200 && mock.nodeIntervalMs === 200);
 
-        await server.pushRates(300, 3000);
-        await eventually(() => mock.workerIntervalMs === 300 && mock.nodeIntervalMs === 3000);
-        expect(client.statuses.at(-1)).to.equal('rates pushed (worker=300 ms, node=3000 ms)');
+        await server.pushInterval(300);
+        await eventually(() => mock.workerIntervalMs === 300 && mock.nodeIntervalMs === 300);
+        expect(client.statuses.at(-1)).to.equal('refresh rate pushed (300 ms)');
     });
 
     it('stopping a local stream ends it and disconnects', async () => {
@@ -185,6 +210,20 @@ describe('TelemetryServerImpl', () => {
         await connecting;
         expect(host.closed).to.have.lengthOf(1);
         expect(client.states.at(-1)).to.equal(ConnectionState.DISCONNECTED);
+    });
+
+    it('says the run ended when the stream closes after the run\'s final line, and waits for the next run', async () => {
+        await listenToOneLine(RECORDED.replace('"final":false', '"final":true'));
+        await eventually(() => client.statuses.some(text => text.startsWith('the run ended')));
+        expect(client.snapshots[0].final).to.equal(true);
+        expect(client.statuses.filter(text => text.includes('retrying'))).to.deep.equal([]);
+        expect(client.states.at(-1)).to.equal(ConnectionState.LISTENING);
+    });
+
+    it('reads a stream that closes without the final line as a lost connection, and retries', async () => {
+        await listenToOneLine(RECORDED);
+        await eventually(() => client.statuses.some(text => text.endsWith('(peer closed); retrying…')));
+        expect(client.statuses.some(text => text.startsWith('the run ended'))).to.equal(false);
     });
 
     it('a session that drops while streaming disconnects and says so, without retrying the stream', async () => {

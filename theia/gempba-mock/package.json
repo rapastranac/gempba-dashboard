@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "private": true,
   "license": "MIT",
-  "description": "GemPBA built-in mocker for development builds: a seeded gempba run served like gempba's center over TCP or SSH.",
+  "description": "GemPBA built-in mocker for development builds: a seeded gempba run served like gempba's telemetry over TCP or SSH.",
   "files": [
     "lib",
     "src"

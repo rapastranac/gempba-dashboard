@@ -1,5 +1,5 @@
 export interface PeerSnapshot {
-    readonly peerWorkerId: number;
+    readonly peerRank: number;
     readonly bytes: number;
     readonly count: number;
 }

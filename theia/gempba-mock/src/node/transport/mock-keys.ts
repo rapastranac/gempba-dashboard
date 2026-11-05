@@ -92,8 +92,11 @@ export namespace MockKeys {
         return pair.private;
     }
 
-    /** An ed25519 pair; ssh2's generator emits an unparseable key about once in 150 tries, so those are redrawn. */
-    function generatePair(): { private: string, public: string } {
+    /**
+     * An ed25519 pair that parses. About once in 256 draws, ssh2's generator drops the public key's first byte when it is 0,
+     * so neither half parses; those are redrawn.
+     */
+    export function generatePair(): { private: string, public: string } {
         for (; ;) {
             const pair = utils.generateKeyPairSync('ed25519', { comment: 'gempba-mock' });
             if (!(utils.parseKey(pair.private) instanceof Error)) {

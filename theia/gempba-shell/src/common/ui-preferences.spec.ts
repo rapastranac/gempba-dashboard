@@ -21,7 +21,7 @@ describe('UiPreferences', () => {
     });
 
     it('shows every GemPBA setting', () => {
-        for (const key of ['gempba.telemetry.workerIntervalMs', 'gempba.telemetry.nodeIntervalMs', 'gempba.later.setting']) {
+        for (const key of ['gempba.telemetry.intervalMs', 'gempba.later.setting']) {
             expect(UiPreferences.isShown(key), key).to.equal(true);
         }
         expect(UiPreferences.isShown('gempbax.setting')).to.equal(false);

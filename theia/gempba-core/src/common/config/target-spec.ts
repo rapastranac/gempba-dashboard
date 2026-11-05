@@ -1,6 +1,6 @@
 import { isBlank } from './values';
 
-/** The job pointer: which gempba center to observe over an open session. Cheap to change, no re-auth. */
+/** The job pointer: which gempba run's telemetry to observe over an open session. Cheap to change, no re-auth. */
 export interface TargetSpec {
     /** Compute node `user@host` (JUMP only); blank for LOCAL and HOST. */
     readonly targetHost: string;

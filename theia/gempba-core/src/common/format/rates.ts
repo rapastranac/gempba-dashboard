@@ -1,7 +1,7 @@
 import { NumberText } from './number-text';
 
 /**
- * Rates as they come: per second from one a second up, per minute below that, and never a coarser unit, so a worker
+ * Rates as they come: per second from one a second up, per minute below that, and never a coarser unit, so a rank
  * that sent a single task reads `0 /min` rather than a per-hour or per-day figure.
  */
 export namespace Rates {

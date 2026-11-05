@@ -1,10 +1,10 @@
 import { Emitter } from '@theia/core/lib/common/event';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import {
-    ConnectionMode, ConnectionState, FrameArrivals, FrameCadence, NodeHistoryStore, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, WorldSnapshot
+    ConnectionMode, ConnectionState, FrameArrivals, FrameCadence, NodeHistoryStore, RankHistoryStore, SessionSpec, TargetSpec, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
-import { TelemetryService } from '../common/telemetry-service';
+import { ObservedIntervals, TelemetryService } from '../common/telemetry-service';
 import { RateSettings } from './rate-settings';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
 
@@ -14,25 +14,27 @@ export class TelemetryServiceImpl implements TelemetryService {
     @inject(TelemetryServer) protected readonly server: TelemetryServer;
     @inject(TelemetryServerClientImpl) protected readonly receiver: TelemetryServerClientImpl;
     @inject(NodeHistoryStore) protected readonly nodeHistory: NodeHistoryStore;
-    @inject(WorkerHistoryStore) protected readonly workerHistory: WorkerHistoryStore;
+    @inject(RankHistoryStore) protected readonly rankHistory: RankHistoryStore;
     @inject(RateSettings) protected readonly rateSettings: RateSettings;
 
     protected readonly onSnapshotEmitter = new Emitter<WorldSnapshot>();
     protected readonly onStateChangeEmitter = new Emitter<ConnectionState>();
     protected readonly onStatusEmitter = new Emitter<string>();
-    protected readonly onRatesChangeEmitter = new Emitter<RefreshRates>();
+    protected readonly onIntervalChangeEmitter = new Emitter<number>();
     readonly onSnapshot = this.onSnapshotEmitter.event;
     readonly onStateChange = this.onStateChangeEmitter.event;
     readonly onStatus = this.onStatusEmitter.event;
-    readonly onRatesChange = this.onRatesChangeEmitter.event;
+    readonly onIntervalChange = this.onIntervalChangeEmitter.event;
 
     protected currentState = ConnectionState.DISCONNECTED;
     protected latestSnapshot: WorldSnapshot | undefined;
     protected latestStatus = '';
-    protected readonly workerCadence = new FrameCadence();
+    protected readonly rankCadence = new FrameCadence();
     protected readonly nodeCadence = new FrameCadence();
     protected readonly nodeArrivals = new FrameArrivals();
     protected latestFrameAt: number | undefined;
+    protected latestLineAt: number | undefined;
+    protected runId: string | undefined;
 
     get state(): ConnectionState {
         return this.currentState;
@@ -46,26 +48,38 @@ export class TelemetryServiceImpl implements TelemetryService {
         return this.latestFrameAt;
     }
 
+    get lastLineAt(): number | undefined {
+        return this.latestLineAt;
+    }
+
     get status(): string {
         return this.latestStatus;
     }
 
-    get rates(): RefreshRates {
-        return this.rateSettings.rates;
+    get intervalMs(): number {
+        return this.rateSettings.intervalMs;
     }
 
-    get observedRates(): Partial<RefreshRates> {
-        return { workerIntervalMs: this.workerCadence.medianMs(), nodeIntervalMs: this.nodeCadence.medianMs() };
+    get observedIntervals(): ObservedIntervals {
+        return { rankMs: this.rankCadence.medianMs(), nodeMs: this.nodeCadence.medianMs() };
     }
 
     @postConstruct()
     protected init(): void {
         this.receiver.snapshots(snapshot => {
-            this.nodeHistory.update(snapshot);
-            this.workerHistory.update(snapshot);
+            if (snapshot.runId !== undefined && this.runId !== undefined && snapshot.runId !== this.runId) {
+                // gempba restarted on the same port: its charts start afresh, as a new Listen's do
+                this.forget();
+            }
+            this.runId = snapshot.runId ?? this.runId;
             const now = Date.now();
-            this.observe(snapshot, now);
-            this.latestFrameAt = now;
+            this.latestLineAt = now;
+            if (!snapshot.headerOnly) {
+                this.nodeHistory.update(snapshot);
+                this.rankHistory.update(snapshot);
+                this.observe(snapshot, now);
+                this.latestFrameAt = now;
+            }
             this.latestSnapshot = snapshot;
             this.onSnapshotEmitter.fire(snapshot);
         });
@@ -77,10 +91,10 @@ export class TelemetryServiceImpl implements TelemetryService {
             this.latestStatus = text;
             this.onStatusEmitter.fire(text);
         });
-        this.rateSettings.onChange(rates => {
-            this.onRatesChangeEmitter.fire(rates);
-            // a failed send leaves the rates in the backend, which sends them on the next connect
-            this.sendRates().catch(() => undefined);
+        this.rateSettings.onChange(intervalMs => {
+            this.onIntervalChangeEmitter.fire(intervalMs);
+            // a failed send leaves the rate in the backend, which sends it on the next connect
+            this.sendInterval().catch(() => undefined);
         });
     }
 
@@ -93,19 +107,14 @@ export class TelemetryServiceImpl implements TelemetryService {
     }
 
     async connect(session: SessionSpec): Promise<void> {
-        await this.sendRates();
+        await this.sendInterval();
         return this.server.connect(session);
     }
 
     async listen(target: TargetSpec): Promise<void> {
-        this.nodeHistory.clear();
-        this.workerHistory.clear();
-        this.workerCadence.clear();
-        this.nodeCadence.clear();
-        this.nodeArrivals.clear();
-        this.latestFrameAt = undefined;
-        this.latestSnapshot = undefined;
-        await this.sendRates();
+        this.forget();
+        this.runId = undefined;
+        await this.sendInterval();
         return this.server.listen(target);
     }
 
@@ -117,15 +126,26 @@ export class TelemetryServiceImpl implements TelemetryService {
         return this.server.disconnect();
     }
 
-    setRates(rates: Partial<RefreshRates>): Promise<void> {
-        return this.rateSettings.set(rates);
+    setIntervalMs(intervalMs: number): Promise<void> {
+        return this.rateSettings.set(intervalMs);
     }
 
-    /** Hands the backend the rates as set, which it sends to gempba now if a stream is open, and on every (re)connect. */
-    protected async sendRates(): Promise<void> {
+    /** Hands the backend the rate as set, which it sends to gempba now if a stream is open, and on every (re)connect. */
+    protected async sendInterval(): Promise<void> {
         await this.rateSettings.ready;
-        const rates = this.rateSettings.rates;
-        await this.server.pushRates(rates.workerIntervalMs, rates.nodeIntervalMs);
+        await this.server.pushInterval(this.rateSettings.intervalMs);
+    }
+
+    /** Clears what the last stream or run left: the snapshot, the histories, the observed rates and the frame times. */
+    protected forget(): void {
+        this.nodeHistory.clear();
+        this.rankHistory.clear();
+        this.rankCadence.clear();
+        this.nodeCadence.clear();
+        this.nodeArrivals.clear();
+        this.latestFrameAt = undefined;
+        this.latestLineAt = undefined;
+        this.latestSnapshot = undefined;
     }
 
     protected observe(snapshot: WorldSnapshot, now: number): void {
@@ -134,9 +154,9 @@ export class TelemetryServiceImpl implements TelemetryService {
                 this.nodeCadence.record(node.host, node.sentinelLocalMillis, node.sentinelLocalMillis);
             }
             for (const socket of node.sockets) {
-                for (const worker of socket.workers) {
-                    this.workerCadence.record(String(worker.workerId), worker.seqNo, worker.localMillis);
-                    this.nodeArrivals.record(node.host, String(worker.workerId), worker.seqNo, now);
+                for (const rank of socket.ranks) {
+                    this.rankCadence.record(String(rank.id), rank.seqNo, rank.localMillis);
+                    this.nodeArrivals.record(node.host, String(rank.id), rank.seqNo, now);
                 }
             }
         }

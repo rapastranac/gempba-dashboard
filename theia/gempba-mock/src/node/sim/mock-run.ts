@@ -1,31 +1,34 @@
-import { RefreshInterval, RefreshRates } from '@gempba/core';
-import { NodeFrame, WorkerFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
-import { MockLive, MockScheduler, MockShape } from '../../common/mock-config';
+import { randomUUID } from 'crypto';
+import { RefreshInterval, RefreshRates, SchedulerRole } from '@gempba/core';
+import { Schema1Frame, Schema1NodeFrame } from './schema1-lines';
+import { RunMarkerFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
+import { Schema2Frame, Schema2NodeFrame, Schema2Topology } from './schema2-lines';
+import { MockFidelity, MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
-import { CenterQueue, QueuedTask } from './center-queue';
+import { CoordinatorQueue, QueuedTask } from './coordinator-queue';
 import { MockRandom } from './mock-random';
 import { MockScenarioModel } from './mock-scenario';
-import { MockTopology, MockWorkerPlace } from './mock-topology';
+import { MockTopology, MockRankPlace } from './mock-topology';
 
 const KiB = 1024;
 const MiB = 1024 ** 2;
 const GiB = 1024 ** 3;
 
-/** A worker's live state, for specs and status; the frames carry the same counters as last sampled. */
-export interface MockWorkerView {
-    readonly workerId: number;
+/** A rank's live state, for specs and status; the frames carry the same counters as last sampled. */
+export interface MockRankView {
+    readonly id: number;
     readonly phase: MockRun.Phase;
     readonly poolThreads: number;
     /** Tasks left in the subtree it explores; Infinity for the root of an endless search. */
     readonly subtree: number;
-    /** The idle rank the center reserved for it to send a task to. */
+    /** The idle rank the coordinator reserved for it to send a task to. */
     readonly next?: number;
     readonly running: number;
     readonly tasksLocal: number;
     readonly sent: number;
     readonly recv: number;
     readonly edges: ReadonlyMap<number, { readonly bytes: number, readonly count: number }>;
-    /** `scheduler_pending_count`: the center's queue when centralized, 0 everywhere else. */
+    /** `scheduler_pending_count`: the coordinator's queue when centralized, 0 everywhere else. */
     readonly pending: number;
 }
 
@@ -34,16 +37,19 @@ interface Edge {
     count: number;
 }
 
-interface WorkerState {
-    place: MockWorkerPlace;
+interface RankState {
+    place: MockRankPlace;
     pid: number;
     seqNo: number;
     lastSampleMs: number;
     nextSampleMs: number;
-    /** The latest frame, serialized when it was sampled; gempba's center repeats it until the worker sends a new one. */
+    /** What it last sent; gempba's aggregator repeats it until the rank sends a new one. */
+    sample?: RankSample;
+    /** The sample written in the schema `frameSchema`, kept until it is sampled again or the schema changes. */
     frameJson?: string;
+    frameSchema?: number;
     phase: MockRun.Phase;
-    /** When it last reported itself available: the center hears of it from the next step on. */
+    /** When it last reported itself available: the coordinator hears of it from the next step on. */
     availableSinceMs: number;
     subtree: number;
     next?: number;
@@ -57,7 +63,11 @@ interface WorkerState {
     baseRss: number;
     efficiency: number;
     edges: Map<number, Edge>;
-    /** Its edges serialized, kept until it sends again: a worker's edges reach every rank it ever sent to, as gempba's do. */
+    /** What schema 2 counts beyond schema 1; the coordinator's counters stay 0 on a worker, and the workers' on the coordinator. */
+    acct: Accounting;
+    /** When the coordinator reserved it as a push target: where the assignment's latency starts. */
+    assignedAtMs?: number;
+    /** Its edges serialized, kept until it sends again: a rank's edges reach every rank it ever sent to, as gempba's do. */
     edgesJson?: string;
 }
 
@@ -67,53 +77,124 @@ interface NodeState {
     stalledUntilMs: number;
     lastSampleMs: number;
     nextSampleMs: number;
+    sample?: NodeSample;
     frameJson?: string;
+    frameSchema?: number;
     pageCache: number;
-    netIn: number;
-    netOut: number;
-    diskRead: number;
-    diskWrite: number;
+}
+
+/** Schema 2's time accounting, as gempba v4.3.0 counts it; times in microseconds unless they say `Ms`, since the run started. */
+interface Accounting {
+    bytesSent: number;
+    bytesRecv: number;
+    sendMicros: number;
+    recvMicros: number;
+    spawnRejectedPoolFull: number;
+    spawnRemoteRejected: number;
+    idleStarved: number;
+    idleImbalanced: number;
+    schedRunning: number;
+    schedWaiting: number;
+    firstTaskMs: number;
+    lastTaskMs: number;
+    assignLatencyTotal: number;
+    assignCount: number;
+    assignLatencyMax: number;
+    availableQueueEmpty: number;
+    stateMsgs: number;
+    scoreProposals: number;
+    scoreBroadcasts: number;
+    scoreProposalsSent: number;
+    lastImprovementMs: number;
+    fullMicros: number;
+    telemetryMicros: number;
+}
+
+/** What a rank's frame says, taken when it is sampled; either schema writes it. */
+interface RankSample {
+    readonly id: number;
+    readonly seqNo: number;
+    readonly localMs: number;
+    readonly tasksStarted: number;
+    readonly sent: number;
+    readonly recv: number;
+    readonly running: number;
+    readonly pending: number;
+    readonly idleMicros: number;
+    readonly cpuPct: number;
+    readonly rssBytes: number;
+    readonly threads: number;
+    readonly edgesJson: string;
+    /** Whole microseconds, as gempba's counters are. */
+    readonly acct: Readonly<Accounting>;
+}
+
+/** What a node's frame says, taken when its sentinel samples it; either schema writes it. */
+interface NodeSample {
+    readonly sentinel: number;
+    readonly localMs: number;
+    readonly host: string;
+    readonly socketCount: number;
+    readonly logicalCores: number;
+    readonly memTotalBytes: number;
+    readonly memAvailBytes: number;
+    readonly cgroupUsedBytes: number;
+    readonly cgroupLimitBytes: number;
+    readonly sockets: readonly { readonly socketId: number, readonly cpuPct: number, readonly memTotalBytes: number, readonly memUsedBytes: number }[];
 }
 
 /**
  * A seeded gempba run, stepped in fixed simulated time so the same seed and the same steps give the same frames
  * whatever the wall clock does. It follows gempba's MPI schedulers (mpi_semi_centralized_scheduler.hpp,
  * mpi_centralized_scheduler.hpp):
- * - the center seeds the search tree's root to rank 1 and runs no tasks itself;
+ * - the coordinator, on rank 0 as gempba's schedulers put it or on the rank set, seeds the search tree's root to the
+ *   lowest rank beside it and runs no tasks itself;
  * - a worker explores one received subtree at a time on its pool, then reports itself available;
- * - semi-centralized: the center reserves an available rank for each running worker that has none, and the worker
+ * - semi-centralized: the coordinator reserves an available rank for each running worker that has none, and the worker
  *   sends it one task, a subtree of its own, with nothing else in flight; nothing queues anywhere;
- * - centralized: running workers send spare tasks to the center while it isn't full, and it hands the biggest it holds
+ * - centralized: running workers send spare tasks to the coordinator while it isn't full, and it hands the biggest it holds
  *   to each available worker; its queue is the only pending count.
  * The counters follow from that, so they agree with one another as gempba's do. Frames are sampled at the worker and
- * node intervals and serialized once; a line is the latest frame of every worker and node with the topology, as
- * gempba's center broadcasts them.
+ * node intervals, one interval for both in schema 2, and written once in the schema the fidelity asks for; a line is
+ * the latest frame of every rank and node with the topology, as gempba's aggregator broadcasts them.
  */
 export class MockRun {
 
     static readonly STEP_MS = 50;
-    static readonly SCHEMA_VERSION = 1;
-    /** gempba's center broadcasts on a fixed interval, whatever the worker rate (center_tcp_server.cpp). */
+    /** The release whose telemetry schema 2 the mocker sends. */
+    static readonly GEMPBA_VERSION = '4.3.0';
+    /** gempba up to v4.2.0 broadcasts on a fixed interval, whatever the worker rate (its center_tcp_server.cpp). */
     static readonly GEMPBA_BROADCAST_MS = 500;
-    /** gempba's CENTER_NBSTORED_TASKS_PER_PROCESS: past this many tasks per process, the centralized center says it is full. */
-    static readonly CENTER_TASKS_PER_PROCESS = 1000;
-    /** gempba's MAX_MEMORY_MB: past this much memory, the centralized center says it is full too. */
-    static readonly CENTER_MAX_MEMORY_BYTES = 10 * GiB;
+    /** gempba's CENTER_NBSTORED_TASKS_PER_PROCESS: past this many tasks per process, the centralized coordinator says it is full. */
+    static readonly COORDINATOR_TASKS_PER_PROCESS = 1000;
+    /** gempba's MAX_MEMORY_MB: past this much memory, the centralized coordinator says it is full too. */
+    static readonly COORDINATOR_MAX_MEMORY_BYTES = 10 * GiB;
     /** It says it is free again below this share of the task limit, with its memory at or below 90 % of its own. */
-    static readonly CENTER_FREE_SHARE = 0.8;
+    static readonly COORDINATOR_FREE_SHARE = 0.8;
     /** How widely the sizes of the branches cut off an endless root vary: the deviation of their logarithm. */
     static readonly BRANCH_SPREAD = 1;
     /** The share of a finite subtree a worker gives away: a branch near its top. */
     static readonly SPLIT_SHARE: readonly [number, number] = [0.2, 0.5];
     /** gempba's main thread polls MPI without sleeping, so an idle process still keeps about one core busy. */
     static readonly POLLING_PCT = 97;
+    /** A task's latency and bandwidth on the way, in microseconds and bytes per microsecond: shared memory within a node, the network across. */
+    static readonly WITHIN_NODE: readonly [number, number] = [15, 8000];
+    static readonly ACROSS_NODES: readonly [number, number] = [60, 1250];
+    /** The node expansions a running task tries to spawn; with every pool thread busy, each is refused and runs inline. */
+    static readonly SPAWN_TRIES_PER_TASK = 4;
+    /** The share of finished tasks that reach a leaf whose score a worker proposes. */
+    static readonly PROPOSALS_PER_TASK = 1e-4;
+    /** gempba keeps at most this many markers; it ignores the rest. */
+    static readonly MAX_MARKERS = 32;
 
     protected readonly random: MockRandom;
+    /** The counters' own noise, apart from the run's, so the same seed steps the same run whatever schema 2 counts. */
+    protected readonly noise: MockRandom;
     protected topologyNow: MockTopology;
-    protected readonly workers = new Map<number, WorkerState>();
+    protected readonly ranks = new Map<number, RankState>();
     protected readonly nodes: NodeState[];
-    protected readonly queue = new CenterQueue();
-    protected centerFull = false;
+    protected readonly queue = new CoordinatorQueue();
+    protected coordinatorFull = false;
     protected liveNow: MockLive;
     protected model: MockScenarioModel;
     protected scenarioStartMs = 0;
@@ -124,11 +205,19 @@ export class MockRun {
     protected pairingCursor = 0;
     protected endedNow = false;
     protected topologyJson?: string;
+    protected topologySchema?: number;
     protected frameOrder?: number[];
+    protected readonly runSeed: number;
+    protected pausedNow = false;
+    protected readonly markers: RunMarkerFrame[] = [];
+    /** Drawn at each Start, so the dashboard tells this run from the one before, whatever the seed. */
+    readonly runId = randomUUID();
 
     constructor(protected readonly shape: MockShape, readonly scheduler: MockScheduler, live: MockLive, seed: number,
-        rates: RefreshRates = RefreshRates.defaults()) {
+        rates: RefreshRates = RefreshRates.defaults(), protected readonly roles: MockRoles = { coordinatorRank: 0, declared: true }) {
         this.random = new MockRandom(seed);
+        this.noise = new MockRandom(seed + 0x5eed);
+        this.runSeed = seed;
         this.liveNow = live;
         this.model = MockScenarioModel.of(live.scenario);
         this.workerInterval = RefreshInterval.clamp(rates.workerIntervalMs);
@@ -136,10 +225,10 @@ export class MockRun {
         this.topologyNow = MockTopology.of(shape);
         this.nodes = this.topologyNow.nodes.map(node => ({
             clockBaseMs: this.random.int(1_000_000, 900_000_000), stalledUntilMs: 0, lastSampleMs: 0, nextSampleMs: 0,
-            pageCache: node.memTotalBytes * 0.08, netIn: 0, netOut: 0, diskRead: 0, diskWrite: 0
+            pageCache: node.memTotalBytes * 0.08
         }));
-        for (const place of this.topologyNow.workers) {
-            this.workers.set(place.workerId, this.newWorker(place));
+        for (const place of this.topologyNow.ranks) {
+            this.ranks.set(place.id, this.newRank(place));
         }
         this.seed();
         this.sample();
@@ -170,9 +259,19 @@ export class MockRun {
         return this.nodeInterval;
     }
 
-    /** gempba broadcasts every 500 ms; with every field filled, the broadcast follows the worker rate. */
+    /** gempba up to v4.2.0 broadcasts every 500 ms; from v4.3.0, at the one interval every frame follows. */
     get broadcastIntervalMs(): number {
-        return this.liveNow.fidelity === 'full' ? this.workerInterval : MockRun.GEMPBA_BROADCAST_MS;
+        return this.schema === 1 ? MockRun.GEMPBA_BROADCAST_MS : this.workerInterval;
+    }
+
+    /** Whether its ranks stopped sending frames; their counters keep counting. */
+    get paused(): boolean {
+        return this.pausedNow;
+    }
+
+    /** The telemetry schema the fidelity sends; it can change while the mocker runs. */
+    get schema(): 1 | 2 {
+        return MockFidelity.schema(this.liveNow.fidelity);
     }
 
     /** A new scenario starts from its beginning; the load and fidelity apply from the next step. */
@@ -181,19 +280,54 @@ export class MockRun {
             this.model = MockScenarioModel.of(live.scenario);
             this.scenarioStartMs = this.time;
         }
+        const schema = this.schema;
         this.liveNow = live;
+        if (this.schema !== schema) {
+            // gempba v4.2.0 has no pause
+            this.pausedNow = this.pausedNow && this.schema === 2;
+            this.rearm();
+        }
+    }
+
+    /** Its ranks stop sending frames while the run goes on, as gempba v4.3.0's do on a pause control. */
+    pause(): void {
+        this.pausedNow = true;
+    }
+
+    resume(): void {
+        this.pausedNow = false;
+        this.rearm();
+    }
+
+    /** Every rank and node not stalled sends a frame now, paused or not, for a snapshot control. */
+    snapshot(): void {
+        for (const rank of this.ranks.values()) {
+            if (this.nodes[rank.place.nodeIndex].stalledUntilMs <= this.time) {
+                this.sampleRank(rank);
+            }
+        }
+        this.nodes.forEach((node, index) => {
+            if (node.stalledUntilMs <= this.time) {
+                this.sampleNode(index);
+            }
+        });
+    }
+
+    /** Records a marker a dashboard sent; false once the run holds as many as gempba keeps. */
+    mark(label: string): boolean {
+        if (this.markers.length >= MockRun.MAX_MARKERS) {
+            return false;
+        }
+        this.markers.push({ elapsed_ms: this.time, label, source: 'dashboard' });
+        this.topologyJson = undefined;
+        return true;
     }
 
     /** Applies the intervals at once: a sample due sooner under the new interval is brought forward. */
     setIntervals(workerMs: number, nodeMs: number): void {
         this.workerInterval = RefreshInterval.clamp(workerMs);
         this.nodeInterval = RefreshInterval.clamp(nodeMs);
-        for (const worker of this.workers.values()) {
-            worker.nextSampleMs = Math.max(this.time, Math.min(worker.nextSampleMs, worker.lastSampleMs + this.workerInterval));
-        }
-        for (const node of this.nodes) {
-            node.nextSampleMs = Math.max(this.time, Math.min(node.nextSampleMs, node.lastSampleMs + this.nodeInterval));
-        }
+        this.rearm();
     }
 
     /** Steps the run until its simulated time reaches `timeMs`; an ended run stands still. */
@@ -207,49 +341,66 @@ export class MockRun {
     fault(fault: MockRun.Fault): string {
         switch (fault) {
             case 'stall-node': return this.stallNode();
-            case 'restart-worker': return this.restartWorker();
-            case 'add-worker': return this.addWorker();
-            case 'remove-worker': return this.removeWorker();
+            case 'restart-rank': return this.restartRank();
+            case 'add-rank': return this.addRank();
+            case 'remove-rank': return this.removeRank();
             case 'end-run':
                 this.endedNow = true;
                 return 'Ended the run, as when gempba\'s process exits';
         }
     }
 
-    /** One broadcast line, without its newline: the latest frame of every worker and node, as gempba's center sends it. */
-    line(nowEpochMs: number): string {
-        this.topologyJson ??= JSON.stringify(MockTopology.toWire(this.topologyNow, workerId => this.workers.get(workerId)?.pid ?? 0));
-        // node by node, as gempba's center walks its topology
-        this.frameOrder ??= [...this.topologyNow.workers].sort((a, b) => a.nodeIndex - b.nodeIndex || a.workerId - b.workerId).map(place => place.workerId);
-        const workers = this.frameOrder.map(workerId => this.workers.get(workerId)?.frameJson).filter(frame => frame !== undefined);
-        const nodes = this.nodes.map(node => node.frameJson).filter(frame => frame !== undefined);
-        return `{"version":${MockRun.SCHEMA_VERSION},"ts":${nowEpochMs},"elapsed_seconds":${Math.floor(this.time / 1000)},`
-            + `"topology":${this.topologyJson},"workers":[${workers.join(',')}],"nodes":[${nodes.join(',')}]}`;
+    /**
+     * One broadcast line, without its newline: the latest frame of every rank and node, as gempba's aggregator sends it.
+     * While paused it is the header alone, unless it is a snapshot or the run's final line, which carry the frames.
+     */
+    line(nowEpochMs: number, kind: { readonly full?: boolean, readonly final?: boolean } = {}): string {
+        const schema = this.schema;
+        const clock = `"ts":${nowEpochMs},"elapsed_seconds":${Math.floor(this.time / 1000)}`;
+        const final = kind.final === true;
+        if (schema === 2 && this.pausedNow && !kind.full && !final) {
+            return `{"version":2,"run_id":"${this.runId}",${clock},"paused":true,"final":false}`;
+        }
+        if (this.topologySchema !== schema) {
+            this.topologyJson = undefined;
+            this.topologySchema = schema;
+        }
+        const pidOf = (id: number) => this.ranks.get(id)?.pid ?? 0;
+        this.topologyJson ??= JSON.stringify(schema === 1 ? MockTopology.toSchema1(this.topologyNow, pidOf) : this.topologySchema2(pidOf));
+        // node by node, as gempba's aggregator walks its topology
+        this.frameOrder ??= [...this.topologyNow.ranks].sort((a, b) => a.nodeIndex - b.nodeIndex || a.id - b.id).map(place => place.id);
+        const ranks = this.frameOrder.map(id => this.ranks.get(id)).map(rank => rank && this.rankJson(rank, schema)).filter(frame => frame !== undefined);
+        const nodes = this.nodes.map(node => this.nodeJson(node, schema)).filter(frame => frame !== undefined);
+        if (schema === 1) {
+            return `{"version":1,${clock},"topology":${this.topologyJson},"workers":[${ranks.join(',')}],"nodes":[${nodes.join(',')}]}`;
+        }
+        return `{"version":2,"run_id":"${this.runId}",${clock},"paused":${this.pausedNow},"final":${final},`
+            + `"topology":${this.topologyJson},"ranks":[${ranks.join(',')}],"nodes":[${nodes.join(',')}]}`;
     }
 
-    workerViews(): MockWorkerView[] {
-        return [...this.workers.values()].map(worker => ({
-            workerId: worker.place.workerId, phase: worker.phase, poolThreads: worker.place.poolThreads, subtree: worker.subtree, next: worker.next,
-            running: worker.running, tasksLocal: worker.tasksLocal, sent: worker.sent, recv: worker.recv, edges: worker.edges, pending: this.pendingOf(worker)
+    rankViews(): MockRankView[] {
+        return [...this.ranks.values()].map(rank => ({
+            id: rank.place.id, phase: rank.phase, poolThreads: rank.place.poolThreads, subtree: rank.subtree, next: rank.next,
+            running: rank.running, tasksLocal: rank.tasksLocal, sent: rank.sent, recv: rank.recv, edges: rank.edges, pending: this.pendingOf(rank)
         }));
     }
 
     protected step(): void {
         this.time += MockRun.STEP_MS;
         const scenarioTime = this.time - this.scenarioStartMs;
-        for (const worker of this.workers.values()) {
-            if (isCenter(worker)) {
-                this.runCenter(worker);
+        for (const rank of this.ranks.values()) {
+            if (this.isCoordinator(rank)) {
+                this.runCoordinator(rank);
             } else {
-                this.runWorker(worker, scenarioTime);
+                this.runRank(rank, scenarioTime);
             }
         }
-        if (this.scheduler === 'centralized') {
+        if (this.centralized) {
             this.scheduleCentralized();
         } else {
             this.scheduleSemiCentralized();
         }
-        const busy = [...this.workers.values()].some(worker => !isCenter(worker) && worker.phase !== 'available');
+        const busy = [...this.ranks.values()].some(rank => !this.isCoordinator(rank) && rank.phase !== 'available');
         if (!busy && this.queue.length === 0) {
             if (this.model.endsWhenDrained) {
                 this.endedNow = true;
@@ -262,91 +413,117 @@ export class MockRun {
     }
 
     /** A running worker's pool finishes tasks of its subtree; once none are left, the worker reports itself available. */
-    protected runWorker(worker: WorkerState, scenarioTime: number): void {
+    protected runRank(rank: RankState, scenarioTime: number): void {
         const dt = MockRun.STEP_MS;
-        const pool = worker.place.poolThreads;
-        if (worker.phase === 'running') {
+        const pool = rank.place.poolThreads;
+        const acct = rank.acct;
+        if (rank.phase === 'running') {
+            acct.schedRunning += dt * 1000;
             const busyTarget = pool * this.model.loadFactor(scenarioTime) * this.liveNow.loadPct / 100;
-            worker.running = Math.min(pool, this.random.round(busyTarget), worker.subtree);
-            const finished = Math.min(this.random.poisson(worker.running * dt / this.model.meanTaskMs), worker.subtree);
-            worker.tasksLocal += finished;
-            worker.subtree -= finished;
-            if (worker.subtree <= 0) {
-                this.finish(worker);
+            rank.running = Math.min(pool, this.random.round(busyTarget), rank.subtree);
+            const finished = Math.min(this.random.poisson(rank.running * dt / this.model.meanTaskMs), rank.subtree);
+            rank.tasksLocal += finished;
+            rank.subtree -= finished;
+            this.spawn(rank, finished);
+            for (let proposals = this.noise.poisson(finished * MockRun.PROPOSALS_PER_TASK); proposals > 0; proposals--) {
+                this.propose(rank);
+            }
+            if (rank.subtree <= 0) {
+                this.finish(rank);
             }
         } else {
-            worker.running = 0;
+            acct.schedWaiting += dt * 1000;
+            rank.running = 0;
         }
-        worker.idleMicros += dt * 1000 * (pool - worker.running) / pool;
-        const cap = Math.max(worker.place.allowedCpuIds.length, 1) * 100;
-        const cpuTarget = Math.min(cap, MockRun.POLLING_PCT + worker.running * 100 * worker.efficiency);
-        worker.cpuPct = clamp(worker.cpuPct + 0.5 * (cpuTarget - worker.cpuPct) + this.random.normal(), 0, cap);
-        const rssTarget = worker.baseRss + worker.running * this.model.taskRssBytes;
-        worker.rssBytes = Math.max(worker.baseRss * 0.9, worker.rssBytes + 0.2 * (rssTarget - worker.rssBytes) + this.random.normal() * 256 * KiB);
+        const idle = dt * 1000 * (pool - rank.running) / pool;
+        rank.idleMicros += idle;
+        // starved while no task ran in the pool, imbalanced while some ran and other threads waited
+        if (rank.running === 0) {
+            acct.idleStarved += idle;
+        } else {
+            acct.idleImbalanced += idle;
+        }
+        const cap = Math.max(rank.place.allowedCpuIds.length, 1) * 100;
+        const cpuTarget = Math.min(cap, MockRun.POLLING_PCT + rank.running * 100 * rank.efficiency);
+        rank.cpuPct = clamp(rank.cpuPct + 0.5 * (cpuTarget - rank.cpuPct) + this.random.normal(), 0, cap);
+        const rssTarget = rank.baseRss + rank.running * this.model.taskRssBytes;
+        rank.rssBytes = Math.max(rank.baseRss * 0.9, rank.rssBytes + 0.2 * (rssTarget - rank.rssBytes) + this.random.normal() * 256 * KiB);
     }
 
-    /** The center runs no tasks: its pool stays idle while it polls MPI, and it holds the queued tasks in memory. */
-    protected runCenter(center: WorkerState): void {
-        center.running = 0;
-        center.idleMicros += MockRun.STEP_MS * 1000;
-        center.cpuPct = clamp(center.cpuPct + 0.5 * (98 - center.cpuPct) + this.random.normal(), 0, 100);
-        const rssTarget = this.centerMemory(center);
-        center.rssBytes = Math.max(center.baseRss * 0.9, center.rssBytes + 0.2 * (rssTarget - center.rssBytes) + this.random.normal() * 64 * KiB);
+    /** The coordinator runs no tasks: its pool stays idle while it polls MPI, and it holds the queued tasks in memory. */
+    protected runCoordinator(coordinator: RankState): void {
+        const dt = MockRun.STEP_MS;
+        coordinator.running = 0;
+        coordinator.idleMicros += dt * 1000;
+        coordinator.acct.idleStarved += dt * 1000;
+        if (this.centralized) {
+            if (this.coordinatorFull) {
+                coordinator.acct.fullMicros += dt * 1000;
+            }
+            if (this.queue.length === 0) {
+                coordinator.acct.availableQueueEmpty += dt * 1000 * this.computing().filter(rank => rank.phase === 'available').length;
+            }
+        }
+        coordinator.cpuPct = clamp(coordinator.cpuPct + 0.5 * (98 - coordinator.cpuPct) + this.random.normal(), 0, 100);
+        const rssTarget = this.coordinatorMemory(coordinator);
+        coordinator.rssBytes = Math.max(coordinator.baseRss * 0.9, coordinator.rssBytes + 0.2 * (rssTarget - coordinator.rssBytes) + this.random.normal() * 64 * KiB);
     }
 
     /**
-     * The center reserves an available rank for each running worker that has none (process_running, process_available),
+     * The coordinator reserves an available rank for each running worker that has none (process_running, process_available),
      * taking the running workers in turn; then each worker with a rank reserved sends it one task when it has one to spare.
      */
     protected scheduleSemiCentralized(): void {
-        const available = this.computing().filter(worker => this.idleAtCenter(worker));
-        const waiting = this.computing().filter(worker => worker.phase === 'running' && worker.next === undefined);
+        const available = this.computing().filter(rank => this.idleAtCoordinator(rank));
+        const waiting = this.computing().filter(rank => rank.phase === 'running' && rank.next === undefined);
         if (available.length > 0 && waiting.length > 0) {
             const start = this.pairingCursor++ % waiting.length;
             const turn = [...waiting.slice(start), ...waiting.slice(0, start)];
             for (let i = 0; i < Math.min(turn.length, available.length); i++) {
-                turn[i].next = available[i].place.workerId;
+                turn[i].next = available[i].place.id;
                 available[i].phase = 'assigned';
+                available[i].assignedAtMs = this.time;
             }
         }
-        for (const worker of this.computing()) {
-            if (worker.phase !== 'running' || worker.next === undefined || worker.subtree < 2 || !this.random.chance(this.model.sendChance(worker.place.workerId))) {
+        for (const rank of this.computing()) {
+            if (rank.phase !== 'running' || rank.next === undefined || rank.subtree < 2 || !this.random.chance(this.model.sendChance(rank.place.id))) {
                 continue;
             }
-            const to = this.workers.get(worker.next);
-            worker.next = undefined;
+            const to = this.ranks.get(rank.next);
+            rank.next = undefined;
             if (to?.phase === 'assigned') {
-                this.give(worker, to, this.split(worker));
+                this.give(rank, to, this.split(rank));
             }
         }
     }
 
     /**
-     * Running workers send spare tasks to the center while it isn't full, one each per step. Past 1000 tasks per process,
+     * Running workers send spare tasks to the coordinator while it isn't full, one each per step. Past 1000 tasks per process,
      * or 10 GiB of memory, it says it is full, until the queue is below 80 % of that limit and its memory at most 9 GiB.
      * It hands its biggest task to each available worker.
      */
     protected scheduleCentralized(): void {
-        const center = this.workers.get(MockTopology.CENTER_ID)!;
-        const limit = MockRun.CENTER_TASKS_PER_PROCESS * this.workers.size;
-        for (const worker of this.computing()) {
-            if (this.centerFull) {
+        const coordinator = this.ranks.get(this.roles.coordinatorRank)!;
+        const limit = MockRun.COORDINATOR_TASKS_PER_PROCESS * this.ranks.size;
+        for (const rank of this.computing()) {
+            if (this.coordinatorFull) {
                 break;
             }
-            if (worker.phase === 'running' && worker.subtree >= 2 && this.random.chance(this.model.sendChance(worker.place.workerId))) {
-                this.give(worker, center, this.split(worker));
-                this.centerFull = this.queue.length > limit || this.centerMemory(center) > MockRun.CENTER_MAX_MEMORY_BYTES;
+            if (rank.phase === 'running' && rank.subtree >= 2 && this.random.chance(this.model.sendChance(rank.place.id))) {
+                this.give(rank, coordinator, this.split(rank));
+                this.coordinatorFull = this.queue.length > limit || this.coordinatorMemory(coordinator) > MockRun.COORDINATOR_MAX_MEMORY_BYTES;
             }
         }
-        if (this.centerFull && this.queue.length < MockRun.CENTER_FREE_SHARE * limit && this.centerMemory(center) <= 0.9 * MockRun.CENTER_MAX_MEMORY_BYTES) {
-            this.centerFull = false;
+        const freed = this.queue.length < MockRun.COORDINATOR_FREE_SHARE * limit && this.coordinatorMemory(coordinator) <= 0.9 * MockRun.COORDINATOR_MAX_MEMORY_BYTES;
+        if (this.coordinatorFull && freed) {
+            this.coordinatorFull = false;
         }
-        for (const worker of this.computing()) {
+        for (const rank of this.computing()) {
             if (this.queue.length === 0) {
                 break;
             }
-            if (this.idleAtCenter(worker)) {
-                this.give(center, worker, this.queue.pop()!);
+            if (this.idleAtCoordinator(rank)) {
+                this.give(coordinator, rank, this.queue.pop()!);
             }
         }
     }
@@ -355,100 +532,246 @@ export class MockRun {
      * Cuts a subtree off the worker's own to send away, always leaving it one task: a share of a finite subtree, as a
      * branch near its top holds; from an endless root, a branch whose size is drawn around the scenario's mean.
      */
-    protected split(worker: WorkerState): QueuedTask {
+    protected split(rank: RankState): QueuedTask {
         let tasks: number;
-        if (worker.subtree === Infinity) {
-            const tasksPerSecond = worker.place.poolThreads * 1000 / this.model.meanTaskMs;
-            const mean = Math.max(this.model.branchSeconds(worker.place.workerId) * tasksPerSecond, 1);
+        if (rank.subtree === Infinity) {
+            const tasksPerSecond = rank.place.poolThreads * 1000 / this.model.meanTaskMs;
+            const mean = Math.max(this.model.branchSeconds(rank.place.id) * tasksPerSecond, 1);
             tasks = Math.max(1, Math.round(this.random.lognormal(mean, MockRun.BRANCH_SPREAD)));
         } else {
             const [low, high] = MockRun.SPLIT_SHARE;
-            tasks = Math.max(1, Math.min(worker.subtree - 1, Math.round(worker.subtree * this.random.between(low, high))));
+            tasks = Math.max(1, Math.min(rank.subtree - 1, Math.round(rank.subtree * this.random.between(low, high))));
         }
-        worker.subtree -= tasks;
+        rank.subtree -= tasks;
         return { tasks, bytes: this.random.int(8, 64) * KiB };
     }
 
-    /** Sends one task: the sender's edge to the receiver counts it with its bytes; the center queues it, a worker starts on it. */
-    protected give(from: WorkerState, to: WorkerState, task: QueuedTask): void {
+    /** Sends one task: the sender's edge to the receiver counts it with its bytes; the coordinator queues it, a worker starts on it. */
+    protected give(from: RankState, to: RankState, task: QueuedTask): void {
         from.sent += 1;
         to.recv += 1;
-        const edge = from.edges.get(to.place.workerId) ?? { bytes: 0, count: 0 };
+        const [latency, bytesPerMicro] = from.place.nodeIndex === to.place.nodeIndex ? MockRun.WITHIN_NODE : MockRun.ACROSS_NODES;
+        from.acct.bytesSent += task.bytes;
+        from.acct.sendMicros += latency + task.bytes / bytesPerMicro;
+        to.acct.bytesRecv += task.bytes;
+        to.acct.recvMicros += task.bytes / bytesPerMicro;
+        const edge = from.edges.get(to.place.id) ?? { bytes: 0, count: 0 };
         edge.bytes += task.bytes;
         edge.count += 1;
-        from.edges.set(to.place.workerId, edge);
+        from.edges.set(to.place.id, edge);
         from.edgesJson = undefined;
-        if (from.place.nodeIndex !== to.place.nodeIndex) {
-            this.nodes[from.place.nodeIndex].netOut += task.bytes;
-            this.nodes[to.place.nodeIndex].netIn += task.bytes;
-        }
-        if (isCenter(to)) {
+        if (this.isCoordinator(to)) {
             this.queue.push(task);
         } else {
             to.phase = 'running';
             to.subtree = task.tasks;
+            if (to.recv === 1) {
+                to.acct.firstTaskMs = this.time;
+            }
+            this.assigned(to, this.isCoordinator(from) ? latency + task.bytes / bytesPerMicro : undefined);
         }
     }
 
-    /** The center hands the search tree's root to the first worker, rank 1 when it is there. */
+    /**
+     * The rank reports itself running, which ends the coordinator's assignment: a task it handed out, or a push target it
+     * named and a worker then sent to; the latency runs from the assignment to the report.
+     */
+    protected assigned(rank: RankState, transferMicros: number | undefined): void {
+        const coordinator = this.coordinatorRank();
+        if (!coordinator) {
+            return;
+        }
+        coordinator.acct.stateMsgs += 1;
+        const since = transferMicros ?? (rank.assignedAtMs === undefined ? undefined : (this.time - rank.assignedAtMs) * 1000);
+        rank.assignedAtMs = undefined;
+        if (since === undefined) {
+            return;
+        }
+        const latency = since + this.noise.int(200, 1500);
+        coordinator.acct.assignLatencyTotal += latency;
+        coordinator.acct.assignCount += 1;
+        coordinator.acct.assignLatencyMax = Math.max(coordinator.acct.assignLatencyMax, latency);
+    }
+
+    /** A busy pool refuses the node expansions it can't take, and so does the scheduler when the rank has no channel to send them on. */
+    protected spawn(rank: RankState, finished: number): void {
+        if (rank.running < rank.place.poolThreads) {
+            return;
+        }
+        const refused = this.noise.poisson(finished * MockRun.SPAWN_TRIES_PER_TASK);
+        rank.acct.spawnRejectedPoolFull += refused;
+        const channel = this.centralized ? !this.coordinatorFull : rank.next !== undefined;
+        if (!channel) {
+            rank.acct.spawnRemoteRejected += refused;
+        }
+    }
+
+    /** A worker proposes a score it reached; the coordinator broadcasts it when it improves, less often as the run goes on. */
+    protected propose(rank: RankState): void {
+        const coordinator = this.coordinatorRank();
+        if (!coordinator) {
+            return;
+        }
+        rank.acct.scoreProposalsSent += 1;
+        coordinator.acct.scoreProposals += 1;
+        if (this.noise.chance(1 / (1 + coordinator.acct.scoreBroadcasts))) {
+            coordinator.acct.scoreBroadcasts += 1;
+            coordinator.acct.lastImprovementMs = this.time;
+        }
+    }
+
+    protected coordinatorRank(): RankState | undefined {
+        return this.roles.declared ? this.ranks.get(this.roles.coordinatorRank) : undefined;
+    }
+
+    /** The coordinator hands the search tree's root to the first worker, the lowest rank beside it. */
     protected seed(): void {
-        const center = this.workers.get(MockTopology.CENTER_ID);
-        const first = this.computing().find(worker => worker.phase === 'available');
-        if (center && first) {
-            const tasksPerSecond = this.computing().reduce((sum, worker) => sum + worker.place.poolThreads * 1000 / this.model.meanTaskMs, 0);
-            this.give(center, first, { tasks: this.model.seedTasks(tasksPerSecond), bytes: this.random.int(8, 64) * KiB });
+        const coordinator = this.coordinatorRank();
+        const first = this.computing().find(rank => rank.phase === 'available');
+        if (!first) {
+            return;
+        }
+        const tasksPerSecond = this.computing().reduce((sum, rank) => sum + rank.place.poolThreads * 1000 / this.model.meanTaskMs, 0);
+        const root = { tasks: this.model.seedTasks(tasksPerSecond), bytes: this.random.int(8, 64) * KiB };
+        if (coordinator) {
+            this.give(coordinator, first, root);
+        } else {
+            // without a coordinator, the lowest rank starts on the root itself
+            first.phase = 'running';
+            first.subtree = root.tasks;
+            first.acct.firstTaskMs = this.time;
         }
     }
 
     /** The worker explored its whole subtree: it reports itself available, and a rank reserved for it is freed. */
-    protected finish(worker: WorkerState): void {
-        worker.phase = 'available';
-        worker.availableSinceMs = this.time;
-        worker.subtree = 0;
-        this.release(worker);
+    protected finish(rank: RankState): void {
+        rank.acct.lastTaskMs = this.time;
+        const coordinator = this.coordinatorRank();
+        if (coordinator) {
+            coordinator.acct.stateMsgs += 1;
+        }
+        rank.phase = 'available';
+        rank.availableSinceMs = this.time;
+        rank.subtree = 0;
+        this.release(rank);
     }
 
     /** Frees the rank reserved for this worker, and the reservation that held this one, so neither waits forever. */
-    protected release(worker: WorkerState): void {
-        if (worker.next !== undefined) {
-            const reserved = this.workers.get(worker.next);
+    protected release(rank: RankState): void {
+        if (rank.next !== undefined) {
+            const reserved = this.ranks.get(rank.next);
             if (reserved?.phase === 'assigned') {
                 reserved.phase = 'available';
                 reserved.availableSinceMs = this.time;
+                reserved.assignedAtMs = undefined;
             }
-            worker.next = undefined;
+            rank.next = undefined;
         }
-        if (worker.phase === 'assigned') {
-            for (const other of this.workers.values()) {
-                if (other.next === worker.place.workerId) {
+        if (rank.phase === 'assigned') {
+            for (const other of this.ranks.values()) {
+                if (other.next === rank.place.id) {
                     other.next = undefined;
                 }
             }
         }
     }
 
-    /** What the center holds in memory: its own, and every queued task's bytes. */
-    protected centerMemory(center: WorkerState): number {
-        return center.baseRss + this.queue.bytes;
+    /** What the coordinator holds in memory: its own, and every queued task's bytes. */
+    protected coordinatorMemory(coordinator: RankState): number {
+        return coordinator.baseRss + this.queue.bytes;
     }
 
-    /** Available, and the center has heard so: a worker that finished this step is not handed work in the same step. */
-    protected idleAtCenter(worker: WorkerState): boolean {
-        return worker.phase === 'available' && worker.availableSinceMs < this.time;
+    /** Available, and the coordinator has heard so: a worker that finished this step is not handed work in the same step. */
+    protected idleAtCoordinator(rank: RankState): boolean {
+        return rank.phase === 'available' && rank.availableSinceMs < this.time;
     }
 
-    protected computing(): WorkerState[] {
-        return [...this.workers.values()].filter(worker => !isCenter(worker));
+    protected isCoordinator(rank: RankState): boolean {
+        return this.roles.declared && rank.place.id === this.roles.coordinatorRank;
     }
 
-    protected pendingOf(worker: WorkerState): number {
-        return isCenter(worker) && this.scheduler === 'centralized' ? this.queue.length : 0;
+    /** The centralized scheduler queues at its coordinator; a run that declares no roles has none, so it pairs ranks instead. */
+    protected get centralized(): boolean {
+        return this.scheduler === 'centralized' && this.roles.declared;
+    }
+
+    /** A sample due sooner under the intervals now in force is brought forward. */
+    protected rearm(): void {
+        for (const rank of this.ranks.values()) {
+            rank.nextSampleMs = Math.max(this.time, Math.min(rank.nextSampleMs, rank.lastSampleMs + this.workerInterval));
+        }
+        for (const node of this.nodes) {
+            node.nextSampleMs = Math.max(this.time, Math.min(node.nextSampleMs, node.lastSampleMs + this.nodeEvery));
+        }
+    }
+
+    /** Node frames keep their own interval in schema 1, and follow the one interval in schema 2, as gempba v4.3.0 drives them. */
+    protected get nodeEvery(): number {
+        return this.schema === 1 ? this.nodeInterval : this.workerInterval;
+    }
+
+    protected roleOf(id: number): SchedulerRole {
+        return this.roles.declared && id === this.roles.coordinatorRank ? 'coordinator' : 'worker';
+    }
+
+    protected topologySchema2(pidOf: (id: number) => number): Schema2Topology {
+        return {
+            ...MockTopology.toSchema2(this.topologyNow, pidOf, id => this.roleOf(id)),
+            run: {
+                scheduler: !this.roles.declared ? 'decentralized' : this.centralized ? 'centralized' : 'semi_centralized',
+                load_balancer: 'quasi_horizontal',
+                runtime_mode: 'multiprocessing',
+                world_size: this.topologyNow.ranks.length,
+                threads_per_process: Math.max(...this.topologyNow.ranks.map(place => place.poolThreads)),
+                gempba_version: MockRun.GEMPBA_VERSION,
+                annotations: { mock: `seed ${this.runSeed}` },
+                markers: [...this.markers]
+            }
+        };
+    }
+
+    /** The rank's latest sample in the schema asked for, written once per sample and schema. */
+    protected rankJson(rank: RankState, schema: number): string | undefined {
+        const sample = rank.sample;
+        if (!sample) {
+            return undefined;
+        }
+        if (rank.frameJson === undefined || rank.frameSchema !== schema) {
+            const frame = schema === 1 ? schema1Frame(sample) : schema2Frame(sample);
+            // the edges last, as gempba writes them
+            rank.frameJson = `${JSON.stringify(frame).slice(0, -1)},"edges_out":${sample.edgesJson}}`;
+            rank.frameSchema = schema;
+        }
+        return rank.frameJson;
+    }
+
+    protected nodeJson(node: NodeState, schema: number): string | undefined {
+        const sample = node.sample;
+        if (!sample) {
+            return undefined;
+        }
+        if (node.frameJson === undefined || node.frameSchema !== schema) {
+            node.frameJson = JSON.stringify(schema === 1 ? schema1NodeFrame(sample) : schema2NodeFrame(sample));
+            node.frameSchema = schema;
+        }
+        return node.frameJson;
+    }
+
+    protected computing(): RankState[] {
+        return [...this.ranks.values()].filter(rank => !this.isCoordinator(rank));
+    }
+
+    protected pendingOf(rank: RankState): number {
+        return this.isCoordinator(rank) && this.centralized ? this.queue.length : 0;
     }
 
     protected sample(): void {
-        for (const worker of this.workers.values()) {
-            if (worker.nextSampleMs <= this.time && this.nodes[worker.place.nodeIndex].stalledUntilMs <= this.time) {
-                this.sampleWorker(worker);
+        if (this.pausedNow) {
+            return;
+        }
+        for (const rank of this.ranks.values()) {
+            if (rank.nextSampleMs <= this.time && this.nodes[rank.place.nodeIndex].stalledUntilMs <= this.time) {
+                this.sampleRank(rank);
             }
         }
         for (let index = 0; index < this.nodes.length; index++) {
@@ -459,29 +782,22 @@ export class MockRun {
         }
     }
 
-    protected sampleWorker(worker: WorkerState): void {
-        const first = worker.seqNo === 0;
-        worker.seqNo += 1;
-        worker.lastSampleMs = this.time;
-        // a worker's samples drift apart from the others', as separate processes' do
-        worker.nextSampleMs = first ? this.time + this.random.int(1, this.workerInterval) : nextAfter(worker.nextSampleMs, this.workerInterval, this.time);
-        worker.edgesJson ??= JSON.stringify([...worker.edges.entries()].sort(([a], [b]) => a - b).map(([to, edge]) => ({ to, bytes: edge.bytes, count: edge.count })));
-        const frame: Omit<WorkerFrame, 'edges_out'> = {
-            worker_id: worker.place.workerId,
-            seq_no: worker.seqNo,
-            worker_local_ms: this.nodes[worker.place.nodeIndex].clockBaseMs + this.time,
-            tasks_local_total: worker.tasksLocal,
-            tasks_sent_total: worker.sent,
-            tasks_recv_total: worker.recv,
-            tasks_running: worker.running,
-            scheduler_pending_count: this.pendingOf(worker),
-            idle_microseconds_per_worker: Math.round(worker.idleMicros),
-            process_cpu_pct: Math.round(worker.cpuPct * 100) / 100,
-            process_rss_bytes: Math.round(worker.rssBytes),
-            process_threads: worker.place.poolThreads + 1
+    protected sampleRank(rank: RankState): void {
+        const first = rank.seqNo === 0;
+        rank.seqNo += 1;
+        rank.lastSampleMs = this.time;
+        // a rank's samples drift apart from the others', as separate processes' do
+        rank.nextSampleMs = first ? this.time + this.random.int(1, this.workerInterval) : nextAfter(rank.nextSampleMs, this.workerInterval, this.time);
+        rank.edgesJson ??= JSON.stringify([...rank.edges.entries()].sort(([a], [b]) => a - b).map(([to, edge]) => ({ to, bytes: edge.bytes, count: edge.count })));
+        // rank 0 is telemetry's aggregator in every run: it gathers every rank's frame and serves the stream
+        rank.acct.telemetryMicros += rank.place.id === 0 ? 1500 + 400 * this.ranks.size : this.noise.int(25, 60);
+        rank.sample = {
+            id: rank.place.id, seqNo: rank.seqNo, localMs: this.nodes[rank.place.nodeIndex].clockBaseMs + this.time, tasksStarted: rank.tasksLocal,
+            sent: rank.sent, recv: rank.recv, running: rank.running, pending: this.pendingOf(rank), idleMicros: Math.round(rank.idleMicros),
+            cpuPct: Math.round(rank.cpuPct * 100) / 100, rssBytes: Math.round(rank.rssBytes), threads: rank.place.poolThreads + 1, edgesJson: rank.edgesJson,
+            acct: Object.fromEntries(Object.entries(rank.acct).map(([key, value]) => [key, Math.round(value)])) as unknown as Accounting
         };
-        // the edges last, as gempba writes them
-        worker.frameJson = `${JSON.stringify(frame).slice(0, -1)},"edges_out":${worker.edgesJson}}`;
+        rank.frameJson = undefined;
     }
 
     protected sampleNode(index: number): void {
@@ -489,54 +805,32 @@ export class MockRun {
         const place = this.topologyNow.nodes[index];
         const sentinel = MockTopology.sentinelOf(this.topologyNow, index);
         if (sentinel === undefined) {
-            node.frameJson = undefined;
+            node.sample = node.frameJson = undefined;
             return;
         }
-        const seconds = (this.time - node.lastSampleMs) / 1000;
         node.lastSampleMs = this.time;
-        node.nextSampleMs = node.frameJson === undefined ? this.time + this.random.int(1, this.nodeInterval) : nextAfter(node.nextSampleMs, this.nodeInterval, this.time);
-        const local = this.topologyNow.workers.filter(worker => worker.nodeIndex === index).map(worker => this.workers.get(worker.workerId)!);
-        const rss = local.reduce((sum, worker) => sum + worker.rssBytes, 0);
+        node.nextSampleMs = node.sample === undefined ? this.time + this.random.int(1, this.nodeEvery) : nextAfter(node.nextSampleMs, this.nodeEvery, this.time);
+        const local = this.topologyNow.ranks.filter(rank => rank.nodeIndex === index).map(rank => this.ranks.get(rank.id)!);
+        const rss = local.reduce((sum, rank) => sum + rank.rssBytes, 0);
         const total = place.memTotalBytes;
         node.pageCache = Math.max(0, node.pageCache + 0.05 * (total * 0.08 - node.pageCache) + this.random.normal() * 16 * MiB);
         const used = Math.min(total * 0.98, 2 * GiB + total * 0.01 + rss + node.pageCache);
         const cgroupLimit = this.shape.cgroupGiB * GiB;
+        // hwloc gives each socket's memory; gempba leaves its CPU and use at 0 for now (hwloc_probe.cpp)
         const full = this.liveNow.fidelity === 'full';
-        if (full) {
-            const chatter = local.length * this.random.int(1, 4) * KiB;
-            node.netIn += chatter;
-            node.netOut += chatter;
-            node.diskRead += Math.round(this.random.int(0, 64) * KiB * seconds);
-            node.diskWrite += Math.round(this.random.int(0, 256) * KiB * seconds);
-        }
-        const frame: NodeFrame = {
-            sentinel_worker_id: sentinel,
-            sentinel_local_ms: node.clockBaseMs + this.time,
-            hostname: place.host,
-            socket_count: place.sockets.length,
-            logical_cores: place.logicalCores,
-            mem_total_bytes: total,
-            mem_avail_bytes: Math.round(total - used),
-            cgroup_mem_used_bytes: cgroupLimit > 0 ? Math.round(Math.min(cgroupLimit, rss + local.length * 64 * MiB)) : 0,
-            cgroup_mem_limit_bytes: cgroupLimit,
-            // hwloc gives each socket's memory; gempba leaves its CPU and use at 0 for now (hwloc_probe.cpp)
+        node.sample = {
+            sentinel, localMs: node.clockBaseMs + this.time, host: place.host, socketCount: place.sockets.length, logicalCores: place.logicalCores,
+            memTotalBytes: total, memAvailBytes: Math.round(total - used),
+            cgroupUsedBytes: cgroupLimit > 0 ? Math.round(Math.min(cgroupLimit, rss + local.length * 64 * MiB)) : 0, cgroupLimitBytes: cgroupLimit,
             sockets: place.sockets.map(socket => {
-                const onSocket = local.filter(worker => worker.place.socketId === socket.socketId);
-                const busy = onSocket.reduce((sum, worker) => sum + worker.cpuPct, 0);
+                const busy = local.filter(rank => rank.place.socketId === socket.socketId).reduce((sum, rank) => sum + rank.cpuPct, 0);
                 return {
-                    socket_id: socket.socketId,
-                    cpu_pct: full ? Math.round(Math.min(100, busy / socket.logicalCores) * 100) / 100 : 0,
-                    mem_total_bytes: Math.round(total / place.sockets.length),
-                    mem_used_bytes: full ? Math.round(used / place.sockets.length) : 0
+                    socketId: socket.socketId, cpuPct: full ? Math.round(Math.min(100, busy / socket.logicalCores) * 100) / 100 : 0,
+                    memTotalBytes: Math.round(total / place.sockets.length), memUsedBytes: full ? Math.round(used / place.sockets.length) : 0
                 };
-            }),
-            // gempba sends these as zeros for now (node_probe.cpp)
-            net_aggregate: full
-                ? { bytes_in: node.netIn, bytes_out: node.netOut, packets_in: Math.round(node.netIn / 1400), packets_out: Math.round(node.netOut / 1400) }
-                : { bytes_in: 0, bytes_out: 0, packets_in: 0, packets_out: 0 },
-            disk_aggregate: full ? { read_bytes: node.diskRead, write_bytes: node.diskWrite } : { read_bytes: 0, write_bytes: 0 }
+            })
         };
-        node.frameJson = JSON.stringify(frame);
+        node.frameJson = undefined;
     }
 
     protected stallNode(): string {
@@ -545,63 +839,63 @@ export class MockRun {
         return `Stalled ${this.topologyNow.nodes[index].host}: its frames stop for ${MockFault.STALL_MS / 1000} s`;
     }
 
-    /** A restarted worker is a new process: a new PID, its sequence number and counters from zero, and its subtree lost. */
-    protected restartWorker(): string {
-        const worker = this.random.pick(this.computing());
-        this.release(worker);
-        const fresh = this.newWorker(worker.place);
-        this.workers.set(worker.place.workerId, fresh);
-        this.sampleWorker(fresh);
+    /** A restarted rank is a new process: a new PID, its sequence number and counters from zero, and its subtree lost. */
+    protected restartRank(): string {
+        const rank = this.random.pick(this.computing());
+        this.release(rank);
+        const fresh = this.newRank(rank.place);
+        this.ranks.set(rank.place.id, fresh);
+        this.sampleRank(fresh);
         this.topologyJson = undefined;
-        return `Restarted worker ${worker.place.workerId} as PID ${fresh.pid}`;
+        return `Restarted rank ${rank.place.id} as PID ${fresh.pid}`;
     }
 
-    protected addWorker(): string {
-        const counts = this.topologyNow.nodes.map(node => this.topologyNow.workers.filter(worker => worker.nodeIndex === node.index).length);
+    protected addRank(): string {
+        const counts = this.topologyNow.nodes.map(node => this.topologyNow.ranks.filter(rank => rank.nodeIndex === node.index).length);
         const nodeIndex = counts.indexOf(Math.min(...counts));
-        this.topologyNow = MockTopology.withWorker(this.topologyNow, this.shape, nodeIndex);
-        for (const place of this.topologyNow.workers) {
-            const existing = this.workers.get(place.workerId);
+        this.topologyNow = MockTopology.withRank(this.topologyNow, this.shape, nodeIndex);
+        for (const place of this.topologyNow.ranks) {
+            const existing = this.ranks.get(place.id);
             if (existing) {
                 existing.place = place;
             } else {
-                const added = this.newWorker(place);
-                this.workers.set(place.workerId, added);
-                this.sampleWorker(added);
+                const added = this.newRank(place);
+                this.ranks.set(place.id, added);
+                this.sampleRank(added);
             }
         }
         this.topologyJson = undefined;
         this.frameOrder = undefined;
-        const added = Math.max(...this.topologyNow.workers.map(worker => worker.workerId));
-        return `Added worker ${added} on ${this.topologyNow.nodes[nodeIndex].host}`;
+        const added = Math.max(...this.topologyNow.ranks.map(rank => rank.id));
+        return `Added rank ${added} on ${this.topologyNow.nodes[nodeIndex].host}`;
     }
 
-    /** Removes a worker from a node that keeps at least one; never the center, nor the last worker beside it. */
-    protected removeWorker(): string {
-        const computing = this.topologyNow.workers.filter(place => place.workerId !== MockTopology.CENTER_ID);
-        const candidates = computing.length < 2 ? [] : computing.filter(place => this.topologyNow.workers.filter(other => other.nodeIndex === place.nodeIndex).length > 1);
+    /** Removes a rank from a node that keeps at least one; never the coordinator, nor the last worker beside it. */
+    protected removeRank(): string {
+        const computing = this.topologyNow.ranks.filter(place => !this.roles.declared || place.id !== this.roles.coordinatorRank);
+        const candidates = computing.length < 2 ? [] : computing.filter(place => this.topologyNow.ranks.filter(other => other.nodeIndex === place.nodeIndex).length > 1);
         if (candidates.length === 0) {
-            return 'No worker can be removed: every node would be left empty, or only the center would remain';
+            return 'No rank can be removed: every node would be left empty, or only the coordinator would remain';
         }
         const gone = this.random.pick(candidates);
-        this.release(this.workers.get(gone.workerId)!);
-        this.workers.delete(gone.workerId);
-        this.topologyNow = MockTopology.withoutWorker(this.topologyNow, this.shape, gone.workerId);
-        for (const place of this.topologyNow.workers) {
-            this.workers.get(place.workerId)!.place = place;
+        this.release(this.ranks.get(gone.id)!);
+        this.ranks.delete(gone.id);
+        this.topologyNow = MockTopology.withoutRank(this.topologyNow, this.shape, gone.id);
+        for (const place of this.topologyNow.ranks) {
+            this.ranks.get(place.id)!.place = place;
         }
         this.topologyJson = undefined;
         this.frameOrder = undefined;
-        return `Removed worker ${gone.workerId} from ${this.topologyNow.nodes[gone.nodeIndex].host}`;
+        return `Removed rank ${gone.id} from ${this.topologyNow.nodes[gone.nodeIndex].host}`;
     }
 
-    protected newWorker(place: MockWorkerPlace): WorkerState {
-        const baseRss = place.workerId === MockTopology.CENTER_ID ? 48 * MiB : this.random.int(64, 160) * MiB;
+    protected newRank(place: MockRankPlace): RankState {
+        const baseRss = this.roles.declared && place.id === this.roles.coordinatorRank ? 48 * MiB : this.random.int(64, 160) * MiB;
         return {
             place, pid: this.nextPid++, seqNo: 0, lastSampleMs: this.time, nextSampleMs: this.time, phase: 'available', availableSinceMs: this.time,
             subtree: 0, running: 0,
             tasksLocal: 0, sent: 0, recv: 0, idleMicros: 0, cpuPct: 0, rssBytes: baseRss, baseRss, efficiency: this.random.between(0.92, 0.99),
-            edges: new Map()
+            edges: new Map(), acct: noAccounting()
         };
     }
 }
@@ -610,12 +904,68 @@ export namespace MockRun {
     /** The faults the run carries out itself; dropping clients and sending a malformed line belong to the transport. */
     export type Fault = Exclude<MockFault, 'drop-clients' | 'malformed-line'>;
 
-    /** A worker's state at the center: exploring a subtree, idle, or reserved to receive one (semi-centralized). */
+    /** A rank's state at the coordinator: exploring a subtree, idle, or reserved to receive one (semi-centralized). */
     export type Phase = 'running' | 'available' | 'assigned';
 }
 
-function isCenter(worker: WorkerState): boolean {
-    return worker.place.workerId === MockTopology.CENTER_ID;
+function schema1Frame(sample: RankSample): Schema1Frame {
+    return {
+        worker_id: sample.id, seq_no: sample.seqNo, worker_local_ms: sample.localMs, tasks_started_total: sample.tasksStarted,
+        tasks_sent_total: sample.sent, tasks_recv_total: sample.recv, tasks_running: sample.running, scheduler_pending_count: sample.pending,
+        idle_microseconds_per_worker: sample.idleMicros, process_cpu_pct: sample.cpuPct, process_rss_bytes: sample.rssBytes, process_threads: sample.threads
+    };
+}
+
+/** Every key gempba v4.3.0 writes, in its order. */
+function schema2Frame(sample: RankSample): Schema2Frame {
+    const acct = sample.acct;
+    return {
+        rank: sample.id, seq_no: sample.seqNo, rank_local_ms: sample.localMs, tasks_started_total: sample.tasksStarted,
+        tasks_sent_total: sample.sent, tasks_recv_total: sample.recv, bytes_sent_total: acct.bytesSent, bytes_recv_total: acct.bytesRecv,
+        send_microseconds_total: acct.sendMicros, recv_microseconds_total: acct.recvMicros, spawn_rejected_pool_full: acct.spawnRejectedPoolFull,
+        spawn_remote_rejected: acct.spawnRemoteRejected, tasks_running: sample.running, scheduler_pending_count: sample.pending,
+        idle_microseconds_per_thread: sample.idleMicros, idle_microseconds_starved: acct.idleStarved, idle_microseconds_imbalanced: acct.idleImbalanced,
+        sched_running_microseconds: acct.schedRunning, sched_waiting_microseconds: acct.schedWaiting, first_task_ms: acct.firstTaskMs,
+        last_task_ms: acct.lastTaskMs, assign_latency_microseconds_total: acct.assignLatencyTotal, assign_count: acct.assignCount,
+        assign_latency_microseconds_max: acct.assignLatencyMax, available_microseconds_queue_empty: acct.availableQueueEmpty,
+        coordinator_state_msgs_total: acct.stateMsgs, coordinator_score_proposals_total: acct.scoreProposals,
+        coordinator_score_broadcasts_total: acct.scoreBroadcasts, score_proposals_sent: acct.scoreProposalsSent,
+        last_score_improvement_ms: acct.lastImprovementMs, coordinator_full_microseconds: acct.fullMicros, telemetry_microseconds_total: acct.telemetryMicros,
+        process_cpu_pct: sample.cpuPct, process_rss_bytes: sample.rssBytes, process_threads: sample.threads
+    };
+}
+
+/** gempba v4.2.0 still sends the network and disk aggregates, always as zeros (node_probe.cpp). */
+function schema1NodeFrame(sample: NodeSample): Schema1NodeFrame {
+    return {
+        sentinel_worker_id: sample.sentinel, ...nodeFields(sample),
+        net_aggregate: { bytes_in: 0, bytes_out: 0, packets_in: 0, packets_out: 0 }, disk_aggregate: { read_bytes: 0, write_bytes: 0 }
+    };
+}
+
+function schema2NodeFrame(sample: NodeSample): Schema2NodeFrame {
+    return { sentinel_rank: sample.sentinel, ...nodeFields(sample) };
+}
+
+/** The node frame's keys both schemas share, in gempba's order after the sentinel's. */
+function nodeFields(sample: NodeSample): Omit<Schema2NodeFrame, 'sentinel_rank'> {
+    return {
+        sentinel_local_ms: sample.localMs, hostname: sample.host, socket_count: sample.socketCount, logical_cores: sample.logicalCores,
+        mem_total_bytes: sample.memTotalBytes, mem_avail_bytes: sample.memAvailBytes, cgroup_mem_used_bytes: sample.cgroupUsedBytes,
+        cgroup_mem_limit_bytes: sample.cgroupLimitBytes,
+        sockets: sample.sockets.map(socket => ({
+            socket_id: socket.socketId, cpu_pct: socket.cpuPct, mem_total_bytes: socket.memTotalBytes, mem_used_bytes: socket.memUsedBytes
+        }))
+    };
+}
+
+function noAccounting(): Accounting {
+    return {
+        bytesSent: 0, bytesRecv: 0, sendMicros: 0, recvMicros: 0, spawnRejectedPoolFull: 0, spawnRemoteRejected: 0, idleStarved: 0, idleImbalanced: 0,
+        schedRunning: 0, schedWaiting: 0, firstTaskMs: 0, lastTaskMs: 0, assignLatencyTotal: 0, assignCount: 0, assignLatencyMax: 0,
+        availableQueueEmpty: 0, stateMsgs: 0, scoreProposals: 0, scoreBroadcasts: 0, scoreProposalsSent: 0, lastImprovementMs: 0, fullMicros: 0,
+        telemetryMicros: 0
+    };
 }
 
 function clamp(value: number, min: number, max: number): number {

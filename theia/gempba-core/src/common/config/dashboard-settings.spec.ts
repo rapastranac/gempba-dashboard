@@ -11,7 +11,7 @@ describe('DashboardSettings', () => {
         const settings = DashboardSettings.defaults();
         expect(settings.lastMode).to.equal(ConnectionMode.LOCAL);
         expect(settings.local.gempbaPort).to.equal(Config.DEFAULT_PORT);
-        expect(settings.workerIntervalMs).to.equal(RefreshInterval.DEFAULT_WORKER_MS);
+        expect(settings.workerIntervalMs).to.equal(RefreshInterval.DEFAULT_MS);
         expect(settings.nodeIntervalMs).to.equal(RefreshInterval.DEFAULT_NODE_MS);
     });
 
@@ -21,7 +21,7 @@ describe('DashboardSettings', () => {
         expect(settings.host.recentPorts).to.be.empty;
         expect(settings.jump.recentTargets).to.be.empty;
         expect(settings.jump.recentLoginHosts).to.be.empty;
-        expect(settings.workerIntervalMs).to.equal(RefreshInterval.DEFAULT_WORKER_MS);
+        expect(settings.workerIntervalMs).to.equal(RefreshInterval.DEFAULT_MS);
         expect(settings.nodeIntervalMs).to.equal(RefreshInterval.DEFAULT_NODE_MS);
     });
 

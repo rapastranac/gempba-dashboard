@@ -1,5 +1,5 @@
 import { CoreUsageSnapshot } from './core-usage-snapshot';
-import { WorkerSnapshot } from './worker-snapshot';
+import { RankSnapshot } from './rank-snapshot';
 
 export interface SocketSnapshot {
     readonly socketId: number;
@@ -10,12 +10,12 @@ export interface SocketSnapshot {
     readonly cpuIds: readonly number[];
     readonly hasTopology: boolean;
     readonly coreUsage: readonly CoreUsageSnapshot[];
-    readonly workers: readonly WorkerSnapshot[];
+    readonly ranks: readonly RankSnapshot[];
 }
 
 export namespace SocketSnapshot {
 
-    export function workerCount(socket: SocketSnapshot): number {
-        return socket.workers.length;
+    export function rankCount(socket: SocketSnapshot): number {
+        return socket.ranks.length;
     }
 }

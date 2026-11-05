@@ -13,7 +13,7 @@ export interface MockEmitterOptions {
 }
 
 /**
- * A stand-in gempba center for tests: replays a recording to every client, one frame per
+ * A stand-in for a gempba run's telemetry stream, for tests: replays a recording to every client, one frame per
  * worker interval, looping at the end. Like gempba it stamps the current time, keeps node frames only on
  * node ticks, and applies control lines clamped to the server's bounds.
  */
@@ -38,7 +38,7 @@ export class MockEmitter {
         if (options.frames.length === 0) {
             throw new Error('MockEmitter needs at least one frame');
         }
-        this.workerInterval = clamp(options.workerIntervalMs ?? RefreshInterval.DEFAULT_WORKER_MS);
+        this.workerInterval = clamp(options.workerIntervalMs ?? RefreshInterval.DEFAULT_MS);
         this.nodeInterval = clamp(options.nodeIntervalMs ?? RefreshInterval.DEFAULT_NODE_MS);
     }
 
@@ -99,7 +99,8 @@ export class MockEmitter {
 
     protected control(line: string): void {
         const message = ControlLine.parse(line);
-        if (!message) {
+        // the recordings it replays are schema 1's, whose only controls are the two intervals
+        if (!message || !ControlLine.isInterval(message)) {
             return;
         }
         const applied = clamp(message.value);
