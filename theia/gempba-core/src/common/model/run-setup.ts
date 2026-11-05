@@ -67,3 +67,17 @@ export interface RankAccounting {
     /** Time in telemetry ticks that sent or read a frame. */
     readonly telemetryMicrosTotal: number;
 }
+
+export namespace RankAccounting {
+
+    /** Every counter at 0, as a rank sends before it has done anything. */
+    export function none(): RankAccounting {
+        return {
+            bytesSentTotal: 0, bytesRecvTotal: 0, sendMicrosTotal: 0, recvMicrosTotal: 0, spawnRejectedPoolFull: 0, spawnRemoteRejected: 0,
+            idleMicrosStarved: 0, idleMicrosImbalanced: 0, schedRunningMicros: 0, schedWaitingMicros: 0, firstTaskMs: 0, lastTaskMs: 0,
+            assignLatencyMicrosTotal: 0, assignCount: 0, assignLatencyMicrosMax: 0, availableMicrosQueueEmpty: 0, coordinatorStateMsgsTotal: 0,
+            coordinatorScoreProposalsTotal: 0, coordinatorScoreBroadcastsTotal: 0, coordinatorFullMicros: 0, scoreProposalsSent: 0,
+            lastScoreImprovementMs: 0, telemetryMicrosTotal: 0
+        };
+    }
+}
