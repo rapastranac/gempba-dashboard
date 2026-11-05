@@ -39,8 +39,7 @@ export class TelemetryServerImpl implements TelemetryServer {
     protected readonly store = new TelemetryStore();
     /** Whether the stream's latest line was the run's final one: gempba closes the connection after it. */
     protected runEnded = false;
-    protected workerIntervalMs = RefreshInterval.DEFAULT_WORKER_MS;
-    protected nodeIntervalMs = RefreshInterval.DEFAULT_NODE_MS;
+    protected intervalMs = RefreshInterval.DEFAULT_MS;
 
     setClient(client: TelemetryServerClient | undefined): void {
         this.client = client;
@@ -170,16 +169,15 @@ export class TelemetryServerImpl implements TelemetryServer {
         }
     }
 
-    async pushRates(workerIntervalMs: number, nodeIntervalMs: number): Promise<void> {
-        this.workerIntervalMs = workerIntervalMs;
-        this.nodeIntervalMs = nodeIntervalMs;
-        const rates = `worker=${workerIntervalMs} ms, node=${nodeIntervalMs} ms`;
+    async pushInterval(intervalMs: number): Promise<void> {
+        this.intervalMs = intervalMs;
+        const rate = RefreshInterval.label(intervalMs);
         if (!this.telemetry) {
-            this.status(`rates saved (${rates}); they are sent on the next connect`);
-        } else if (this.sendRates(this.telemetry)) {
-            this.status(`rates pushed (${rates})`);
+            this.status(`refresh rate saved (${rate}); it is sent on the next connect`);
+        } else if (this.sendInterval(this.telemetry)) {
+            this.status(`refresh rate pushed (${rate})`);
         } else {
-            this.status('rates not sent, the connection is down; they are sent on reconnect');
+            this.status('refresh rate not sent, the connection is down; it is sent on reconnect');
         }
     }
 
@@ -192,7 +190,7 @@ export class TelemetryServerImpl implements TelemetryServer {
         return {
             onConnected: () => {
                 if (epoch === this.epoch && this.telemetry) {
-                    this.sendRates(this.telemetry);
+                    this.sendInterval(this.telemetry);
                     this.status(`connected to ${address}`);
                 }
             },
@@ -215,10 +213,14 @@ export class TelemetryServerImpl implements TelemetryServer {
         };
     }
 
-    protected sendRates(telemetry: TelemetryClient): boolean {
-        const rank = telemetry.sendControl(ControlKind.SetWorkerIntervalMs, this.workerIntervalMs);
-        const node = telemetry.sendControl(ControlKind.SetNodeIntervalMs, this.nodeIntervalMs);
-        return rank && node;
+    /**
+     * Sends the one rate under both of gempba 4.2's control names, which every gempba 4.x takes: 4.3 drives every frame
+     * at it and ignores the node one, and 4.2 gets the same interval for both kinds of frame.
+     */
+    protected sendInterval(telemetry: TelemetryClient): boolean {
+        const ranks = telemetry.sendControl(ControlKind.SetWorkerIntervalMs, this.intervalMs);
+        const nodes = telemetry.sendControl(ControlKind.SetNodeIntervalMs, this.intervalMs);
+        return ranks && nodes;
     }
 
     protected stopListening(): void {

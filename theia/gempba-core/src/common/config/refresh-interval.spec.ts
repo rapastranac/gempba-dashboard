@@ -5,7 +5,7 @@ describe('RefreshInterval', () => {
 
     it('offers presets within gempba\'s bounds, including both defaults', () => {
         expect(RefreshInterval.PRESETS_MS.every(ms => ms >= RefreshInterval.MIN_MS && ms <= RefreshInterval.MAX_MS)).to.be.true;
-        expect(RefreshInterval.PRESETS_MS).to.include.members([RefreshInterval.DEFAULT_WORKER_MS, RefreshInterval.DEFAULT_NODE_MS]);
+        expect(RefreshInterval.PRESETS_MS).to.include.members([RefreshInterval.DEFAULT_MS, RefreshInterval.DEFAULT_NODE_MS]);
         expect([...RefreshInterval.PRESETS_MS].sort((a, b) => a - b)).to.deep.equal(RefreshInterval.PRESETS_MS);
     });
 

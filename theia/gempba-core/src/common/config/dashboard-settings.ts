@@ -57,7 +57,7 @@ export namespace DashboardSettings {
             local: localOf(settings.local ?? {}),
             host: hostOf(settings.host ?? {}),
             jump: jumpOf(settings.jump ?? {}),
-            workerIntervalMs: positiveOr(settings.workerIntervalMs, RefreshInterval.DEFAULT_WORKER_MS),
+            workerIntervalMs: positiveOr(settings.workerIntervalMs, RefreshInterval.DEFAULT_MS),
             nodeIntervalMs: positiveOr(settings.nodeIntervalMs, RefreshInterval.DEFAULT_NODE_MS)
         };
     }

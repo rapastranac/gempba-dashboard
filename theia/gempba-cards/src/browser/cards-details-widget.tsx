@@ -123,12 +123,12 @@ export class CardsDetailsWidget extends ReactWidget {
             paused: this.telemetry.snapshot?.paused,
             ended: this.telemetry.snapshot?.final,
             now: Date.now(),
-            intervalMs: this.telemetry.rates.workerIntervalMs
+            intervalMs: this.telemetry.intervalMs
         });
     }
 
     protected motionMs(): number {
-        return MotionTiming.durationMs(this.telemetry.rates.workerIntervalMs, window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        return MotionTiming.durationMs(this.telemetry.intervalMs, window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     }
 
     protected find(): Shown | undefined {

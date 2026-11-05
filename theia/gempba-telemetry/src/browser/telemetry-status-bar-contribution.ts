@@ -3,11 +3,11 @@ import { FrontendApplicationContribution } from '@theia/core/lib/browser/fronten
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser/status-bar/status-bar-types';
 import { inject, injectable } from '@theia/core/shared/inversify';
 import { ConnectionState, Rates, RefreshInterval, RunSetupText, TaskWords } from '@gempba/core';
-import { TelemetryService, RankHistoryService } from '../common/telemetry-service';
+import { ObservedIntervals, RankHistoryService, TelemetryService } from '../common/telemetry-service';
 import { TelemetryMenus } from './telemetry-command-contribution';
 
 /**
- * One status-bar entry: the connection state, and while streaming the node count and the worker refresh rate. On hover
+ * One status-bar entry: the connection state, and while streaming the node count and the refresh rate. On hover
  * it shows the latest status, the run's tasks per second and how often frames arrive; a click opens the live controls.
  */
 @injectable()
@@ -27,14 +27,14 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
         this.telemetry.onStateChange(() => this.update());
         this.telemetry.onStatus(() => this.update());
         this.telemetry.onSnapshot(() => this.update());
-        this.telemetry.onRatesChange(() => this.update());
+        this.telemetry.onIntervalChange(() => this.update());
     }
 
     protected update(): void {
         const state = this.telemetry.state;
         const listening = state === ConnectionState.LISTENING;
         const nodes = this.telemetry.snapshot?.nodes.length;
-        const rate = RefreshInterval.label(this.telemetry.rates.workerIntervalMs);
+        const rate = RefreshInterval.label(this.telemetry.intervalMs);
         const text = listening && nodes !== undefined
             ? `$(pulse) GemPBA: ${nodes} ${nodes === 1 ? 'node' : 'nodes'} · ${rate}`
             : `$(plug) GemPBA: ${state.toLowerCase()}`;
@@ -47,9 +47,9 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
         if (listening && throughput.length > 0) {
             lines.push(`${TaskWords.STARTED}: ${Rates.text(throughput[throughput.length - 1])}`);
         }
-        const observed = this.telemetry.observedRates.workerIntervalMs;
-        lines.push(`Worker frames every ${rate}${listening && observed !== undefined ? `, arriving every ${RefreshInterval.label(observed)}` : ''}`);
-        lines.push('Click for the refresh rates; the other GemPBA commands are in the command palette (F1).');
+        const arriving = listening ? ObservedIntervals.text(this.telemetry.observedIntervals) : '';
+        lines.push(`Refresh rate ${rate}${arriving ? `; ${arriving}` : ''}`);
+        lines.push('Click for the refresh rate; the other GemPBA commands are in the command palette (F1).');
         const tooltip = lines.join('\n');
         if (text + tooltip === this.shown) {
             return;

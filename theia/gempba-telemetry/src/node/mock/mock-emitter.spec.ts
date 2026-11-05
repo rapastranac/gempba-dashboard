@@ -103,7 +103,7 @@ describe('MockEmitter', () => {
 
     it('defaults to gempba\'s cadence', () => {
         const created = new MockEmitter({ frames: [frame(1)] });
-        expect([created.workerIntervalMs, created.nodeIntervalMs]).to.deep.equal([RefreshInterval.DEFAULT_WORKER_MS, RefreshInterval.DEFAULT_NODE_MS]);
+        expect([created.workerIntervalMs, created.nodeIntervalMs]).to.deep.equal([RefreshInterval.DEFAULT_MS, RefreshInterval.DEFAULT_NODE_MS]);
     });
 
     it('loads the canned recording', () => {

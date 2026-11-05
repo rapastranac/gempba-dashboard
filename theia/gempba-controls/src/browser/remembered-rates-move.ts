@@ -6,8 +6,8 @@ import { RememberedSettings } from '../common/remembered-settings';
 import { SettingsServer } from '../common/settings-protocol';
 
 /**
- * Moves the rates the Connection view kept in the remembered settings, before the hub owned them, over to the hub's
- * settings, once. It runs at startup rather than in the Connection view, so the move does not depend on the view, and
+ * Moves the rate the Connection view kept in the remembered settings, before the hub owned it, over to the hub's
+ * setting, once. It runs at startup rather than in the Connection view, so the move does not depend on the view, and
  * the view loads the remembered settings only after it, so it never saves the moved rates back.
  */
 @injectable()
@@ -32,14 +32,14 @@ export class RememberedRatesMove implements FrontendApplicationContribution {
     protected async move(): Promise<void> {
         try {
             const settings = await this.settingsServer.load();
-            const rates = RememberedSettings.ratesToMove(settings);
-            if (rates.workerIntervalMs === undefined && rates.nodeIntervalMs === undefined) {
+            const intervalMs = RememberedSettings.rateToMove(settings);
+            if (intervalMs === undefined) {
                 return;
             }
-            await this.telemetry.setRates(rates);
+            await this.telemetry.setIntervalMs(intervalMs);
             await this.settingsServer.save(RememberedSettings.withoutRates(settings));
         } catch (error) {
-            this.messages.error(`The remembered refresh rates could not be moved to the settings: ${error instanceof Error ? error.message : String(error)}`);
+            this.messages.error(`The remembered refresh rate could not be moved to the settings: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 }

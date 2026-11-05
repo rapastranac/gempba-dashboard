@@ -13,8 +13,7 @@ export namespace TelemetryCommands {
     export const LISTEN: Command = { id: 'gempba.listen', category: CATEGORY, label: 'Listen…' };
     export const STOP: Command = { id: 'gempba.stop', category: CATEGORY, label: 'Stop Listening' };
     export const DISCONNECT: Command = { id: 'gempba.disconnect', category: CATEGORY, label: 'Disconnect' };
-    export const SET_WORKER_RATE: Command = { id: 'gempba.setWorkerRate', category: CATEGORY, label: 'Set Worker Refresh Rate…' };
-    export const SET_NODE_RATE: Command = { id: 'gempba.setNodeRate', category: CATEGORY, label: 'Set Node Refresh Rate…' };
+    export const SET_RATE: Command = { id: 'gempba.setRefreshRate', category: CATEGORY, label: 'Set Refresh Rate…' };
 }
 
 export namespace TelemetryMenus {
@@ -26,8 +25,7 @@ export namespace TelemetryMenus {
      */
     export const CONTROLS = ['gempba-telemetry-controls'];
     export const RATES = [...CONTROLS, '1_rates'];
-    export const WORKER_RATES = [...RATES, 'worker'];
-    export const NODE_RATES = [...RATES, 'node'];
+    export const RATE = [...RATES, 'rate'];
     export const STREAM = [...CONTROLS, '2_stream'];
 }
 

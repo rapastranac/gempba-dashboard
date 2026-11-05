@@ -1,5 +1,5 @@
 import { Event } from '@theia/core/lib/common/event';
-import { ConnectionMode, ConnectionState, NodeSeries, RefreshRates, SessionSpec, TargetSpec, RankSeries, WorldSnapshot } from '@gempba/core';
+import { ConnectionMode, ConnectionState, NodeSeries, RankSeries, RefreshInterval, SessionSpec, TargetSpec, WorldSnapshot } from '@gempba/core';
 
 /**
  * The frontend API every feature injects: the active session's telemetry stream and its controls. Features
@@ -24,13 +24,13 @@ export interface TelemetryService {
     readonly onStateChange: Event<ConnectionState>;
     readonly onStatus: Event<string>;
     /**
-     * The refresh rates the user chose, kept as settings every window shares. They are sent to gempba before every
-     * Listen and Connect, and on every change.
+     * The refresh rate the user chose, in milliseconds: how often gempba sends every frame, rank and node frames alike.
+     * It is a setting every window shares, sent to gempba before every Listen and Connect, and on every change.
      */
-    readonly rates: RefreshRates;
-    /** How often frames actually arrive, measured on gempba's own clocks since it acknowledges no change; unknown until measured. */
-    readonly observedRates: Partial<RefreshRates>;
-    readonly onRatesChange: Event<RefreshRates>;
+    readonly intervalMs: number;
+    /** How often frames actually arrive, measured on gempba's own clocks since it acknowledges no change. */
+    readonly observedIntervals: ObservedIntervals;
+    readonly onIntervalChange: Event<number>;
 
     /**
      * When one of the node's ranks last sent a new frame, on this machine's clock; `undefined` before any. A node whose
@@ -49,8 +49,24 @@ export interface TelemetryService {
     /** Stops streaming; an SSH session stays open, a local stream ends in DISCONNECTED. */
     stop(): Promise<void>;
     disconnect(): Promise<void>;
-    /** Saves new rates as the user's settings, which applies them in every window. */
-    setRates(rates: Partial<RefreshRates>): Promise<void>;
+    /** Saves a new refresh rate as the user's setting, which applies it in every window. */
+    setIntervalMs(intervalMs: number): Promise<void>;
+}
+
+/** How often rank frames and node frames arrive, in milliseconds; each unknown until measured. */
+export interface ObservedIntervals {
+    readonly rankMs?: number;
+    readonly nodeMs?: number;
+}
+
+export namespace ObservedIntervals {
+
+    /** `rank frames arrive every 650 ms, node frames every 1 s`, leaving out what isn't measured; empty before anything is. */
+    export function text(observed: ObservedIntervals): string {
+        const rank = observed.rankMs === undefined ? undefined : `rank frames arrive every ${RefreshInterval.label(observed.rankMs)}`;
+        const node = observed.nodeMs === undefined ? undefined : `node frames ${rank ? '' : 'arrive '}every ${RefreshInterval.label(observed.nodeMs)}`;
+        return [rank, node].filter(part => part !== undefined).join(', ');
+    }
 }
 
 /** Per-node utilization history of the active session, updated before each snapshot is announced. */

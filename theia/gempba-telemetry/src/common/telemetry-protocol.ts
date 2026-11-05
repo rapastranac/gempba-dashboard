@@ -19,8 +19,8 @@ export interface TelemetryServer extends RpcServer<TelemetryServerClient> {
     /** Stops streaming; an SSH session stays open for the next target, a local stream simply ends. */
     stop(): Promise<void>;
     disconnect(): Promise<void>;
-    /** Sends the refresh intervals now if streaming, and on every later (re)connect. */
-    pushRates(workerIntervalMs: number, nodeIntervalMs: number): Promise<void>;
+    /** Sends the refresh rate now if streaming, and on every later (re)connect, for rank and node frames alike. */
+    pushInterval(intervalMs: number): Promise<void>;
 }
 
 /** Backend-to-frontend notifications; the `on` prefix makes them one-way RPC messages. */

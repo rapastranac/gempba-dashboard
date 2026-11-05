@@ -38,7 +38,7 @@ export class MockEmitter {
         if (options.frames.length === 0) {
             throw new Error('MockEmitter needs at least one frame');
         }
-        this.workerInterval = clamp(options.workerIntervalMs ?? RefreshInterval.DEFAULT_WORKER_MS);
+        this.workerInterval = clamp(options.workerIntervalMs ?? RefreshInterval.DEFAULT_MS);
         this.nodeInterval = clamp(options.nodeIntervalMs ?? RefreshInterval.DEFAULT_NODE_MS);
     }
 
