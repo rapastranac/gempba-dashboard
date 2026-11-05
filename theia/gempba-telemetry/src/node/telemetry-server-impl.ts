@@ -213,14 +213,9 @@ export class TelemetryServerImpl implements TelemetryServer {
         };
     }
 
-    /**
-     * Sends the one rate under both of gempba 4.2's control names, which every gempba 4.x takes: 4.3 drives every frame
-     * at it and ignores the node one, and 4.2 gets the same interval for both kinds of frame.
-     */
+    /** Sends the rate as `set_interval_ms`, the one interval gempba v4.3.0 drives every frame and its broadcast at. */
     protected sendInterval(telemetry: TelemetryClient): boolean {
-        const ranks = telemetry.sendControl(ControlKind.SetWorkerIntervalMs, this.intervalMs);
-        const nodes = telemetry.sendControl(ControlKind.SetNodeIntervalMs, this.intervalMs);
-        return ranks && nodes;
+        return telemetry.sendControl(ControlKind.SetIntervalMs, this.intervalMs);
     }
 
     protected stopListening(): void {

@@ -110,7 +110,7 @@ describe('TelemetryServerImpl', () => {
     });
 
     async function listenToMock(): Promise<MockEmitter> {
-        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), workerIntervalMs: 50 });
+        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), intervalMs: 50 });
         await server.listen(TargetSpec.of(undefined, await emitter.listen()));
         return emitter;
     }
@@ -161,14 +161,14 @@ describe('TelemetryServerImpl', () => {
         expect(client.statuses.some(text => text.startsWith('connected to 127.0.0.1:'))).to.equal(true);
     });
 
-    it('sends the saved rate on connect and a new one while streaming, for rank and node frames alike', async () => {
+    it('sends the saved rate on connect and a new one while streaming, as set_interval_ms', async () => {
         await server.pushInterval(200);
         expect(client.statuses.at(-1)).to.equal('refresh rate saved (200 ms); it is sent on the next connect');
         const mock = await listenToMock();
-        await eventually(() => mock.workerIntervalMs === 200 && mock.nodeIntervalMs === 200);
+        await eventually(() => mock.intervalMs === 200);
 
         await server.pushInterval(300);
-        await eventually(() => mock.workerIntervalMs === 300 && mock.nodeIntervalMs === 300);
+        await eventually(() => mock.intervalMs === 300);
         expect(client.statuses.at(-1)).to.equal('refresh rate pushed (300 ms)');
     });
 
@@ -183,7 +183,7 @@ describe('TelemetryServerImpl', () => {
     });
 
     it('stopping a stream over an SSH session keeps the session open', async () => {
-        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), workerIntervalMs: 50 });
+        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), intervalMs: 50 });
         const port = await emitter.listen();
         const connecting = server.connect(SessionSpec.of({ mode: ConnectionMode.HOST, host: 'me@vm' }));
         host.settle(undefined);
@@ -227,7 +227,7 @@ describe('TelemetryServerImpl', () => {
     });
 
     it('a session that drops while streaming disconnects and says so, without retrying the stream', async () => {
-        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), workerIntervalMs: 50 });
+        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), intervalMs: 50 });
         const port = await emitter.listen();
         const connecting = server.connect(SessionSpec.of({ mode: ConnectionMode.HOST, host: 'me@vm' }));
         host.settle(undefined);

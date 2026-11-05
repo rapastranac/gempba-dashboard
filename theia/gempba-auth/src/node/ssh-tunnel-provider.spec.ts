@@ -74,7 +74,7 @@ describe('SshTunnelProvider', function (): void {
                 resolve(chunk.toString('utf8'));
             });
         });
-        expect(first.startsWith('{"version":1')).to.equal(true);
+        expect(first.startsWith('{"version":2')).to.equal(true);
         expect(fs.readFileSync(path.join(sshDir, 'known_hosts'), 'utf8')).to.contain(`[127.0.0.1]:${port} ssh-ed25519 `);
         forward.close();
         tunnel.close();

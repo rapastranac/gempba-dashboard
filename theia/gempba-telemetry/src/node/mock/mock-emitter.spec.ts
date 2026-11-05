@@ -6,7 +6,7 @@ import { MockEmitter } from './mock-emitter';
 
 function frame(seq: number): BroadcastEnvelope {
     return {
-        version: 1, ts: 0, elapsed_seconds: seq,
+        version: 2, ts: 0, elapsed_seconds: seq,
         ranks: [{
             rank: 0, seq_no: seq, rank_local_ms: 0, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
             tasks_running: 0, scheduler_pending_count: 0, idle_microseconds_per_thread: 0, process_cpu_pct: 0,
@@ -67,7 +67,7 @@ describe('MockEmitter', () => {
     }
 
     it('replays the recording from its first frame and loops at the end', async () => {
-        const lines = await (await connect(new MockEmitter({ frames: [frame(1), frame(2)], workerIntervalMs: 50 }))).waitFor(3);
+        const lines = await (await connect(new MockEmitter({ frames: [frame(1), frame(2)], intervalMs: 50 }))).waitFor(3);
         expect(lines.slice(0, 3).map(line => line.ranks![0].seq_no)).to.deep.equal([1, 2, 1]);
     });
 
@@ -77,33 +77,30 @@ describe('MockEmitter', () => {
         expect(first.ts).to.be.at.least(before);
     });
 
-    it('keeps node frames only on node ticks', async () => {
-        const created = new MockEmitter({ frames: [frame(1)], workerIntervalMs: 50, nodeIntervalMs: 10_000 });
-        const lines = await (await connect(created)).waitFor(2);
-        expect(lines[0].nodes).to.have.lengthOf(1);
-        expect(lines[1].nodes).to.deep.equal([]);
+    it('sends the node frames on every line, as gempba 4.3 drives every frame at one interval', async () => {
+        const lines = await (await connect(new MockEmitter({ frames: [frame(1)], intervalMs: 50 }))).waitFor(2);
+        expect(lines.slice(0, 2).map(line => line.nodes?.length)).to.deep.equal([1, 1]);
     });
 
-    it('applies control lines clamped to the server bounds and ignores malformed ones', async () => {
+    it('takes the interval under either of gempba 4.3\'s names, clamped to its bounds, and ignores the node interval and malformed lines', async () => {
         const applied: [ControlKind, number][] = [];
         const created = new MockEmitter({ frames: [frame(1)], onControl: (kind, ms) => applied.push([kind, ms]) });
         const client = await connect(created);
         await client.waitFor(1);
 
-        client.socket.write('garbage\n' + ControlLine.format(ControlKind.SetWorkerIntervalMs, 10)
-            + ControlLine.format(ControlKind.SetNodeIntervalMs, 2500));
+        client.socket.write('garbage\n' + ControlLine.format(ControlKind.SetIntervalMs, 10)
+            + ControlLine.format(ControlKind.SetNodeIntervalMs, 2500) + ControlLine.format(ControlKind.SetWorkerIntervalMs, 300));
         const deadline = Date.now() + 1500;
         while (applied.length < 2 && Date.now() < deadline) {
             await new Promise(resolve => setTimeout(resolve, 10));
         }
-        expect(applied).to.deep.equal([[ControlKind.SetWorkerIntervalMs, RefreshInterval.MIN_MS], [ControlKind.SetNodeIntervalMs, 2500]]);
-        expect(created.workerIntervalMs).to.equal(RefreshInterval.MIN_MS);
-        expect(created.nodeIntervalMs).to.equal(2500);
+        expect(applied).to.deep.equal([[ControlKind.SetIntervalMs, RefreshInterval.MIN_MS], [ControlKind.SetWorkerIntervalMs, 300]]);
+        expect(created.intervalMs).to.equal(300);
     });
 
     it('defaults to gempba\'s cadence', () => {
         const created = new MockEmitter({ frames: [frame(1)] });
-        expect([created.workerIntervalMs, created.nodeIntervalMs]).to.deep.equal([RefreshInterval.DEFAULT_MS, RefreshInterval.DEFAULT_NODE_MS]);
+        expect(created.intervalMs).to.equal(RefreshInterval.DEFAULT_MS);
     });
 
     it('loads the canned recording', () => {

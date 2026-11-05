@@ -66,7 +66,7 @@ describe('RemoteConnection', function (): void {
     let publicKey: string;
 
     before(async () => {
-        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), workerIntervalMs: 50 });
+        emitter = new MockEmitter({ frames: MockEmitter.load(MockEmitter.DEFAULT_FIXTURE), intervalMs: 50 });
         emitterPort = await emitter.listen();
     });
 
