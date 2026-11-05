@@ -502,7 +502,6 @@ describe('MockRun', () => {
             const node = envelope(mock).nodes![1];
             expect(envelope(mock).version).to.equal(2);
             expect(node.sockets!.every(socket => socket.cpu_pct > 0 && socket.mem_used_bytes > 0)).to.equal(true);
-            expect([node.net_aggregate, node.disk_aggregate]).to.deep.equal([undefined, undefined]);
             expect(mock.intervalMs).to.equal(100);
         });
 

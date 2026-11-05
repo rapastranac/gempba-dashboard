@@ -12,9 +12,6 @@ export namespace WorldSnapshotMapper {
     /** Host bucket for ranks with no identity or topology mapping. */
     export const UNKNOWN_HOST = '(unknown host)';
 
-    /** The first schema with the run's id and setup, each rank's role and the time accounting. */
-    export const SCHEMA_WITH_ACCOUNTING = 2;
-
     export function toWorldSnapshot(envelope: BroadcastEnvelope | undefined): WorldSnapshot {
         if (!envelope) {
             return WorldSnapshot.empty();
@@ -45,7 +42,7 @@ export namespace WorldSnapshotMapper {
             }
 
             getOrCreate(getOrCreate(ranksByHostBySocket, host, () => new Map()), socketId, () => [])
-                .push(toRankSnapshot(frame, sentinel, identity, envelope.elapsed_seconds, envelope.version >= SCHEMA_WITH_ACCOUNTING));
+                .push(toRankSnapshot(frame, sentinel, identity, envelope.elapsed_seconds));
             getOrCreate(getOrCreate(framesByHostBySocket, host, () => new Map()), socketId, () => new Map())
                 .set(rank, frame);
             if (identity) {
@@ -94,12 +91,8 @@ export namespace WorldSnapshotMapper {
         };
     }
 
-    /** Builds from before gempba's v4.3.0 renames call the coordinator `center`. */
     function toRole(role: string | undefined): SchedulerRole | undefined {
-        if (role === 'coordinator' || role === 'center') {
-            return 'coordinator';
-        }
-        return role === 'worker' ? role : undefined;
+        return role === 'coordinator' || role === 'worker' ? role : undefined;
     }
 
     function toAccounting(frame: RankFrame): RankAccounting {
@@ -168,7 +161,7 @@ export namespace WorldSnapshotMapper {
     }
 
     function toRankSnapshot(
-        frame: RankFrame, sentinel: boolean, identity: RankIdentity | undefined, elapsedSeconds: number, accounted: boolean
+        frame: RankFrame, sentinel: boolean, identity: RankIdentity | undefined, elapsedSeconds: number
     ): RankSnapshot {
         return {
             id: frame.rank,
@@ -189,7 +182,7 @@ export namespace WorldSnapshotMapper {
             threads: frame.process_threads,
             elapsedSeconds,
             peers: (frame.edges_out ?? []).map(edge => ({ peerRank: edge.to, bytes: edge.bytes, count: edge.count })),
-            accounting: accounted ? toAccounting(frame) : undefined
+            accounting: toAccounting(frame)
         };
     }
 

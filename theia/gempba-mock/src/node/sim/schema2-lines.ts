@@ -6,8 +6,8 @@ import { NodeFrame, RankFrame, RankIdentity, RunMarkerFrame, TopologyNode } from
  */
 export type Schema2Frame = Required<Omit<RankFrame, 'edges_out'>>;
 
-/** A node frame without schema 1's network and disk aggregates, which gempba v4.3.0 dropped. */
-export type Schema2NodeFrame = Required<Omit<NodeFrame, 'net_aggregate' | 'disk_aggregate'>>;
+/** What the mocker writes as a node's frame, every key required, as for a rank's. */
+export type Schema2NodeFrame = Required<NodeFrame>;
 
 export interface Schema2Topology {
     readonly nodes: readonly Required<TopologyNode>[];
