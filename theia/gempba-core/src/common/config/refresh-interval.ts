@@ -4,7 +4,7 @@ export namespace RefreshInterval {
     export const MAX_MS = 600_000;
     /** The refresh rate gempba starts at, and the dashboard's: how often every frame is sent. */
     export const DEFAULT_MS = 500;
-    /** gempba 4.2's node-frame interval, which the Java dashboard's settings file and the replay emitter still keep. */
+    /** The node-frame interval the Java dashboard's settings file keeps beside the worker one, as gempba 4.2 took both. */
     export const DEFAULT_NODE_MS = 1000;
 
     /** The intervals the controls offer; gempba takes any whole number of milliseconds between its bounds. */

@@ -1,4 +1,4 @@
-import { ConnectionMode, DashboardSettings, RefreshRates, SessionSpec, TargetSpec } from '@gempba/core';
+import { ConnectionMode, DashboardSettings, RefreshInterval, SessionSpec, TargetSpec } from '@gempba/core';
 
 /**
  * How the Connection view reads and updates the remembered settings: one block per mode, so switching modes
@@ -80,13 +80,13 @@ export namespace RememberedSettings {
      * which the Java app also reads.
      */
     export function rateToMove(settings: DashboardSettings): number | undefined {
-        const rate = RefreshRates.of(settings).workerIntervalMs;
-        return rate !== RefreshRates.defaults().workerIntervalMs ? rate : undefined;
+        const value = settings.workerIntervalMs;
+        const rate = Number.isFinite(value) ? RefreshInterval.clamp(value) : RefreshInterval.DEFAULT_MS;
+        return rate !== RefreshInterval.DEFAULT_MS ? rate : undefined;
     }
 
     /** The settings with the rates back at their defaults, once moved to the hub. */
     export function withoutRates(settings: DashboardSettings): DashboardSettings {
-        const defaults = RefreshRates.defaults();
-        return withRates(settings, defaults.workerIntervalMs, defaults.nodeIntervalMs);
+        return withRates(settings, RefreshInterval.DEFAULT_MS, RefreshInterval.DEFAULT_NODE_MS);
     }
 }
