@@ -1,5 +1,5 @@
 import { RefreshInterval, RefreshRates } from '@gempba/core';
-import { NodeFrame, WorkerFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
+import { Schema1Frame, Schema1NodeFrame } from './schema1-lines';
 import { MockLive, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
 import { CenterQueue, QueuedTask } from './center-queue';
@@ -466,7 +466,7 @@ export class MockRun {
         // a worker's samples drift apart from the others', as separate processes' do
         worker.nextSampleMs = first ? this.time + this.random.int(1, this.workerInterval) : nextAfter(worker.nextSampleMs, this.workerInterval, this.time);
         worker.edgesJson ??= JSON.stringify([...worker.edges.entries()].sort(([a], [b]) => a - b).map(([to, edge]) => ({ to, bytes: edge.bytes, count: edge.count })));
-        const frame: Omit<WorkerFrame, 'edges_out'> = {
+        const frame: Schema1Frame = {
             worker_id: worker.place.workerId,
             seq_no: worker.seqNo,
             worker_local_ms: this.nodes[worker.place.nodeIndex].clockBaseMs + this.time,
@@ -509,7 +509,7 @@ export class MockRun {
             node.diskRead += Math.round(this.random.int(0, 64) * KiB * seconds);
             node.diskWrite += Math.round(this.random.int(0, 256) * KiB * seconds);
         }
-        const frame: NodeFrame = {
+        const frame: Schema1NodeFrame = {
             sentinel_worker_id: sentinel,
             sentinel_local_ms: node.clockBaseMs + this.time,
             hostname: place.host,

@@ -19,7 +19,7 @@ function linesOf(fixture: string): string[] {
 const [FULL, PAUSED, SNAPSHOT_WHILE_PAUSED] = linesOf('schema2-run.ndjson');
 const [PRE_RENAME_FULL] = linesOf('schema2-pre-rename-run.ndjson');
 
-function workersOf(world: WorldSnapshot): RankSnapshot[] {
+function ranksOf(world: WorldSnapshot): RankSnapshot[] {
     return world.nodes.flatMap(node => node.sockets.flatMap(socket => socket.ranks));
 }
 
@@ -45,26 +45,26 @@ describe('Telemetry schema 2', () => {
         });
 
         it('reads tasks started and the time-accounting counters', () => {
-            const [coordinator, worker] = BroadcastEnvelope.parse(FULL).workers!;
+            const [coordinator, rank] = BroadcastEnvelope.parse(FULL).ranks!;
             expect(coordinator.tasks_started_total).to.equal(0);
             expect(coordinator.assign_count).to.be.above(0);
             expect(coordinator.coordinator_state_msgs_total).to.be.above(0);
-            expect(worker.tasks_started_total).to.be.above(0);
-            expect(worker.sched_running_microseconds! + worker.sched_waiting_microseconds!).to.be.above(0);
-            expect(worker.idle_microseconds_starved! + worker.idle_microseconds_imbalanced!).to.be.closeTo(worker.idle_microseconds_per_worker, 1);
-            expect(worker.telemetry_microseconds_total).to.be.above(0);
+            expect(rank.tasks_started_total).to.be.above(0);
+            expect(rank.sched_running_microseconds! + rank.sched_waiting_microseconds!).to.be.above(0);
+            expect(rank.idle_microseconds_starved! + rank.idle_microseconds_imbalanced!).to.be.closeTo(rank.idle_microseconds_per_thread, 1);
+            expect(rank.telemetry_microseconds_total).to.be.above(0);
         });
 
         it('reads a paused line as the header alone', () => {
             const envelope = BroadcastEnvelope.parse(PAUSED);
             expect(envelope).to.include({ version: 2, paused: true });
-            expect([envelope.topology, envelope.workers, envelope.nodes]).to.deep.equal([undefined, undefined, undefined]);
+            expect([envelope.topology, envelope.ranks, envelope.nodes]).to.deep.equal([undefined, undefined, undefined]);
         });
 
         it('reads a snapshot sent while paused as a full line', () => {
             const envelope = BroadcastEnvelope.parse(SNAPSHOT_WHILE_PAUSED);
             expect(envelope.paused).to.equal(true);
-            expect(envelope.workers).to.have.lengthOf(4);
+            expect(envelope.ranks).to.have.lengthOf(4);
         });
 
         it('reads the final line\'s flag', () => {
@@ -98,19 +98,19 @@ describe('Telemetry schema 2', () => {
         it('maps a line with the older names as it maps one with v4.3.0\'s', () => {
             const world = WorldSnapshotMapper.toWorldSnapshot(BroadcastEnvelope.parse(renamed));
             expect(WorldSnapshotMapper.toWorldSnapshot(BroadcastEnvelope.parse(older))).to.deep.equal(world);
-            const [coordinator, worker] = workersOf(world);
-            expect([coordinator.role, worker.role]).to.deep.equal(['coordinator', 'worker']);
+            const [coordinator, rank] = ranksOf(world);
+            expect([coordinator.role, rank.role]).to.deep.equal(['coordinator', 'worker']);
             expect(coordinator.accounting).to.include({
                 coordinatorStateMsgsTotal: 5, coordinatorScoreProposalsTotal: 6, coordinatorScoreBroadcastsTotal: 7, coordinatorFullMicros: 8
             });
-            expect([worker.id, worker.localMillis, worker.tasksStartedTotal, worker.idleMicrosPerThread, worker.sentinel]).to.deep.equal([1, 50, 9, 60, true]);
+            expect([rank.id, rank.localMillis, rank.tasksStartedTotal, rank.idleMicrosPerThread, rank.sentinel]).to.deep.equal([1, 50, 9, 60, true]);
             expect([world.nodes[0].sentinelRank, world.nodes[0].sentinelLocalMillis]).to.deep.equal([1, 70]);
         });
 
         it('takes the v4.3.0 name when a line carries both', () => {
             const line = '{"version":2,"ranks":[{"rank":2,"worker_id":7,"coordinator_state_msgs_total":3,"center_state_msgs_total":4}],"workers":[{"worker_id":7}]}';
-            const [frame] = BroadcastEnvelope.parse(line).workers!;
-            expect([frame.worker_id, frame.coordinator_state_msgs_total]).to.deep.equal([2, 3]);
+            const [frame] = BroadcastEnvelope.parse(line).ranks!;
+            expect([frame.rank, frame.coordinator_state_msgs_total]).to.deep.equal([2, 3]);
         });
 
         it('maps a real line recorded before the renames like one recorded after', () => {
@@ -118,13 +118,13 @@ describe('Telemetry schema 2', () => {
             const after = WorldSnapshotMapper.toWorldSnapshot(BroadcastEnvelope.parse(FULL));
             for (const world of [before, after]) {
                 expect(world.nodes.map(node => node.host)).to.deep.equal(['DESKTOP']);
-                expect(workersOf(world).map(worker => worker.role)).to.deep.equal(['coordinator', 'worker', 'worker', 'worker']);
+                expect(ranksOf(world).map(rank => rank.role)).to.deep.equal(['coordinator', 'worker', 'worker', 'worker']);
                 expect([0, 1].map(id => WorldSnapshot.isCoordinator(world, id))).to.deep.equal([true, false]);
                 expect(WorldSnapshot.rankOf(world, 0)!.accounting!.coordinatorStateMsgsTotal).to.be.above(0);
-                expect(workersOf(world).filter(worker => worker.sentinel)).to.have.lengthOf(1);
-                const worker = WorldSnapshot.rankOf(world, 1)!;
-                expect(worker.localMillis).to.be.above(0);
-                expect(worker.idleMicrosPerThread).to.be.above(0);
+                expect(ranksOf(world).filter(rank => rank.sentinel)).to.have.lengthOf(1);
+                const rank = WorldSnapshot.rankOf(world, 1)!;
+                expect(rank.localMillis).to.be.above(0);
+                expect(rank.idleMicrosPerThread).to.be.above(0);
             }
             expect(Object.keys(WorldSnapshot.rankOf(before, 1)!)).to.deep.equal(Object.keys(WorldSnapshot.rankOf(after, 1)!));
         });
@@ -138,7 +138,7 @@ describe('Telemetry schema 2', () => {
             expect(world.run).to.include({ scheduler: 'semi_centralized', loadBalancer: 'quasi_horizontal', runtimeMode: 'multiprocessing', worldSize: 4 });
             expect(world.run!.markers[0]).to.include({ label: 'fixture recorded', source: 'dashboard' });
             expect([world.paused, world.final]).to.deep.equal([false, false]);
-            expect(workersOf(world).map(worker => worker.role)).to.deep.equal(['coordinator', 'worker', 'worker', 'worker']);
+            expect(ranksOf(world).map(rank => rank.role)).to.deep.equal(['coordinator', 'worker', 'worker', 'worker']);
             expect([0, 1].map(id => WorldSnapshot.isCoordinator(world, id))).to.deep.equal([true, false]);
         });
 
@@ -147,14 +147,14 @@ describe('Telemetry schema 2', () => {
             const world = WorldSnapshotMapper.toWorldSnapshot(envelope);
             const coordinator = WorldSnapshot.rankOf(world, 0)!;
             expect(coordinator.accounting).to.include({
-                assignCount: envelope.workers![0].assign_count, coordinatorStateMsgsTotal: envelope.workers![0].coordinator_state_msgs_total
+                assignCount: envelope.ranks![0].assign_count, coordinatorStateMsgsTotal: envelope.ranks![0].coordinator_state_msgs_total
             });
-            const worker = WorldSnapshot.rankOf(world, 1)!;
-            expect(worker.tasksStartedTotal).to.equal(envelope.workers![1].tasks_started_total);
-            expect(worker.accounting).to.include({
-                schedRunningMicros: envelope.workers![1].sched_running_microseconds,
-                idleMicrosStarved: envelope.workers![1].idle_microseconds_starved,
-                bytesSentTotal: envelope.workers![1].bytes_sent_total
+            const rank = WorldSnapshot.rankOf(world, 1)!;
+            expect(rank.tasksStartedTotal).to.equal(envelope.ranks![1].tasks_started_total);
+            expect(rank.accounting).to.include({
+                schedRunningMicros: envelope.ranks![1].sched_running_microseconds,
+                idleMicrosStarved: envelope.ranks![1].idle_microseconds_starved,
+                bytesSentTotal: envelope.ranks![1].bytes_sent_total
             });
         });
 
@@ -163,8 +163,8 @@ describe('Telemetry schema 2', () => {
                 + '"identities":[{"worker_id":0,"hostname":"h"},{"worker_id":1,"hostname":"h"}]},'
                 + '"workers":[{"worker_id":0,"seq_no":1,"tasks_local_total":5},{"worker_id":1,"seq_no":1,"tasks_local_total":9}]}';
             const world = WorldSnapshotMapper.toWorldSnapshot(BroadcastEnvelope.parse(line));
-            const worker = WorldSnapshot.rankOf(world, 1)!;
-            expect([worker.tasksStartedTotal, worker.accounting, worker.role]).to.deep.equal([9, undefined, undefined]);
+            const rank = WorldSnapshot.rankOf(world, 1)!;
+            expect([rank.tasksStartedTotal, rank.accounting, rank.role]).to.deep.equal([9, undefined, undefined]);
             expect([world.runId, world.run, world.paused, world.final]).to.deep.equal([undefined, undefined, false, false]);
             expect(WorldSnapshot.isCoordinator(world, 0)).to.equal(true);
         });

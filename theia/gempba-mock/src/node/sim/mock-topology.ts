@@ -1,4 +1,4 @@
-import { Topology } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
+import { Schema1Topology } from './schema1-lines';
 import { MockShape } from '../../common/mock-config';
 
 const GiB = 1024 ** 3;
@@ -86,7 +86,7 @@ export namespace MockTopology {
     }
 
     /** The topology as gempba sends it, with each worker's current process id. */
-    export function toWire(topology: MockTopology, pidOf: (workerId: number) => number): Topology {
+    export function toWire(topology: MockTopology, pidOf: (workerId: number) => number): Schema1Topology {
         return {
             nodes: topology.nodes.map(node => ({
                 hostname: node.host,

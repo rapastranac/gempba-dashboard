@@ -41,7 +41,7 @@ export class TelemetryStore {
 
 /** A paused line: the header alone, no topology or frames. A snapshot or the final line sent while paused carries them. */
 function isHeaderOnly(envelope: BroadcastEnvelope): boolean {
-    return envelope.topology === undefined && envelope.workers === undefined && envelope.nodes === undefined;
+    return envelope.topology === undefined && envelope.ranks === undefined && envelope.nodes === undefined;
 }
 
 function isUsable(topology: Topology | undefined): topology is Topology {

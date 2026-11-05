@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { RefreshRates, WorldSnapshot } from '@gempba/core';
-import { BroadcastEnvelope, WorkerFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
+import { BroadcastEnvelope, RankFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { WorldSnapshotMapper } from '@gempba/telemetry/lib/node/telemetry/world-snapshot-mapper';
 import { MockConfig, MockLive, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
@@ -28,8 +28,8 @@ describe('MockRun', () => {
         return BroadcastEnvelope.parse(mock.line(TS));
     }
 
-    function workerFrame(mock: MockRun, workerId: number): WorkerFrame {
-        return envelope(mock).workers!.find(frame => frame.worker_id === workerId)!;
+    function workerFrame(mock: MockRun, workerId: number): RankFrame {
+        return envelope(mock).ranks!.find(frame => frame.rank === workerId)!;
     }
 
     function view(mock: MockRun, workerId: number): MockWorkerView {
@@ -53,7 +53,7 @@ describe('MockRun', () => {
         const mock = run();
         const first = envelope(mock);
         expect(first).to.include({ version: 1, ts: TS, elapsed_seconds: 0 });
-        expect(first.workers!.map(frame => frame.worker_id)).to.deep.equal([0, 1, 2, 3, 4, 5, 6, 7]);
+        expect(first.ranks!.map(frame => frame.rank)).to.deep.equal([0, 1, 2, 3, 4, 5, 6, 7]);
         expect(first.nodes!.map(frame => frame.hostname)).to.deep.equal(['mock-host-01', 'mock-host-02']);
         mock.advanceTo(10_000);
         const world: WorldSnapshot = WorldSnapshotMapper.toWorldSnapshot(envelope(mock));
@@ -67,24 +67,24 @@ describe('MockRun', () => {
 
     it('keeps its counters consistent over 10,000 steps: rising, summing over edges, and within the pool and the CPUs', () => {
         const mock = run();
-        const last = new Map<number, WorkerFrame>();
+        const last = new Map<number, RankFrame>();
         const allowed = new Map(mock.topology.workers.map(worker => [worker.workerId, worker.allowedCpuIds.length]));
         for (let step = 1; step <= 1000; step++) {
             mock.advanceTo(step * 10 * MockRun.STEP_MS);
             const sent = envelope(mock);
-            for (const frame of sent.workers!) {
-                const before = last.get(frame.worker_id);
+            for (const frame of sent.ranks!) {
+                const before = last.get(frame.rank);
                 if (before) {
                     expect(frame.seq_no).to.be.at.least(before.seq_no);
                     expect(frame.tasks_started_total).to.be.at.least(before.tasks_started_total);
                     expect(frame.tasks_sent_total).to.be.at.least(before.tasks_sent_total);
                     expect(frame.tasks_recv_total).to.be.at.least(before.tasks_recv_total);
-                    expect(frame.idle_microseconds_per_worker).to.be.at.least(before.idle_microseconds_per_worker);
+                    expect(frame.idle_microseconds_per_thread).to.be.at.least(before.idle_microseconds_per_thread);
                 }
                 expect(frame.tasks_running).to.be.at.most(frame.process_threads - 1);
-                expect(frame.process_cpu_pct).to.be.at.most(allowed.get(frame.worker_id)! * 100);
+                expect(frame.process_cpu_pct).to.be.at.most(allowed.get(frame.rank)! * 100);
                 expect(frame.process_rss_bytes).to.be.below(2 * 1024 ** 3);
-                last.set(frame.worker_id, frame);
+                last.set(frame.rank, frame);
             }
             for (const node of sent.nodes!) {
                 expect(node.mem_avail_bytes).to.be.within(0, node.mem_total_bytes);
@@ -150,7 +150,7 @@ describe('MockRun', () => {
             expect(computing(mock).every(worker => worker.pending === 0)).to.equal(true);
             // the frame was sampled up to a worker interval ago
             expect(workerFrame(mock, 0).scheduler_pending_count).to.be.within(1, center.pending);
-            expect(envelope(mock).workers!.filter(frame => frame.worker_id !== 0).every(frame => frame.scheduler_pending_count === 0)).to.equal(true);
+            expect(envelope(mock).ranks!.filter(frame => frame.rank !== 0).every(frame => frame.scheduler_pending_count === 0)).to.equal(true);
         });
 
         it('fills its queue to gempba\'s limit, then takes no more while it is full', () => {
@@ -174,7 +174,7 @@ describe('MockRun', () => {
         const mock = run({ scenario: 'imbalanced' });
         mock.advanceTo(60_000);
         // a worker that just went idle still shows the CPU it was using, settling within a few steps
-        const idle = envelope(mock).workers!.filter(frame => frame.worker_id !== 0 && frame.tasks_running === 0).map(frame => frame.process_cpu_pct).sort((a, b) => a - b);
+        const idle = envelope(mock).ranks!.filter(frame => frame.rank !== 0 && frame.tasks_running === 0).map(frame => frame.process_cpu_pct).sort((a, b) => a - b);
         expect(idle.length).to.be.above(2);
         expect(idle[Math.floor(idle.length / 2)]).to.be.within(85, 110);
     });
@@ -240,7 +240,7 @@ describe('MockRun', () => {
             const nodeIndex = mock.topology.nodes.findIndex(node => message.includes(node.host));
             const stalled = mock.topology.workers.filter(worker => worker.nodeIndex === nodeIndex).map(worker => worker.workerId);
             const others = mock.topology.workers.filter(worker => worker.nodeIndex !== nodeIndex).map(worker => worker.workerId);
-            const seqs = () => new Map(envelope(mock).workers!.map(frame => [frame.worker_id, frame.seq_no]));
+            const seqs = () => new Map(envelope(mock).ranks!.map(frame => [frame.rank, frame.seq_no]));
             const start = seqs();
             mock.advanceTo(5000 + MockFault.STALL_MS - 100);
             const during = seqs();
@@ -258,7 +258,7 @@ describe('MockRun', () => {
             const workerId = Number(/worker (\d+)/.exec(message)![1]);
             const frame = workerFrame(mock, workerId);
             expect(frame).to.include({ seq_no: 1, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0 });
-            const pid = envelope(mock).topology!.identities!.find(identity => identity.worker_id === workerId)!.pid;
+            const pid = envelope(mock).topology!.identities!.find(identity => identity.rank === workerId)!.pid;
             expect(message).to.contain(`PID ${pid}`);
             expect(view(mock, workerId).phase).to.equal('available');
             expect(mock.workerViews().some(worker => worker.next === workerId)).to.equal(false);
@@ -267,11 +267,11 @@ describe('MockRun', () => {
         it('adds and removes workers, keeping every node and the center', () => {
             const mock = run({}, { shape: { nodes: 1, workersPerNode: 2 } });
             expect(mock.fault('add-worker')).to.equal('Added worker 2 on mock-host-01');
-            expect(envelope(mock).workers!.map(frame => frame.worker_id)).to.deep.equal([0, 1, 2]);
+            expect(envelope(mock).ranks!.map(frame => frame.rank)).to.deep.equal([0, 1, 2]);
             mock.advanceTo(1000);
             expect(mock.fault('remove-worker')).to.match(/^Removed worker [12] from mock-host-01$/);
             expect(mock.fault('remove-worker')).to.match(/^No worker can be removed/);
-            expect(envelope(mock).topology!.nodes![0].worker_ids).to.have.lengthOf(2);
+            expect(envelope(mock).topology!.nodes![0].ranks).to.have.lengthOf(2);
         });
 
         it('ends the run', () => {

@@ -122,7 +122,7 @@ describe('RemoteConnection', function (): void {
         expect(new KnownHosts(path.join(dir, 'known_hosts')).check('127.0.0.1', port, server!.hostKey.getPublicSSH())).to.equal('trusted');
 
         const forward = await host.openForward(TargetSpec.of(undefined, 9000));
-        expect((await firstFrame(forward.port)).workers).to.have.lengthOf(4);
+        expect((await firstFrame(forward.port)).ranks).to.have.lengthOf(4);
         forward.close();
 
         host.close();
@@ -244,7 +244,7 @@ describe('RemoteConnection', function (): void {
         const forward = await jump.openForward(TargetSpec.of('tester@node7', 9000));
         expect(server!.execs).to.have.lengthOf(1);
         expect(server!.execs[0]).to.match(/^ssh -v -N -o BatchMode=yes .* -L 127\.0\.0\.1:\d+:127\.0\.0\.1:9000 node7$/);
-        expect((await firstFrame(forward.port)).workers).to.have.lengthOf(4);
+        expect((await firstFrame(forward.port)).ranks).to.have.lengthOf(4);
         forward.close();
     });
 

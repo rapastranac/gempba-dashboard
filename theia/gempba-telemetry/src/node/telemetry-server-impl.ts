@@ -206,9 +206,9 @@ export class TelemetryServerImpl implements TelemetryServer {
     }
 
     protected sendRates(telemetry: TelemetryClient): boolean {
-        const worker = telemetry.sendControl(ControlKind.SetWorkerIntervalMs, this.workerIntervalMs);
+        const rank = telemetry.sendControl(ControlKind.SetWorkerIntervalMs, this.workerIntervalMs);
         const node = telemetry.sendControl(ControlKind.SetNodeIntervalMs, this.nodeIntervalMs);
-        return worker && node;
+        return rank && node;
     }
 
     protected stopListening(): void {

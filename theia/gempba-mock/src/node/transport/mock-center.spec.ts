@@ -81,7 +81,7 @@ describe('MockCenter', () => {
         const connectedAt = Date.now();
         await until(() => client.lines.length > 0);
         expect(Date.now() - connectedAt).to.be.below(400);
-        expect(BroadcastEnvelope.parse(client.lines[0]).workers).to.have.lengthOf(8);
+        expect(BroadcastEnvelope.parse(client.lines[0]).ranks).to.have.lengthOf(8);
         expect(logged).to.deep.equal([`TCP client ${client.socket.localPort} connected`]);
     });
 

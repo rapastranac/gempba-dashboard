@@ -167,7 +167,7 @@ describe('MockSshEndpoint', () => {
         await serve(ConnectionMode.HOST);
         const client = await connect();
         const line = await firstLine(await forward(client, 9000));
-        expect(BroadcastEnvelope.parse(line).workers).to.have.lengthOf(8);
+        expect(BroadcastEnvelope.parse(line).ranks).to.have.lengthOf(8);
         expect(logged.some(message => message.startsWith('tester signed in over SSH from 127.0.0.1:'))).to.equal(true);
         await until(() => logged.includes('tester over SSH connected'));
         let refused: unknown;
