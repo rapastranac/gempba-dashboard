@@ -60,7 +60,7 @@ export namespace GridTiles {
         node(host: string): NodeSeries;
         throughput(host: string): readonly number[];
         clusterThroughput(): readonly number[];
-        rank(workerId: number): RankSeries;
+        rank(id: number): RankSeries;
         nodeFrameAt(host: string): number | undefined;
         lastFrameAt(): number | undefined;
     }
@@ -104,7 +104,7 @@ export namespace GridTiles {
         if (!snapshot || nodes.length === 0) {
             return undefined;
         }
-        const workers = nodes.flatMap(node => node.sockets.flatMap(socket => socket.ranks));
+        const ranks = nodes.flatMap(node => node.sockets.flatMap(socket => socket.ranks));
         const allocated = nodes.reduce((sum, node) => sum + NodeUtilization.allocatedCores(node), 0);
         const throughput = sources.clusterThroughput();
         const unit = Rates.unitFor(Math.max(0, ...throughput));
@@ -114,7 +114,7 @@ export namespace GridTiles {
         const moves = TaskMoves.of(snapshot);
         const figures: GridFigure[] = [
             {
-                label: 'Cores busy', value: NumberText.fixed(NodeUtilization.coresBusy(workers), 1), unit: `of ${allocated}`,
+                label: 'Cores busy', value: NumberText.fixed(NodeUtilization.coresBusy(ranks), 1), unit: `of ${allocated}`,
                 hint: 'The cores the workers keep busy, of those allocated to them.'
             },
             {
@@ -122,15 +122,15 @@ export namespace GridTiles {
                 detail: Rates.runAverage(moves.started, snapshot.elapsedSeconds), hint: TaskWords.STARTED_HINT
             }
         ];
-        if (workers.length > 1) {
-            figures.push(movedFigure(moves), idleFigure(snapshot, workers.map(worker => worker.id), sources));
+        if (ranks.length > 1) {
+            figures.push(movedFigure(moves), idleFigure(snapshot, ranks.map(rank => rank.id), sources));
         }
         if (memTotal > 0) {
             figures.push(memoryFigure(memUsed, memTotal));
         }
         return {
             liveness: Liveness.of({ ...clock, lastFrameAt: sources.lastFrameAt() }),
-            summary: `${plural(nodes.length, 'node')} · ${plural(workers.length, 'worker')}`,
+            summary: `${plural(nodes.length, 'node')} · ${plural(ranks.length, 'worker')}`,
             figures,
             throughput: throughput.map(rate => Rates.inUnit(rate, unit)),
             throughputUnit: unit,
@@ -153,8 +153,8 @@ export namespace GridTiles {
     }
 
     /** How much of their pools' time the workers wait for work now, on average, the coordinator left out; a dash before any reading. */
-    function idleFigure(snapshot: WorldSnapshot, workerIds: readonly number[], sources: Sources): GridFigure {
-        const readings = workerIds.filter(id => !WorldSnapshot.isCoordinator(snapshot, id)).map(id => latest(sources.rank(id).idlePct))
+    function idleFigure(snapshot: WorldSnapshot, ids: readonly number[], sources: Sources): GridFigure {
+        const readings = ids.filter(id => !WorldSnapshot.isCoordinator(snapshot, id)).map(id => latest(sources.rank(id).idlePct))
             .filter((reading): reading is number => reading !== undefined);
         const mean = readings.length > 0 ? readings.reduce((sum, reading) => sum + reading, 0) / readings.length : undefined;
         return {

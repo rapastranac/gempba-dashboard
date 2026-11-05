@@ -18,8 +18,8 @@ export namespace TaskMoves {
     export function of(world: WorldSnapshot, host?: string): TaskMoves {
         const hostOf = new Map<number, string>();
         for (const node of world.nodes) {
-            for (const worker of node.sockets.flatMap(socket => socket.ranks)) {
-                hostOf.set(worker.id, node.host);
+            for (const rank of node.sockets.flatMap(socket => socket.ranks)) {
+                hostOf.set(rank.id, node.host);
             }
         }
         let started = 0;
@@ -27,11 +27,11 @@ export namespace TaskMoves {
         let received = 0;
         let acrossNodes = 0;
         for (const node of world.nodes.filter(candidate => host === undefined || candidate.host === host)) {
-            for (const worker of node.sockets.flatMap(socket => socket.ranks)) {
-                started += worker.tasksStartedTotal;
-                sent += worker.tasksSentTotal;
-                received += worker.tasksRecvTotal;
-                for (const peer of worker.peers) {
+            for (const rank of node.sockets.flatMap(socket => socket.ranks)) {
+                started += rank.tasksStartedTotal;
+                sent += rank.tasksSentTotal;
+                received += rank.tasksRecvTotal;
+                for (const peer of rank.peers) {
                     const to = hostOf.get(peer.peerRank);
                     if (to !== undefined && to !== node.host) {
                         acrossNodes += peer.count;

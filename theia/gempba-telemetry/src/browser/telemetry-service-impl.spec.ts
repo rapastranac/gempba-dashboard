@@ -13,7 +13,7 @@ import { TelemetryServiceImpl } from './telemetry-service-impl';
 
 /** One node "h" whose worker 7 sent frame `seqNo` at `millis`, with a node frame its sentinel took at `millis`. */
 function snapshot(host: string, seqNo = 1, millis = 0): WorldSnapshot {
-    const worker: RankSnapshot = {
+    const rank: RankSnapshot = {
         id: 7, seqNo, localMillis: millis, pid: 0, sentinel: true, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
         tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0, cpuPct: 90, rssBytes: 0, threads: 1,
         elapsedSeconds: 0, peers: []
@@ -21,7 +21,7 @@ function snapshot(host: string, seqNo = 1, millis = 0): WorldSnapshot {
     const node: NodeSnapshot = {
         host, socketCount: 1, physicalCores: 4, logicalCores: 4, hasLiveMemory: true, memTotalBytes: 100, memUsedBytes: 25,
         sentinelRank: 7, sentinelLocalMillis: millis, nodeUtilPct: 50,
-        sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 4, cpuIds: [0, 1, 2, 3], hasTopology: true, coreUsage: [], ranks: [worker] }]
+        sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 4, cpuIds: [0, 1, 2, 3], hasTopology: true, coreUsage: [], ranks: [rank] }]
     };
     return { ...WorldSnapshot.empty(), timestampMillis: 1, nodes: [node] };
 }
@@ -44,7 +44,7 @@ describe('TelemetryServiceImpl', () => {
     let calls: string[];
     let receiver: TelemetryServerClientImpl;
     let nodeHistory: NodeHistoryStore;
-    let workerHistory: RankHistoryStore;
+    let rankHistory: RankHistoryStore;
     let settings: FakeRateSettings;
     let service: TelemetryService;
 
@@ -56,7 +56,7 @@ describe('TelemetryServiceImpl', () => {
             listen: async target => void calls.push(`listen ${target.gempbaPort}`),
             stop: async () => void calls.push('stop'),
             disconnect: async () => void calls.push('disconnect'),
-            pushRates: async (worker, node) => void calls.push(`rates ${worker} ${node}`),
+            pushRates: async (rank, node) => void calls.push(`rates ${rank} ${node}`),
             setClient: () => undefined,
             dispose: () => undefined
         };
@@ -70,7 +70,7 @@ describe('TelemetryServiceImpl', () => {
         container.bind(TelemetryService).toService(TelemetryServiceImpl);
         receiver = container.get(TelemetryServerClientImpl);
         nodeHistory = container.get(NodeHistoryStore);
-        workerHistory = container.get(RankHistoryStore);
+        rankHistory = container.get(RankHistoryStore);
         settings = container.get<FakeRateSettings>(RateSettings);
         service = container.get(TelemetryService);
     });
@@ -82,7 +82,7 @@ describe('TelemetryServiceImpl', () => {
 
     it('records the histories before announcing a snapshot', () => {
         const seen: number[][] = [];
-        service.onSnapshot(() => seen.push([nodeHistory.seriesFor('h').cpu.length, workerHistory.seriesFor(7).cpu.length]));
+        service.onSnapshot(() => seen.push([nodeHistory.seriesFor('h').cpu.length, rankHistory.seriesFor(7).cpu.length]));
         receiver.onSnapshot(snapshot('h'));
         expect(seen).to.deep.equal([[1, 1]]);
         expect(service.snapshot!.nodes[0].host).to.equal('h');
@@ -142,7 +142,7 @@ describe('TelemetryServiceImpl', () => {
         receiver.onSnapshot(snapshot('h', 2, 500));
         await service.listen(TargetSpec.of(undefined, 9001));
         expect(service.snapshot).to.equal(undefined);
-        expect([nodeHistory.hosts(), workerHistory.ranks()]).to.deep.equal([[], []]);
+        expect([nodeHistory.hosts(), rankHistory.ranks()]).to.deep.equal([[], []]);
         expect(service.observedRates).to.deep.equal({ workerIntervalMs: undefined, nodeIntervalMs: undefined });
         expect([service.lastFrameAt, service.nodeFrameAt('h')]).to.deep.equal([undefined, undefined]);
     });

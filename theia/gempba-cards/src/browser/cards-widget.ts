@@ -140,7 +140,7 @@ export class CardsWidget extends SplitWidget {
             return;
         }
         const first = this.snapshot?.nodes[0];
-        const sentinel = first && this.tree.model.getNode(CardsTreeNode.workerId(first.host, first.sentinelRank));
+        const sentinel = first && this.tree.model.getNode(CardsTreeNode.rankId(first.host, first.sentinelRank));
         if (CardsTreeNode.is(sentinel)) {
             this.picked = true;
             this.tree.model.selectNode(sentinel);

@@ -31,12 +31,12 @@ export namespace CoreHeat {
     export function loadByCpu(node: NodeSnapshot): Map<number, number> {
         const load = new Map<number, number>();
         for (const socket of node.sockets) {
-            for (const worker of socket.ranks) {
-                const cpuIds = worker.allowedCpuIds.length > 0 ? worker.allowedCpuIds : socket.cpuIds;
+            for (const rank of socket.ranks) {
+                const cpuIds = rank.allowedCpuIds.length > 0 ? rank.allowedCpuIds : socket.cpuIds;
                 if (cpuIds.length === 0) {
                     continue;
                 }
-                const share = worker.cpuPct / cpuIds.length;
+                const share = rank.cpuPct / cpuIds.length;
                 for (const cpuId of cpuIds) {
                     load.set(cpuId, (load.get(cpuId) ?? 0) + share);
                 }

@@ -15,10 +15,10 @@ export class PeersDialog extends ReactDialog<void> {
     protected readonly rows: CardsText.PeerRow[];
     protected readonly total: string;
 
-    constructor(worker: RankSnapshot, world: WorldSnapshot | undefined) {
-        super({ title: `Outgoing peers — Worker ${worker.id}`, maxWidth: 640 });
-        this.rows = CardsText.peerRows(worker, world);
-        this.total = `Total: ${Peers.summarize(worker.peers)}`;
+    constructor(rank: RankSnapshot, world: WorldSnapshot | undefined) {
+        super({ title: `Outgoing peers — Worker ${rank.id}`, maxWidth: 640 });
+        this.rows = CardsText.peerRows(rank, world);
+        this.total = `Total: ${Peers.summarize(rank.peers)}`;
         this.appendAcceptButton('OK');
         this.contentNode.classList.add('gempba-peers-dialog');
     }

@@ -4,7 +4,7 @@ import { CardsText } from './cards-text';
 
 const GiB = 1024 ** 3;
 
-function worker(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
+function rank(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
     return {
         id: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
         tasksStartedTotal: 12450, tasksRunning: 1, tasksSentTotal: 619, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerThread: 238,
@@ -16,7 +16,7 @@ function worker(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
 function socket(overrides: Partial<SocketSnapshot> = {}): SocketSnapshot {
     return {
         socketId: 0, name: 'Xeon', physicalCores: 4, logicalCores: 8, cpuIds: [0, 1, 2, 3, 4, 5, 6, 7], hasTopology: true,
-        coreUsage: [{ rank: 3, cpuPct: 87.3, accessibleCores: 4, socketCores: 8 }], ranks: [worker(), worker({ id: 4 })], ...overrides
+        coreUsage: [{ rank: 3, cpuPct: 87.3, accessibleCores: 4, socketCores: 8 }], ranks: [rank(), rank({ id: 4 })], ...overrides
     };
 }
 
@@ -33,24 +33,24 @@ describe('CardsText', () => {
         expect(CardsText.nodeCaption(node({ sockets: [socket(), socket({ socketId: 1, ranks: [] })] }))).to.equal('2 sockets · 2 workers');
         expect(CardsText.socketTitle(socket())).to.equal('Socket 0: Xeon');
         expect(CardsText.socketTitle(socket({ hasTopology: false }))).to.equal('Socket 0');
-        expect(CardsText.socketCaption(socket({ ranks: [worker()] }))).to.equal('1 worker');
-        expect(CardsText.workerTitle(worker())).to.equal('Worker 3');
-        expect(CardsText.workerTitle(worker({ id: 0, sentinel: true }))).to.equal('Worker 0 · sentinel');
-        expect(CardsText.workerTitle(worker({ id: 0, sentinel: true }), true)).to.equal('Worker 0 · coordinator · sentinel');
-        expect(CardsText.workerCaption(worker(), 4)).to.equal('22% CPU · 256.0 MB');
+        expect(CardsText.socketCaption(socket({ ranks: [rank()] }))).to.equal('1 worker');
+        expect(CardsText.rankTitle(rank())).to.equal('Worker 3');
+        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }))).to.equal('Worker 0 · sentinel');
+        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }), true)).to.equal('Worker 0 · coordinator · sentinel');
+        expect(CardsText.rankCaption(rank(), 4)).to.equal('22% CPU · 256.0 MB');
     });
 
     it('subtitles a worker with its process, frame and node', () => {
-        expect(CardsText.workerSubtitle('alpha', worker())).to.equal('PID 4100 · frame #17 · on alpha');
-        expect(CardsText.workerSubtitle('alpha', worker({ pid: 0 }))).to.equal('frame #17 · on alpha');
+        expect(CardsText.rankSubtitle('alpha', rank())).to.equal('PID 4100 · frame #17 · on alpha');
+        expect(CardsText.rankSubtitle('alpha', rank({ pid: 0 }))).to.equal('frame #17 · on alpha');
     });
 
     it('lists outgoing peers busiest first, with the node each runs on', () => {
-        const sender = worker({
+        const sender = rank({
             peers: [{ peerRank: 4, bytes: 2048, count: 3 }, { peerRank: 9, bytes: 1024 ** 2, count: 1200 }, { peerRank: 7, bytes: 10, count: 3 }]
         });
         const world = {
-            nodes: [node({ host: 'alpha', sockets: [socket()] }), node({ host: 'beta', sockets: [socket({ ranks: [worker({ id: 9 })] })] })]
+            nodes: [node({ host: 'alpha', sockets: [socket()] }), node({ host: 'beta', sockets: [socket({ ranks: [rank({ id: 9 })] })] })]
         } as unknown as WorldSnapshot;
         expect(CardsText.peerRows(sender, world)).to.deep.equal([
             { peer: 'Worker 9', host: 'beta', tasks: '1,200', bytes: '1.0 MB' },

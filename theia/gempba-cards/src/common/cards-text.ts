@@ -26,27 +26,27 @@ export namespace CardsText {
     }
 
     /** `Worker 3`, `Worker 3 · sentinel`, or `Worker 0 · coordinator · sentinel`; the view marks the sentinel with a star icon. */
-    export function workerTitle(worker: RankSnapshot, coordinator = false): string {
-        return [`Worker ${worker.id}`, ...(coordinator ? ['coordinator'] : []), ...(worker.sentinel ? ['sentinel'] : [])].join(' · ');
+    export function rankTitle(rank: RankSnapshot, coordinator = false): string {
+        return [`Worker ${rank.id}`, ...(coordinator ? ['coordinator'] : []), ...(rank.sentinel ? ['sentinel'] : [])].join(' · ');
     }
 
     /** The short caption of a worker's tree row, its CPU as a share of the cores it may use, as its meter shows: `22% CPU · 256.0 MB`. */
-    export function workerCaption(worker: RankSnapshot, accessibleCores: number): string {
-        return `${NumberText.fixed(worker.cpuPct / Math.max(accessibleCores, 1), 0)}% CPU · ${Bytes.human(worker.rssBytes)}`;
+    export function rankCaption(rank: RankSnapshot, accessibleCores: number): string {
+        return `${NumberText.fixed(rank.cpuPct / Math.max(accessibleCores, 1), 0)}% CPU · ${Bytes.human(rank.rssBytes)}`;
     }
 
     /** e.g. `PID 4100 · frame #17 · on alpha`. */
-    export function workerSubtitle(host: string, worker: RankSnapshot): string {
-        const parts = worker.pid > 0 ? [`PID ${worker.pid}`] : [];
-        parts.push(`frame #${worker.seqNo}`, `on ${host}`);
+    export function rankSubtitle(host: string, rank: RankSnapshot): string {
+        const parts = rank.pid > 0 ? [`PID ${rank.pid}`] : [];
+        parts.push(`frame #${rank.seqNo}`, `on ${host}`);
         return parts.join(' · ');
     }
 
     /** Every outgoing peer of a worker, busiest first, with the node each one runs on. */
-    export function peerRows(worker: RankSnapshot, world: WorldSnapshot | undefined): PeerRow[] {
+    export function peerRows(rank: RankSnapshot, world: WorldSnapshot | undefined): PeerRow[] {
         const hostOf = new Map<number, string>();
         world?.nodes.forEach(node => node.sockets.forEach(socket => socket.ranks.forEach(each => hostOf.set(each.id, node.host))));
-        return [...worker.peers]
+        return [...rank.peers]
             .sort((a, b) => b.count - a.count || b.bytes - a.bytes || a.peerRank - b.peerRank)
             .map(peer => ({
                 peer: `Worker ${peer.peerRank}`,

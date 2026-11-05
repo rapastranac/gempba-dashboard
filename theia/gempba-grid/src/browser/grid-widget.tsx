@@ -47,7 +47,7 @@ export class GridWidget extends ReactWidget {
         node: host => this.nodeHistory.seriesFor(host),
         throughput: host => this.rankHistory.throughputFor(host),
         clusterThroughput: () => this.rankHistory.clusterThroughput(),
-        rank: workerId => this.rankHistory.seriesFor(workerId),
+        rank: id => this.rankHistory.seriesFor(id),
         nodeFrameAt: host => this.telemetry.nodeFrameAt(host),
         lastFrameAt: () => this.telemetry.lastFrameAt
     };
