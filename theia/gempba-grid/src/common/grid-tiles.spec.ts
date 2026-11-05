@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { NodeHistoryStore, NodeSeries, NodeSnapshot, PeerSnapshot, TaskWords, WorkerSeries, RankSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeHistoryStore, NodeSeries, NodeSnapshot, PeerSnapshot, TaskWords, RankSeries, RankSnapshot, WorldSnapshot } from '@gempba/core';
 import { GridTiles } from './grid-tiles';
 
 const GiB = 1024 ** 3;
@@ -31,7 +31,7 @@ function sources(overrides: Partial<GridTiles.Sources> = {}): GridTiles.Sources 
         node: () => SERIES,
         throughput: () => [100, 100, 100, 100, 100, 130, 130, 130, 130, 130],
         clusterThroughput: () => CLUSTER_THROUGHPUT,
-        worker: () => WorkerSeries.empty(),
+        rank: () => RankSeries.empty(),
         nodeFrameAt: () => 9_500,
         lastFrameAt: () => 9_900,
         ...overrides
@@ -159,8 +159,8 @@ describe('GridTiles', () => {
 
         it('averages how idle the workers are now, leaving out the coordinator, which runs no tasks', () => {
             const idlePct = new Map([[0, [0]], [1, [5, 10]], [2, [30]]]);
-            const series = (id: number): WorkerSeries => ({ ...WorkerSeries.empty(), idlePct: idlePct.get(id) ?? [] });
-            const idle = GridTiles.overview(SHARED, sources({ worker: series }), CLOCK)!.figures.find(figure => figure.label === 'Idle');
+            const series = (id: number): RankSeries => ({ ...RankSeries.empty(), idlePct: idlePct.get(id) ?? [] });
+            const idle = GridTiles.overview(SHARED, sources({ rank: series }), CLOCK)!.figures.find(figure => figure.label === 'Idle');
             expect(idle).to.include({ value: '20', unit: '%', tone: 'idle' });
             const fresh = GridTiles.overview(SHARED, sources(), CLOCK)!.figures.find(figure => figure.label === 'Idle');
             expect([fresh?.value, fresh?.unit]).to.deep.equal(['—', undefined]);

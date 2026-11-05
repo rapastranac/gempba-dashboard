@@ -1,5 +1,5 @@
 import {
-    Bytes, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, TaskMoves, TaskWords, WorkerSeries, WorldSnapshot
+    Bytes, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, TaskMoves, TaskWords, RankSeries, WorldSnapshot
 } from '@gempba/core';
 import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { Trend } from '@gempba/ui/lib/common/trend';
@@ -60,7 +60,7 @@ export namespace GridTiles {
         node(host: string): NodeSeries;
         throughput(host: string): readonly number[];
         clusterThroughput(): readonly number[];
-        worker(workerId: number): WorkerSeries;
+        rank(workerId: number): RankSeries;
         nodeFrameAt(host: string): number | undefined;
         lastFrameAt(): number | undefined;
     }
@@ -154,7 +154,7 @@ export namespace GridTiles {
 
     /** How much of their pools' time the workers wait for work now, on average, the coordinator left out; a dash before any reading. */
     function idleFigure(snapshot: WorldSnapshot, workerIds: readonly number[], sources: Sources): GridFigure {
-        const readings = workerIds.filter(id => !WorldSnapshot.isCoordinator(snapshot, id)).map(id => latest(sources.worker(id).idlePct))
+        const readings = workerIds.filter(id => !WorldSnapshot.isCoordinator(snapshot, id)).map(id => latest(sources.rank(id).idlePct))
             .filter((reading): reading is number => reading !== undefined);
         const mean = readings.length > 0 ? readings.reduce((sum, reading) => sum + reading, 0) / readings.length : undefined;
         return {

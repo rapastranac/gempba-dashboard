@@ -1,5 +1,5 @@
 /** A copy of one worker's recent history for drawing; each series is oldest first. */
-export interface WorkerSeries {
+export interface RankSeries {
     /** Percent of one core, as in the frames. */
     readonly cpu: readonly number[];
     /** Tasks started per second, handed to its threads, over the last 10 s of the worker's frames. */
@@ -9,13 +9,13 @@ export interface WorkerSeries {
     readonly rssBytes: readonly number[];
 }
 
-export namespace WorkerSeries {
+export namespace RankSeries {
 
-    export function empty(): WorkerSeries {
+    export function empty(): RankSeries {
         return { cpu: [], tasksPerSecond: [], idlePct: [], rssBytes: [] };
     }
 
-    export function isEmpty(series: WorkerSeries): boolean {
+    export function isEmpty(series: RankSeries): boolean {
         return series.cpu.length === 0;
     }
 }

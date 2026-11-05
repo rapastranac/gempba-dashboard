@@ -1,5 +1,5 @@
 import { Event } from '@theia/core/lib/common/event';
-import { ConnectionMode, ConnectionState, NodeSeries, RefreshRates, SessionSpec, TargetSpec, WorkerSeries, WorldSnapshot } from '@gempba/core';
+import { ConnectionMode, ConnectionState, NodeSeries, RefreshRates, SessionSpec, TargetSpec, RankSeries, WorldSnapshot } from '@gempba/core';
 
 /**
  * The frontend API every feature injects: the active session's telemetry stream and its controls. Features
@@ -56,10 +56,10 @@ export interface NodeHistoryService {
 }
 
 /** Per-worker live history of the active session, with node and cluster throughput, updated before each snapshot is announced. */
-export const WorkerHistoryService = Symbol('WorkerHistoryService');
+export const RankHistoryService = Symbol('WorkerHistoryService');
 
-export interface WorkerHistoryService {
-    seriesFor(workerId: number): WorkerSeries;
+export interface RankHistoryService {
+    seriesFor(id: number): RankSeries;
     /** Tasks started per second by all of one node's workers, oldest first. */
     throughputFor(host: string): readonly number[];
     /** Tasks started per second by every worker, oldest first. */

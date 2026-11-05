@@ -1,6 +1,6 @@
 import {
-    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, SocketSnapshot, TaskWords, WorkerHistoryStore,
-    WorkerSeries, RankSnapshot, WorldSnapshot
+    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, SocketSnapshot, TaskWords, RankHistoryStore,
+    RankSeries, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { Trend } from '@gempba/ui/lib/common/trend';
 import { CardsText } from './cards-text';
@@ -97,7 +97,7 @@ export namespace CardsPanel {
     /** What the panel reads besides the snapshot: the hub's rolling histories. */
     export interface Histories {
         node(host: string): NodeSeries;
-        worker(workerId: number): WorkerSeries;
+        rank(workerId: number): RankSeries;
         throughput(host: string): readonly number[];
     }
 
@@ -172,7 +172,7 @@ export namespace CardsPanel {
     }
 
     export function forWorker(world: WorldSnapshot | undefined, socket: SocketSnapshot, worker: RankSnapshot, histories: Histories): Panel {
-        const series = histories.worker(worker.id);
+        const series = histories.rank(worker.id);
         const accessible = accessibleCores(worker, socket);
         const idle = latest(series.idlePct);
         const host = world?.nodes.find(node => node.sockets.some(each => each.ranks.some(other => other.id === worker.id)))?.host;
@@ -215,7 +215,7 @@ export namespace CardsPanel {
         }
         const cpu: Chart = {
             title: 'CPU', latest: `${NumberText.fixed(worker.cpuPct / accessible, 0)}% of ${plural(accessible, 'core')}`, values: series.cpu.map(pct => pct / accessible),
-            max: 100, capacity: WorkerHistoryStore.CAPACITY, tone: 'cpu'
+            max: 100, capacity: RankHistoryStore.CAPACITY, tone: 'cpu'
         };
         const moved: Total[] = [
             { label: TaskWords.SENT, value: Rates.countWithRate(worker.tasksSentTotal, worker.elapsedSeconds), hint: TaskWords.SENT_HINT },
@@ -233,7 +233,7 @@ export namespace CardsPanel {
                 rateChart(series.tasksPerSecond),
                 {
                     title: 'Idle', latest: idle === undefined ? '—' : `${NumberText.fixed(idle, 0)}%`, values: series.idlePct, max: 100,
-                    capacity: WorkerHistoryStore.CAPACITY, tone: 'idle'
+                    capacity: RankHistoryStore.CAPACITY, tone: 'idle'
                 },
                 cpu
             ],
@@ -287,7 +287,7 @@ export namespace CardsPanel {
         const unit = Rates.unitFor(Math.max(0, ...perSecond));
         return {
             title: TaskWords.STARTED, latest: Rates.text(latest(perSecond), 'tasks', unit), values: perSecond.map(rate => Rates.inUnit(rate, unit)),
-            capacity: WorkerHistoryStore.CAPACITY, tone: 'tasks'
+            capacity: RankHistoryStore.CAPACITY, tone: 'tasks'
         };
     }
 

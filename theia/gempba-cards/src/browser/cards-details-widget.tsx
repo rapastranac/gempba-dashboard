@@ -3,7 +3,7 @@ import { codicon } from '@theia/core/lib/browser/widgets/widget';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import { ConnectionState, RankSnapshot, WorldSnapshot } from '@gempba/core';
-import { NodeHistoryService, TelemetryService, WorkerHistoryService } from '@gempba/telemetry/lib/common';
+import { NodeHistoryService, TelemetryService, RankHistoryService } from '@gempba/telemetry/lib/common';
 import { Gauge, HeatStrip, HeroStat, LiveIndicator, LivenessWatch, MeterBar, Panel, Sparkline } from '@gempba/ui/lib/browser';
 import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { MotionTiming } from '@gempba/ui/lib/common/motion-timing';
@@ -29,7 +29,7 @@ export class CardsDetailsWidget extends ReactWidget {
 
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
     @inject(NodeHistoryService) protected readonly nodeHistory: NodeHistoryService;
-    @inject(WorkerHistoryService) protected readonly workerHistory: WorkerHistoryService;
+    @inject(RankHistoryService) protected readonly rankHistory: RankHistoryService;
 
     protected snapshot: WorldSnapshot | undefined;
     protected row: CardsTreeNode | undefined;
@@ -37,8 +37,8 @@ export class CardsDetailsWidget extends ReactWidget {
 
     protected readonly histories: CardsPanel.Histories = {
         node: host => this.nodeHistory.seriesFor(host),
-        worker: workerId => this.workerHistory.seriesFor(workerId),
-        throughput: host => this.workerHistory.throughputFor(host)
+        rank: workerId => this.rankHistory.seriesFor(workerId),
+        throughput: host => this.rankHistory.throughputFor(host)
     };
 
     @postConstruct()

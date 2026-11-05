@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import {
-    NodeHistoryStore, NodeSeries, NodeSnapshot, SocketSnapshot, StructureKey, TaskWords, WorkerHistoryStore, WorkerSeries, RankSnapshot, WorldSnapshot
+    NodeHistoryStore, NodeSeries, NodeSnapshot, SocketSnapshot, StructureKey, TaskWords, RankHistoryStore, RankSeries, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { CardsPanel } from './cards-panel';
 
@@ -28,10 +28,10 @@ function node(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
     };
 }
 
-function histories(overrides: Partial<{ node: NodeSeries, worker: WorkerSeries, throughput: number[] }> = {}): CardsPanel.Histories {
+function histories(overrides: Partial<{ node: NodeSeries, worker: RankSeries, throughput: number[] }> = {}): CardsPanel.Histories {
     return {
         node: () => overrides.node ?? { cpu: [50, 75], mem: [3 * GiB, 4 * GiB], cpuLatest: 75, memUsedLatest: 4 * GiB, memTotalLatest: 16 * GiB },
-        worker: () => overrides.worker ?? { cpu: [280, 300], tasksPerSecond: [110, 120], idlePct: [10, 12.4], rssBytes: [250 * 1024 ** 2, 256 * 1024 ** 2] },
+        rank: () => overrides.worker ?? { cpu: [280, 300], tasksPerSecond: [110, 120], idlePct: [10, 12.4], rssBytes: [250 * 1024 ** 2, 256 * 1024 ** 2] },
         throughput: () => overrides.throughput ?? [100, 100, 100, 100, 100, 130, 130, 130, 130, 130]
     };
 }
@@ -83,7 +83,7 @@ describe('CardsPanel', () => {
 
         it('charts CPU on a 0–100 scale, memory up to the total, and tasks started on a round scale', () => {
             const charts = CardsPanel.forNode(node(), histories()).charts;
-            expect(charts.map(chart => chart.capacity)).to.deep.equal([NodeHistoryStore.CAPACITY, NodeHistoryStore.CAPACITY, WorkerHistoryStore.CAPACITY]);
+            expect(charts.map(chart => chart.capacity)).to.deep.equal([NodeHistoryStore.CAPACITY, NodeHistoryStore.CAPACITY, RankHistoryStore.CAPACITY]);
             expect(charts.map(chart => [chart.title, chart.latest, chart.max, chart.tone])).to.deep.equal([
                 ['CPU', '75%', 100, 'cpu'], ['Memory', '4.0 GB', 16 * GiB, 'memory'], ['Tasks started', '130 tasks/s', undefined, 'tasks']
             ]);
@@ -221,7 +221,7 @@ describe('CardsPanel', () => {
         });
 
         it('shows no idle time or rate before two frames', () => {
-            const [tasks, idle] = CardsPanel.forWorker(undefined, socket(), worker(), histories({ worker: WorkerSeries.empty() })).heroes;
+            const [tasks, idle] = CardsPanel.forWorker(undefined, socket(), worker(), histories({ worker: RankSeries.empty() })).heroes;
             expect([tasks.value, idle.value, idle.unit]).to.deep.equal(['—', '—', undefined]);
         });
     });

@@ -3,7 +3,7 @@ import { expect } from 'chai';
 import { Emitter } from '@theia/core/lib/common/event';
 import { Container } from '@theia/core/shared/inversify';
 import {
-    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, RankSnapshot, WorldSnapshot
+    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RefreshRates, SessionSpec, TargetSpec, RankHistoryStore, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { TelemetryService } from '../common/telemetry-service';
@@ -44,7 +44,7 @@ describe('TelemetryServiceImpl', () => {
     let calls: string[];
     let receiver: TelemetryServerClientImpl;
     let nodeHistory: NodeHistoryStore;
-    let workerHistory: WorkerHistoryStore;
+    let workerHistory: RankHistoryStore;
     let settings: FakeRateSettings;
     let service: TelemetryService;
 
@@ -64,13 +64,13 @@ describe('TelemetryServiceImpl', () => {
         container.bind(TelemetryServer).toConstantValue(server);
         container.bind(TelemetryServerClientImpl).toSelf().inSingletonScope();
         container.bind(NodeHistoryStore).toConstantValue(new NodeHistoryStore());
-        container.bind(WorkerHistoryStore).toConstantValue(new WorkerHistoryStore());
+        container.bind(RankHistoryStore).toConstantValue(new RankHistoryStore());
         container.bind(RateSettings).toConstantValue(new FakeRateSettings());
         container.bind(TelemetryServiceImpl).toSelf().inSingletonScope();
         container.bind(TelemetryService).toService(TelemetryServiceImpl);
         receiver = container.get(TelemetryServerClientImpl);
         nodeHistory = container.get(NodeHistoryStore);
-        workerHistory = container.get(WorkerHistoryStore);
+        workerHistory = container.get(RankHistoryStore);
         settings = container.get<FakeRateSettings>(RateSettings);
         service = container.get(TelemetryService);
     });
@@ -142,7 +142,7 @@ describe('TelemetryServiceImpl', () => {
         receiver.onSnapshot(snapshot('h', 2, 500));
         await service.listen(TargetSpec.of(undefined, 9001));
         expect(service.snapshot).to.equal(undefined);
-        expect([nodeHistory.hosts(), workerHistory.workerIds()]).to.deep.equal([[], []]);
+        expect([nodeHistory.hosts(), workerHistory.ranks()]).to.deep.equal([[], []]);
         expect(service.observedRates).to.deep.equal({ workerIntervalMs: undefined, nodeIntervalMs: undefined });
         expect([service.lastFrameAt, service.nodeFrameAt('h')]).to.deep.equal([undefined, undefined]);
     });
