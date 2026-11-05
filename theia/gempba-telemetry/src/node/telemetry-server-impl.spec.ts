@@ -178,6 +178,29 @@ describe('TelemetryServerImpl', () => {
         expect(client.statuses.at(-1)).to.equal('refresh rate pushed (300 ms)');
     });
 
+    it('sends the run controls to gempba, and says in the status whether each went', async () => {
+        const received: string[] = [];
+        const gempba = net.createServer(socket => {
+            sockets.add(socket);
+            socket.on('close', () => sockets.delete(socket));
+            socket.on('data', chunk => received.push(...chunk.toString('utf8').split('\n').filter(line => line !== '')));
+        });
+        gempbas.push(gempba);
+        await new Promise<void>(resolve => gempba.listen(0, '127.0.0.1', resolve));
+        await server.sendControl({ kind: 'pause' });
+        expect(client.statuses.at(-1)).to.equal('pause not sent, the connection is down');
+
+        await server.listen(TargetSpec.of(undefined, (gempba.address() as net.AddressInfo).port));
+        await eventually(() => client.links.includes(StreamLink.UP));
+        for (const control of [{ kind: 'pause' }, { kind: 'resume' }, { kind: 'snapshot' }, { kind: 'mark', label: 'phase 2' }] as const) {
+            await server.sendControl(control);
+        }
+        await server.sendControl({ kind: 'mark', label: '' });
+        await eventually(() => received.length === 5);
+        expect(received.slice(1)).to.deep.equal(['{"kind":"pause"}', '{"kind":"resume"}', '{"kind":"snapshot"}', '{"kind":"mark","label":"phase 2"}']);
+        expect(client.statuses.slice(-2)).to.deep.equal(['mark "phase 2" sent', 'mark "" not sent: Enter a label']);
+    });
+
     it('stopping a local stream ends it and disconnects', async () => {
         await listenToMock();
         await eventually(() => client.snapshots.length >= 1);

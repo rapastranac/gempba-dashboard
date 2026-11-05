@@ -63,6 +63,14 @@ export interface TelemetryService {
      * it for frozen data only: a live stream would refill the views with its next frame.
      */
     clear(): void;
+    /** Asks gempba to pause its telemetry: its ranks stop sending frames, and the stream stays connected with header-only lines. */
+    pause(): Promise<void>;
+    /** Asks gempba to resume its telemetry. */
+    resume(): Promise<void>;
+    /** Asks gempba for one full line now, paused or not. */
+    requestSnapshot(): Promise<void>;
+    /** Marks this moment of the run with a label of 1 to 64 bytes, listed in the run's markers. */
+    mark(label: string): Promise<void>;
     /** Saves a new refresh rate as the user's setting, which applies it in every window. */
     setIntervalMs(intervalMs: number): Promise<void>;
 }

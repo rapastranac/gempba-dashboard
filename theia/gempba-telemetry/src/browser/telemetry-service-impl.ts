@@ -147,6 +147,22 @@ export class TelemetryServiceImpl implements TelemetryService {
         this.onClearEmitter.fire();
     }
 
+    pause(): Promise<void> {
+        return this.server.sendControl({ kind: 'pause' });
+    }
+
+    resume(): Promise<void> {
+        return this.server.sendControl({ kind: 'resume' });
+    }
+
+    requestSnapshot(): Promise<void> {
+        return this.server.sendControl({ kind: 'snapshot' });
+    }
+
+    mark(label: string): Promise<void> {
+        return this.server.sendControl({ kind: 'mark', label });
+    }
+
     setIntervalMs(intervalMs: number): Promise<void> {
         return this.rateSettings.set(intervalMs);
     }

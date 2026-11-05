@@ -1,5 +1,6 @@
 import { RpcServer } from '@theia/core/lib/common/messaging/proxy-factory';
 import { ConnectionMode, ConnectionState, SessionSpec, StreamLink, TargetSpec, WorldSnapshot } from '@gempba/core';
+import { RunControl } from './run-control';
 
 /**
  * The JSON-RPC contract between the telemetry backend and the frontend `TelemetryService`. Only read-model
@@ -21,6 +22,8 @@ export interface TelemetryServer extends RpcServer<TelemetryServerClient> {
     disconnect(): Promise<void>;
     /** Sends the refresh rate now if streaming, and on every later (re)connect, for rank and node frames alike. */
     pushInterval(intervalMs: number): Promise<void>;
+    /** Sends a run control to gempba now; the status says whether it went. */
+    sendControl(control: RunControl): Promise<void>;
 }
 
 /** Backend-to-frontend notifications; the `on` prefix makes them one-way RPC messages. */

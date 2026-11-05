@@ -7,6 +7,7 @@ import {
     RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
+import { RunControl } from '../common/run-control';
 import { ObservedIntervals, TelemetryService } from '../common/telemetry-service';
 import { RateSettings } from './rate-settings';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
@@ -59,6 +60,7 @@ describe('TelemetryServiceImpl', () => {
             stop: async () => void calls.push('stop'),
             disconnect: async () => void calls.push('disconnect'),
             pushInterval: async ms => void calls.push(`interval ${ms}`),
+            sendControl: async control => void calls.push(RunControl.text(control)),
             setClient: () => undefined,
             dispose: () => undefined
         };
@@ -227,5 +229,13 @@ describe('TelemetryServiceImpl', () => {
         await service.disconnect();
         expect(await service.availableModes()).to.deep.equal([ConnectionMode.LOCAL]);
         expect(calls).to.deep.equal(['stop', 'disconnect']);
+    });
+
+    it('sends the run controls to the backend', async () => {
+        await service.pause();
+        await service.resume();
+        await service.requestSnapshot();
+        await service.mark('phase 2');
+        expect(calls).to.deep.equal(['pause', 'resume', 'snapshot', 'mark "phase 2"']);
     });
 });

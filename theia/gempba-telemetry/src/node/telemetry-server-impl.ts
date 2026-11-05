@@ -2,10 +2,11 @@ import { ContributionProvider } from '@theia/core/lib/common/contribution-provid
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { inject, injectable, named } from '@theia/core/shared/inversify';
 import { ConnectionMode, ConnectionState, RefreshInterval, SessionSpec, StreamLink, TargetSpec } from '@gempba/core';
+import { RunControl } from '../common/run-control';
 import { TelemetryServer, TelemetryServerClient } from '../common/telemetry-protocol';
 import { FrameListener } from './client/frame-listener';
 import { TelemetryClient } from './client/telemetry-client';
-import { ControlKind } from './protocol/wire-protocol';
+import { ControlKind, ControlLine } from './protocol/wire-protocol';
 import { TelemetryStore } from './telemetry/telemetry-store';
 import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
 
@@ -184,6 +185,16 @@ export class TelemetryServerImpl implements TelemetryServer {
             this.status(`refresh rate pushed (${rate})`);
         } else {
             this.status('refresh rate not sent, the connection is down; it is sent on reconnect');
+        }
+    }
+
+    async sendControl(control: RunControl): Promise<void> {
+        const what = RunControl.text(control);
+        const problem = control.kind === 'mark' ? RunControl.labelProblem(control.label) : undefined;
+        if (problem) {
+            this.status(`${what} not sent: ${problem}`);
+        } else {
+            this.status(this.telemetry?.send(ControlLine.of(control)) ? `${what} sent` : `${what} not sent, the connection is down`);
         }
     }
 
