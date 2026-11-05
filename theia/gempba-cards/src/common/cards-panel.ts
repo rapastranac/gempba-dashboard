@@ -162,7 +162,7 @@ export namespace CardsPanel {
                     const accessible = accessibleCores(rank, socket);
                     const fraction = rank.cpuPct / (100 * accessible);
                     return {
-                        label: CardsText.rankTitle(rank, WorldSnapshot.isCoordinator(world, rank.id)), fraction, tone: 'cpu',
+                        label: CardsText.rankTitle(rank, world), fraction, tone: 'cpu',
                         valueText: `${NumberText.fixed(fraction * 100, 0)}% of ${plural(accessible, 'core')}`
                     };
                 })
@@ -222,7 +222,7 @@ export namespace CardsPanel {
             { label: TaskWords.RECEIVED, value: Rates.countWithRate(rank.tasksRecvTotal, rank.elapsedSeconds), hint: TaskWords.RECEIVED_HINT }
         ];
         return {
-            title: CardsText.rankTitle(rank, coordinator),
+            title: CardsText.rankTitle(rank, world),
             subtitle: [...(coordinator ? ['schedules the run, runs no tasks'] : []), CardsText.rankSubtitle(host ?? '—', rank)].join(' · '),
             gauge: {
                 label: `CPU on ${plural(accessible, 'core')}`, fraction: rank.cpuPct / (100 * accessible), tone: 'cpu',
