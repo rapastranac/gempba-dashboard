@@ -1,5 +1,7 @@
 import { Event } from '@theia/core/lib/common/event';
-import { ConnectionMode, ConnectionState, NodeSeries, RankSeries, RefreshInterval, SessionSpec, TargetSpec, WorldSnapshot } from '@gempba/core';
+import {
+    ConnectionMode, ConnectionState, NodeSeries, RankSeries, RefreshInterval, SessionSpec, StreamCondition, StreamLink, TargetSpec, WorldSnapshot
+} from '@gempba/core';
 
 /**
  * The frontend API every feature injects: the active session's telemetry stream and its controls. Features
@@ -20,9 +22,16 @@ export interface TelemetryService {
     readonly lastLineAt: number | undefined;
     /** The latest user-facing status line. */
     readonly status: string;
+    /** What the stream's link did last: up, retrying, or why it stopped; `undefined` from a new Listen until the backend reports. */
+    readonly link: StreamLink | undefined;
+    /** What the views say about the data held, from the state, the link and the latest snapshot; `undefined` while none is held. */
+    readonly condition: StreamCondition | undefined;
     readonly onSnapshot: Event<WorldSnapshot>;
     readonly onStateChange: Event<ConnectionState>;
     readonly onStatus: Event<string>;
+    readonly onLinkChange: Event<StreamLink | undefined>;
+    /** The held data was emptied, by Clear or a new Listen: views redraw from the empty hub. */
+    readonly onClear: Event<void>;
     /**
      * The refresh rate the user chose, in milliseconds: how often gempba sends every frame, rank and node frames alike.
      * It is a setting every window shares, sent to gempba before every Listen and Connect, and on every change.
@@ -42,13 +51,18 @@ export interface TelemetryService {
     connect(session: SessionSpec): Promise<void>;
     /**
      * Starts a new target over the open session, or on this machine when none is open; the snapshot, the
-     * histories, the observed rates and the frame times are cleared first. Another run on the same target, told by
-     * its run id, clears them too, before its first snapshot.
+     * histories, the observed rates and the frame times are cleared first, as by {@link clear}. Another run on the same
+     * target, told by its run id, clears them too, before its first snapshot.
      */
     listen(target: TargetSpec): Promise<void>;
     /** Stops streaming; an SSH session stays open, a local stream ends in DISCONNECTED. */
     stop(): Promise<void>;
     disconnect(): Promise<void>;
+    /**
+     * Empties the snapshot, the histories, the observed rates and the frame times, and fires {@link onClear}. The commands offer
+     * it for frozen data only: a live stream would refill the views with its next frame.
+     */
+    clear(): void;
     /** Saves a new refresh rate as the user's setting, which applies it in every window. */
     setIntervalMs(intervalMs: number): Promise<void>;
 }

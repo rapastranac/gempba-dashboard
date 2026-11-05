@@ -1,5 +1,5 @@
 import { RpcServer } from '@theia/core/lib/common/messaging/proxy-factory';
-import { ConnectionMode, ConnectionState, SessionSpec, TargetSpec, WorldSnapshot } from '@gempba/core';
+import { ConnectionMode, ConnectionState, SessionSpec, StreamLink, TargetSpec, WorldSnapshot } from '@gempba/core';
 
 /**
  * The JSON-RPC contract between the telemetry backend and the frontend `TelemetryService`. Only read-model
@@ -28,4 +28,6 @@ export interface TelemetryServerClient {
     onSnapshot(snapshot: WorldSnapshot): void;
     onStateChange(state: ConnectionState): void;
     onStatus(text: string): void;
+    /** What the stream's link did last: up, retrying, or why it stopped; sent once per change, and again for each new Listen. */
+    onLink(link: StreamLink): void;
 }

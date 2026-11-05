@@ -4,7 +4,7 @@ import { MenuContribution, MenuModelRegistry } from '@theia/core/lib/common/menu
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { QuickInputService, QuickPickItem } from '@theia/core/lib/common/quick-pick-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
-import { Config, ConnectionMode, ConnectionState, SessionSpec, TargetSpec } from '@gempba/core';
+import { Config, ConnectionMode, ConnectionState, SessionSpec, StreamCondition, TargetSpec } from '@gempba/core';
 import { TelemetryService } from '../common/telemetry-service';
 
 export namespace TelemetryCommands {
@@ -13,6 +13,7 @@ export namespace TelemetryCommands {
     export const LISTEN: Command = { id: 'gempba.listen', category: CATEGORY, label: 'Listen…' };
     export const STOP: Command = { id: 'gempba.stop', category: CATEGORY, label: 'Stop Listening' };
     export const DISCONNECT: Command = { id: 'gempba.disconnect', category: CATEGORY, label: 'Disconnect' };
+    export const CLEAR: Command = { id: 'gempba.clear', category: CATEGORY, label: 'Clear Data' };
     export const SET_RATE: Command = { id: 'gempba.setRefreshRate', category: CATEGORY, label: 'Set Refresh Rate…' };
 }
 
@@ -27,6 +28,7 @@ export namespace TelemetryMenus {
     export const RATES = [...CONTROLS, '1_rates'];
     export const RATE = [...RATES, 'rate'];
     export const STREAM = [...CONTROLS, '2_stream'];
+    export const DATA = [...CONTROLS, '3_data'];
 }
 
 const MODE_LABELS: Record<ConnectionMode, string> = {
@@ -75,13 +77,18 @@ export class TelemetryCommandContribution implements CommandContribution, MenuCo
             isEnabled: () => this.telemetry.state !== ConnectionState.DISCONNECTED,
             execute: () => this.run(this.telemetry.disconnect())
         });
+        registry.registerCommand(TelemetryCommands.CLEAR, {
+            isEnabled: () => StreamCondition.isFrozen(this.telemetry.condition),
+            execute: () => this.telemetry.clear()
+        });
     }
 
     registerMenus(menus: MenuModelRegistry): void {
-        [TelemetryCommands.CONNECT, TelemetryCommands.LISTEN, TelemetryCommands.STOP, TelemetryCommands.DISCONNECT]
+        [TelemetryCommands.CONNECT, TelemetryCommands.LISTEN, TelemetryCommands.STOP, TelemetryCommands.DISCONNECT, TelemetryCommands.CLEAR]
             .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.SESSION, { commandId: command.id, order: String(index) }));
         [TelemetryCommands.STOP, TelemetryCommands.DISCONNECT]
             .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.STREAM, { commandId: command.id, order: String(index) }));
+        menus.registerMenuAction(TelemetryMenus.DATA, { commandId: TelemetryCommands.CLEAR.id });
     }
 
     protected async connect(): Promise<void> {

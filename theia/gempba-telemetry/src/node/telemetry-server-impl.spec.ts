@@ -6,7 +6,7 @@ import * as path from 'path';
 import { bindContributionProvider } from '@theia/core/lib/common/contribution-provider';
 import { Emitter } from '@theia/core/lib/common/event';
 import { Container, injectable } from '@theia/core/shared/inversify';
-import { ConnectionMode, ConnectionState, SessionSpec, TargetSpec, WorldSnapshot } from '@gempba/core';
+import { ConnectionMode, ConnectionState, SessionSpec, StreamLink, TargetSpec, WorldSnapshot } from '@gempba/core';
 import { TelemetryServerClient } from '../common/telemetry-protocol';
 import { MockEmitter } from './mock/mock-emitter';
 import { TelemetryServerImpl } from './telemetry-server-impl';
@@ -17,6 +17,7 @@ class RecordingClient implements TelemetryServerClient {
     readonly snapshots: WorldSnapshot[] = [];
     readonly states: ConnectionState[] = [];
     readonly statuses: string[] = [];
+    readonly links: StreamLink[] = [];
 
     onSnapshot(snapshot: WorldSnapshot): void {
         this.snapshots.push(snapshot);
@@ -28,6 +29,10 @@ class RecordingClient implements TelemetryServerClient {
 
     onStatus(text: string): void {
         this.statuses.push(text);
+    }
+
+    onLink(link: StreamLink): void {
+        this.links.push(link);
     }
 }
 
@@ -150,6 +155,7 @@ describe('TelemetryServerImpl', () => {
         await listenToMock();
         await eventually(() => client.snapshots.length >= 1);
         expect(client.states).to.deep.equal([ConnectionState.LISTENING]);
+        expect(client.links).to.deep.equal([StreamLink.UP]);
     });
 
     it('streams mapped snapshots from the target', async () => {
@@ -180,6 +186,7 @@ describe('TelemetryServerImpl', () => {
         await new Promise(resolve => setTimeout(resolve, 150));
         expect(client.snapshots.length).to.equal(received);
         expect(client.states.at(-1)).to.equal(ConnectionState.DISCONNECTED);
+        expect(client.links).to.deep.equal([StreamLink.UP, StreamLink.STOPPED]);
     });
 
     it('stopping a stream over an SSH session keeps the session open', async () => {
@@ -192,6 +199,7 @@ describe('TelemetryServerImpl', () => {
         await eventually(() => client.snapshots.length >= 1);
         await server.stop();
         expect(client.states.slice(-2)).to.deep.equal([ConnectionState.LISTENING, ConnectionState.CONNECTED]);
+        expect(client.links.at(-1)).to.equal(StreamLink.STOPPED);
         expect(host.closed).to.deep.equal([]);
     });
 
@@ -201,6 +209,7 @@ describe('TelemetryServerImpl', () => {
         expect(client.states.at(-1)).to.equal(ConnectionState.DISCONNECTED);
         await server.stop();
         expect(client.states.at(-1)).to.equal(ConnectionState.DISCONNECTED);
+        expect(client.links.at(-1)).to.equal(StreamLink.DISCONNECTED);
     });
 
     it('closes a tunnel that opens after the session was abandoned', async () => {
@@ -218,12 +227,26 @@ describe('TelemetryServerImpl', () => {
         expect(client.snapshots[0].final).to.equal(true);
         expect(client.statuses.filter(text => text.includes('retrying'))).to.deep.equal([]);
         expect(client.states.at(-1)).to.equal(ConnectionState.LISTENING);
+        expect(client.links).to.deep.equal([StreamLink.UP, StreamLink.RETRYING]);
     });
 
     it('reads a stream that closes without the final line as a lost connection, and retries', async () => {
         await listenToOneLine(RECORDED);
         await eventually(() => client.statuses.some(text => text.endsWith('(peer closed); retrying…')));
         expect(client.statuses.some(text => text.startsWith('the run ended'))).to.equal(false);
+        expect(client.links).to.deep.equal([StreamLink.UP, StreamLink.RETRYING]);
+    });
+
+    it('reports the link afresh for each new Listen, though it did the same as the last stream\'s', async () => {
+        const vacant = net.createServer();
+        await new Promise<void>(resolve => vacant.listen(0, '127.0.0.1', resolve));
+        const port = (vacant.address() as net.AddressInfo).port;
+        await new Promise(resolve => vacant.close(resolve));
+        await server.listen(TargetSpec.of(undefined, port));
+        await eventually(() => client.links.length === 1);
+        await server.listen(TargetSpec.of(undefined, port));
+        await eventually(() => client.links.length === 2);
+        expect(client.links).to.deep.equal([StreamLink.RETRYING, StreamLink.RETRYING]);
     });
 
     it('a session that drops while streaming disconnects and says so, without retrying the stream', async () => {
@@ -238,6 +261,7 @@ describe('TelemetryServerImpl', () => {
         host.opened[0].drop(new Error('Keepalive timeout'));
         expect(client.states.at(-1)).to.equal(ConnectionState.DISCONNECTED);
         expect(client.statuses.at(-1)).to.equal('SSH session to me@vm closed (Keepalive timeout); connect again');
+        expect(client.links.at(-1)).to.equal(StreamLink.SESSION_CLOSED);
         expect(host.closed).to.deep.equal([host.opened[0]]);
 
         const received = client.snapshots.length;
