@@ -4,7 +4,7 @@ import { ControlKind, ControlLine } from '@gempba/telemetry/lib/node/protocol/wi
 import { MockFault } from '../../common/mock-fault';
 import { MockRun } from '../sim/mock-run';
 
-export interface MockCenterOptions {
+export interface MockAggregatorOptions {
     readonly log?: (message: string) => void;
     /** Once the run ends, after every client is closed: gempba's process has exited. */
     readonly onEnded?: () => void;
@@ -17,11 +17,11 @@ export interface MockCenterOptions {
 }
 
 /**
- * The mock's stand-in for gempba's center: it advances the run with the wall clock and, every broadcast interval,
+ * The mock's stand-in for gempba's aggregator, the telemetry server on rank 0: it advances the run with the wall clock and, every broadcast interval,
  * writes the run's latest frames to every client, the first one the moment a client connects. Control lines from any
  * client set the run's intervals, clamped as gempba clamps them, and apply at once.
  */
-export class MockCenter {
+export class MockAggregator {
 
     static readonly DEFAULT_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
     static readonly DEFAULT_MAX_INBOUND_BYTES = 64 * 1024;
@@ -31,7 +31,7 @@ export class MockCenter {
     protected timer: NodeJS.Timeout | undefined;
     protected running = false;
 
-    constructor(protected readonly mock: MockRun, protected readonly options: MockCenterOptions = {}) { }
+    constructor(protected readonly mock: MockRun, protected readonly options: MockAggregatorOptions = {}) { }
 
     get run(): MockRun {
         return this.mock;
@@ -74,7 +74,7 @@ export class MockCenter {
                 inbound = inbound.slice(newline + 1);
                 newline = inbound.indexOf('\n');
             }
-            if (inbound.length > (this.options.maxInboundBytes ?? MockCenter.DEFAULT_MAX_INBOUND_BYTES)) {
+            if (inbound.length > (this.options.maxInboundBytes ?? MockAggregator.DEFAULT_MAX_INBOUND_BYTES)) {
                 this.drop(stream, 'it sent too much without a newline');
             }
         });
@@ -133,7 +133,7 @@ export class MockCenter {
     }
 
     protected send(stream: Duplex, line: string): void {
-        if (stream.writableLength > (this.options.maxBufferedBytes ?? MockCenter.DEFAULT_MAX_BUFFERED_BYTES)) {
+        if (stream.writableLength > (this.options.maxBufferedBytes ?? MockAggregator.DEFAULT_MAX_BUFFERED_BYTES)) {
             this.drop(stream, 'it fell too far behind');
             return;
         }

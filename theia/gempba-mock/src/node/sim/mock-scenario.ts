@@ -16,7 +16,7 @@ export interface MockScenarioModel {
     readonly endsWhenDrained: boolean;
     /** The share of its pool a worker keeps busy, from 0 to 1, before the load setting. */
     loadFactor(timeMs: number): number;
-    /** The tasks in the whole tree the center seeds, for a cluster that finishes `tasksPerSecond` together; Infinity for an endless one. */
+    /** The tasks in the whole tree the coordinator seeds, for a cluster that finishes `tasksPerSecond` together; Infinity for an endless one. */
     seedTasks(tasksPerSecond: number): number;
     /** How long, on average, a branch the worker cuts off an endless root keeps one worker busy. */
     branchSeconds(id: number): number;

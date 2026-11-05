@@ -8,7 +8,7 @@ import { ConnectionMode } from '@gempba/core';
 import { BroadcastEnvelope } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { MockConfig } from '../../common/mock-config';
 import { MockRun } from '../sim/mock-run';
-import { MockCenter } from './mock-center';
+import { MockAggregator } from './mock-aggregator';
 import { MockKeys } from './mock-keys';
 import { MockSshEndpoint, MockSshOptions } from './ssh-endpoint';
 import { MockTopology } from '../sim/mock-topology';
@@ -72,7 +72,7 @@ describe('MockKeys', () => {
 describe('MockSshEndpoint', () => {
 
     let home: string;
-    let center: MockCenter;
+    let aggregator: MockAggregator;
     let endpoint: MockSshEndpoint;
     let port: number;
     let logged: string[];
@@ -87,10 +87,10 @@ describe('MockSshEndpoint', () => {
         clientKey = fs.readFileSync(client.privatePath, 'utf8');
         const defaults = MockConfig.defaults();
         const run = new MockRun(defaults.shape, defaults.scheduler, defaults.live, 42);
-        center = new MockCenter(run, { log: message => logged.push(message) });
-        center.start();
+        aggregator = new MockAggregator(run, { log: message => logged.push(message) });
+        aggregator.start();
         const hosts = run.topology.nodes.map(node => node.host);
-        endpoint = new MockSshEndpoint(center, {
+        endpoint = new MockSshEndpoint(aggregator, {
             mode, hostKey: MockKeys.hostKey(dir).privateKey, authorizedKeys: [client.parsed], gempbaPort: 9000, isNode: name => hosts.includes(name),
             log: message => logged.push(message), ...options
         });
@@ -166,7 +166,7 @@ describe('MockSshEndpoint', () => {
 
     afterEach(async () => {
         clients.splice(0).forEach(client => client.end());
-        center.stop();
+        aggregator.stop();
         await endpoint.close();
         fs.rmSync(home, { recursive: true, force: true });
     });
@@ -190,7 +190,7 @@ describe('MockSshEndpoint', () => {
         await connect({ privateKey: stranger }).catch(error => failed = error);
         expect(String(failed)).to.contain('All configured authentication methods failed');
         await endpoint.close();
-        endpoint = new MockSshEndpoint(center, {
+        endpoint = new MockSshEndpoint(aggregator, {
             mode: ConnectionMode.HOST, hostKey: MockKeys.hostKey(MockKeys.dir(home)).privateKey, authorizedKeys: [], gempbaPort: 9000, isNode: () => true, log: () => undefined
         });
         port = await endpoint.listen(0);

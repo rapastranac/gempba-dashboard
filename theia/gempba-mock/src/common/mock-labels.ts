@@ -11,7 +11,7 @@ export interface MockChoice<T> {
 export namespace MockLabels {
 
     export const MODES: readonly MockChoice<ConnectionMode>[] = [
-        { value: ConnectionMode.LOCAL, label: 'Local', detail: 'The mock center listens on a loopback port, as gempba does on this machine' },
+        { value: ConnectionMode.LOCAL, label: 'Local', detail: 'The mock\'s telemetry listens on a loopback port, as gempba\'s does on this machine' },
         { value: ConnectionMode.HOST, label: 'Host', detail: 'A mock VM over SSH, with gempba running on it' },
         { value: ConnectionMode.JUMP, label: 'Jump host', detail: 'A mock login node over SSH, with gempba on a compute node behind it' }
     ];
@@ -25,8 +25,8 @@ export namespace MockLabels {
     ];
 
     export const SCHEDULERS: readonly MockChoice<MockScheduler>[] = [
-        { value: 'semi-centralized', label: 'Semi-centralized', detail: 'The center pairs each busy worker with an idle one, which the worker sends one task to' },
-        { value: 'centralized', label: 'Centralized', detail: 'Workers send spare tasks to a queue at the center, which hands them to idle workers' }
+        { value: 'semi-centralized', label: 'Semi-centralized', detail: 'The coordinator pairs each busy worker with an idle one, which the worker sends one task to' },
+        { value: 'centralized', label: 'Centralized', detail: 'Workers send spare tasks to a queue at the coordinator, which hands them to idle workers' }
     ];
 
     export const FIDELITIES: readonly MockChoice<MockFidelity>[] = [

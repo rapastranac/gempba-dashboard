@@ -1,15 +1,15 @@
 import * as net from 'net';
-import { MockCenter } from './mock-center';
+import { MockAggregator } from './mock-aggregator';
 
-/** Local mode: the mock center listens on a loopback port, as gempba's does, and the dashboard connects to it. */
+/** Local mode: the mock's telemetry listens on a loopback port, as gempba's does, and the dashboard connects to it. */
 export class MockTcpEndpoint {
 
     protected readonly server = net.createServer(socket => {
         socket.setNoDelay(true);
-        this.center.attach(socket, `TCP client ${socket.remotePort}`);
+        this.aggregator.attach(socket, `TCP client ${socket.remotePort}`);
     });
 
-    constructor(protected readonly center: MockCenter) { }
+    constructor(protected readonly aggregator: MockAggregator) { }
 
     /** Resolves with the bound port; port 0 lets the OS pick a free one. */
     listen(port: number): Promise<number> {

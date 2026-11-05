@@ -102,15 +102,15 @@ describe('MockRun', () => {
 
     describe('semi-centralized, as gempba schedules it', () => {
 
-        it('has the center seed the root and nothing more, and run no tasks while it polls', () => {
+        it('has the coordinator seed the root and nothing more, and run no tasks while it polls', () => {
             const mock = run();
             mock.advanceTo(60_000);
-            const center = rankFrame(mock, 0);
-            expect(center).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0, scheduler_pending_count: 0 });
-            expect(center.process_cpu_pct).to.be.within(90, 100);
+            const coordinator = rankFrame(mock, 0);
+            expect(coordinator).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0, scheduler_pending_count: 0 });
+            expect(coordinator.process_cpu_pct).to.be.within(90, 100);
         });
 
-        it('sends one task at a time to an idle rank the center reserved, so no worker ever queues one', () => {
+        it('sends one task at a time to an idle rank the coordinator reserved, so no worker ever queues one', () => {
             const mock = run();
             let before = new Map(mock.rankViews().map(rank => [rank.id, rank]));
             let transfers = 0;
@@ -141,28 +141,28 @@ describe('MockRun', () => {
 
     describe('centralized, as gempba schedules it', () => {
 
-        it('queues the tasks workers send at the center, which alone reports them pending', () => {
+        it('queues the tasks workers send at the coordinator, which alone reports them pending', () => {
             const mock = run({}, { scheduler: 'centralized' });
             mock.advanceTo(30_000);
-            const center = view(mock, 0);
-            expect(center.pending).to.equal(center.recv - (center.sent - 1));
-            expect(center.pending).to.be.above(0);
+            const coordinator = view(mock, 0);
+            expect(coordinator.pending).to.equal(coordinator.recv - (coordinator.sent - 1));
+            expect(coordinator.pending).to.be.above(0);
             expect(computing(mock).every(rank => rank.pending === 0)).to.equal(true);
             // the frame was sampled up to a worker interval ago
-            expect(rankFrame(mock, 0).scheduler_pending_count).to.be.within(1, center.pending);
+            expect(rankFrame(mock, 0).scheduler_pending_count).to.be.within(1, coordinator.pending);
             expect(envelope(mock).ranks!.filter(frame => frame.rank !== 0).every(frame => frame.scheduler_pending_count === 0)).to.equal(true);
         });
 
         it('fills its queue to gempba\'s limit, then takes no more while it is full', () => {
             const mock = run({}, { scheduler: 'centralized', shape: { nodes: 1, ranksPerNode: 3 } });
-            const limit = MockRun.CENTER_TASKS_PER_PROCESS * 3;
+            const limit = MockRun.COORDINATOR_TASKS_PER_PROCESS * 3;
             let filled = false;
             let highest = 0;
             for (let step = 1; step <= 400_000 / MockRun.STEP_MS; step++) {
                 mock.advanceTo(step * MockRun.STEP_MS);
-                const center = view(mock, 0);
-                highest = Math.max(highest, center.pending);
-                filled = filled || center.pending > limit;
+                const coordinator = view(mock, 0);
+                highest = Math.max(highest, coordinator.pending);
+                filled = filled || coordinator.pending > limit;
             }
             expect(filled, 'it filled').to.equal(true);
             // past the limit by at most one task per worker, sent in the step it filled
@@ -264,7 +264,7 @@ describe('MockRun', () => {
             expect(mock.rankViews().some(rank => rank.next === id)).to.equal(false);
         });
 
-        it('adds and removes ranks, keeping every node and the center', () => {
+        it('adds and removes ranks, keeping every node and the coordinator', () => {
             const mock = run({}, { shape: { nodes: 1, ranksPerNode: 2 } });
             expect(mock.fault('add-rank')).to.equal('Added rank 2 on mock-host-01');
             expect(envelope(mock).ranks!.map(frame => frame.rank)).to.deep.equal([0, 1, 2]);

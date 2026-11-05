@@ -2,7 +2,7 @@ import { RefreshInterval, RefreshRates } from '@gempba/core';
 import { Schema1Frame, Schema1NodeFrame } from './schema1-lines';
 import { MockLive, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
-import { CenterQueue, QueuedTask } from './center-queue';
+import { CoordinatorQueue, QueuedTask } from './coordinator-queue';
 import { MockRandom } from './mock-random';
 import { MockScenarioModel } from './mock-scenario';
 import { MockTopology, MockRankPlace } from './mock-topology';
@@ -18,14 +18,14 @@ export interface MockRankView {
     readonly poolThreads: number;
     /** Tasks left in the subtree it explores; Infinity for the root of an endless search. */
     readonly subtree: number;
-    /** The idle rank the center reserved for it to send a task to. */
+    /** The idle rank the coordinator reserved for it to send a task to. */
     readonly next?: number;
     readonly running: number;
     readonly tasksLocal: number;
     readonly sent: number;
     readonly recv: number;
     readonly edges: ReadonlyMap<number, { readonly bytes: number, readonly count: number }>;
-    /** `scheduler_pending_count`: the center's queue when centralized, 0 everywhere else. */
+    /** `scheduler_pending_count`: the coordinator's queue when centralized, 0 everywhere else. */
     readonly pending: number;
 }
 
@@ -40,10 +40,10 @@ interface RankState {
     seqNo: number;
     lastSampleMs: number;
     nextSampleMs: number;
-    /** The latest frame, serialized when it was sampled; gempba's center repeats it until the rank sends a new one. */
+    /** The latest frame, serialized when it was sampled; gempba's aggregator repeats it until the rank sends a new one. */
     frameJson?: string;
     phase: MockRun.Phase;
-    /** When it last reported itself available: the center hears of it from the next step on. */
+    /** When it last reported itself available: the coordinator hears of it from the next step on. */
     availableSinceMs: number;
     subtree: number;
     next?: number;
@@ -79,28 +79,28 @@ interface NodeState {
  * A seeded gempba run, stepped in fixed simulated time so the same seed and the same steps give the same frames
  * whatever the wall clock does. It follows gempba's MPI schedulers (mpi_semi_centralized_scheduler.hpp,
  * mpi_centralized_scheduler.hpp):
- * - the center seeds the search tree's root to rank 1 and runs no tasks itself;
+ * - the coordinator seeds the search tree's root to rank 1 and runs no tasks itself;
  * - a worker explores one received subtree at a time on its pool, then reports itself available;
- * - semi-centralized: the center reserves an available rank for each running worker that has none, and the worker
+ * - semi-centralized: the coordinator reserves an available rank for each running worker that has none, and the worker
  *   sends it one task, a subtree of its own, with nothing else in flight; nothing queues anywhere;
- * - centralized: running workers send spare tasks to the center while it isn't full, and it hands the biggest it holds
+ * - centralized: running workers send spare tasks to the coordinator while it isn't full, and it hands the biggest it holds
  *   to each available worker; its queue is the only pending count.
  * The counters follow from that, so they agree with one another as gempba's do. Frames are sampled at the worker and
  * node intervals and serialized once; a line is the latest frame of every rank and node with the topology, as
- * gempba's center broadcasts them.
+ * gempba's aggregator broadcasts them.
  */
 export class MockRun {
 
     static readonly STEP_MS = 50;
     static readonly SCHEMA_VERSION = 1;
-    /** gempba's center broadcasts on a fixed interval, whatever the worker rate (center_tcp_server.cpp). */
+    /** gempba up to v4.2.0 broadcasts on a fixed interval, whatever the worker rate (its center_tcp_server.cpp). */
     static readonly GEMPBA_BROADCAST_MS = 500;
-    /** gempba's CENTER_NBSTORED_TASKS_PER_PROCESS: past this many tasks per process, the centralized center says it is full. */
-    static readonly CENTER_TASKS_PER_PROCESS = 1000;
-    /** gempba's MAX_MEMORY_MB: past this much memory, the centralized center says it is full too. */
-    static readonly CENTER_MAX_MEMORY_BYTES = 10 * GiB;
+    /** gempba's CENTER_NBSTORED_TASKS_PER_PROCESS: past this many tasks per process, the centralized coordinator says it is full. */
+    static readonly COORDINATOR_TASKS_PER_PROCESS = 1000;
+    /** gempba's MAX_MEMORY_MB: past this much memory, the centralized coordinator says it is full too. */
+    static readonly COORDINATOR_MAX_MEMORY_BYTES = 10 * GiB;
     /** It says it is free again below this share of the task limit, with its memory at or below 90 % of its own. */
-    static readonly CENTER_FREE_SHARE = 0.8;
+    static readonly COORDINATOR_FREE_SHARE = 0.8;
     /** How widely the sizes of the branches cut off an endless root vary: the deviation of their logarithm. */
     static readonly BRANCH_SPREAD = 1;
     /** The share of a finite subtree a worker gives away: a branch near its top. */
@@ -112,8 +112,8 @@ export class MockRun {
     protected topologyNow: MockTopology;
     protected readonly ranks = new Map<number, RankState>();
     protected readonly nodes: NodeState[];
-    protected readonly queue = new CenterQueue();
-    protected centerFull = false;
+    protected readonly queue = new CoordinatorQueue();
+    protected coordinatorFull = false;
     protected liveNow: MockLive;
     protected model: MockScenarioModel;
     protected scenarioStartMs = 0;
@@ -216,10 +216,10 @@ export class MockRun {
         }
     }
 
-    /** One broadcast line, without its newline: the latest frame of every rank and node, as gempba's center sends it. */
+    /** One broadcast line, without its newline: the latest frame of every rank and node, as gempba's aggregator sends it. */
     line(nowEpochMs: number): string {
         this.topologyJson ??= JSON.stringify(MockTopology.toWire(this.topologyNow, id => this.ranks.get(id)?.pid ?? 0));
-        // node by node, as gempba's center walks its topology
+        // node by node, as gempba's aggregator walks its topology
         this.frameOrder ??= [...this.topologyNow.ranks].sort((a, b) => a.nodeIndex - b.nodeIndex || a.id - b.id).map(place => place.id);
         const ranks = this.frameOrder.map(id => this.ranks.get(id)?.frameJson).filter(frame => frame !== undefined);
         const nodes = this.nodes.map(node => node.frameJson).filter(frame => frame !== undefined);
@@ -238,8 +238,8 @@ export class MockRun {
         this.time += MockRun.STEP_MS;
         const scenarioTime = this.time - this.scenarioStartMs;
         for (const rank of this.ranks.values()) {
-            if (isCenter(rank)) {
-                this.runCenter(rank);
+            if (isCoordinator(rank)) {
+                this.runCoordinator(rank);
             } else {
                 this.runRank(rank, scenarioTime);
             }
@@ -249,7 +249,7 @@ export class MockRun {
         } else {
             this.scheduleSemiCentralized();
         }
-        const busy = [...this.ranks.values()].some(rank => !isCenter(rank) && rank.phase !== 'available');
+        const busy = [...this.ranks.values()].some(rank => !isCoordinator(rank) && rank.phase !== 'available');
         if (!busy && this.queue.length === 0) {
             if (this.model.endsWhenDrained) {
                 this.endedNow = true;
@@ -285,21 +285,21 @@ export class MockRun {
         rank.rssBytes = Math.max(rank.baseRss * 0.9, rank.rssBytes + 0.2 * (rssTarget - rank.rssBytes) + this.random.normal() * 256 * KiB);
     }
 
-    /** The center runs no tasks: its pool stays idle while it polls MPI, and it holds the queued tasks in memory. */
-    protected runCenter(center: RankState): void {
-        center.running = 0;
-        center.idleMicros += MockRun.STEP_MS * 1000;
-        center.cpuPct = clamp(center.cpuPct + 0.5 * (98 - center.cpuPct) + this.random.normal(), 0, 100);
-        const rssTarget = this.centerMemory(center);
-        center.rssBytes = Math.max(center.baseRss * 0.9, center.rssBytes + 0.2 * (rssTarget - center.rssBytes) + this.random.normal() * 64 * KiB);
+    /** The coordinator runs no tasks: its pool stays idle while it polls MPI, and it holds the queued tasks in memory. */
+    protected runCoordinator(coordinator: RankState): void {
+        coordinator.running = 0;
+        coordinator.idleMicros += MockRun.STEP_MS * 1000;
+        coordinator.cpuPct = clamp(coordinator.cpuPct + 0.5 * (98 - coordinator.cpuPct) + this.random.normal(), 0, 100);
+        const rssTarget = this.coordinatorMemory(coordinator);
+        coordinator.rssBytes = Math.max(coordinator.baseRss * 0.9, coordinator.rssBytes + 0.2 * (rssTarget - coordinator.rssBytes) + this.random.normal() * 64 * KiB);
     }
 
     /**
-     * The center reserves an available rank for each running worker that has none (process_running, process_available),
+     * The coordinator reserves an available rank for each running worker that has none (process_running, process_available),
      * taking the running workers in turn; then each worker with a rank reserved sends it one task when it has one to spare.
      */
     protected scheduleSemiCentralized(): void {
-        const available = this.computing().filter(rank => this.idleAtCenter(rank));
+        const available = this.computing().filter(rank => this.idleAtCoordinator(rank));
         const waiting = this.computing().filter(rank => rank.phase === 'running' && rank.next === undefined);
         if (available.length > 0 && waiting.length > 0) {
             const start = this.pairingCursor++ % waiting.length;
@@ -322,31 +322,32 @@ export class MockRun {
     }
 
     /**
-     * Running workers send spare tasks to the center while it isn't full, one each per step. Past 1000 tasks per process,
+     * Running workers send spare tasks to the coordinator while it isn't full, one each per step. Past 1000 tasks per process,
      * or 10 GiB of memory, it says it is full, until the queue is below 80 % of that limit and its memory at most 9 GiB.
      * It hands its biggest task to each available worker.
      */
     protected scheduleCentralized(): void {
-        const center = this.ranks.get(MockTopology.CENTER_ID)!;
-        const limit = MockRun.CENTER_TASKS_PER_PROCESS * this.ranks.size;
+        const coordinator = this.ranks.get(MockTopology.COORDINATOR_ID)!;
+        const limit = MockRun.COORDINATOR_TASKS_PER_PROCESS * this.ranks.size;
         for (const rank of this.computing()) {
-            if (this.centerFull) {
+            if (this.coordinatorFull) {
                 break;
             }
             if (rank.phase === 'running' && rank.subtree >= 2 && this.random.chance(this.model.sendChance(rank.place.id))) {
-                this.give(rank, center, this.split(rank));
-                this.centerFull = this.queue.length > limit || this.centerMemory(center) > MockRun.CENTER_MAX_MEMORY_BYTES;
+                this.give(rank, coordinator, this.split(rank));
+                this.coordinatorFull = this.queue.length > limit || this.coordinatorMemory(coordinator) > MockRun.COORDINATOR_MAX_MEMORY_BYTES;
             }
         }
-        if (this.centerFull && this.queue.length < MockRun.CENTER_FREE_SHARE * limit && this.centerMemory(center) <= 0.9 * MockRun.CENTER_MAX_MEMORY_BYTES) {
-            this.centerFull = false;
+        const freed = this.queue.length < MockRun.COORDINATOR_FREE_SHARE * limit && this.coordinatorMemory(coordinator) <= 0.9 * MockRun.COORDINATOR_MAX_MEMORY_BYTES;
+        if (this.coordinatorFull && freed) {
+            this.coordinatorFull = false;
         }
         for (const rank of this.computing()) {
             if (this.queue.length === 0) {
                 break;
             }
-            if (this.idleAtCenter(rank)) {
-                this.give(center, rank, this.queue.pop()!);
+            if (this.idleAtCoordinator(rank)) {
+                this.give(coordinator, rank, this.queue.pop()!);
             }
         }
     }
@@ -369,7 +370,7 @@ export class MockRun {
         return { tasks, bytes: this.random.int(8, 64) * KiB };
     }
 
-    /** Sends one task: the sender's edge to the receiver counts it with its bytes; the center queues it, a worker starts on it. */
+    /** Sends one task: the sender's edge to the receiver counts it with its bytes; the coordinator queues it, a worker starts on it. */
     protected give(from: RankState, to: RankState, task: QueuedTask): void {
         from.sent += 1;
         to.recv += 1;
@@ -382,7 +383,7 @@ export class MockRun {
             this.nodes[from.place.nodeIndex].netOut += task.bytes;
             this.nodes[to.place.nodeIndex].netIn += task.bytes;
         }
-        if (isCenter(to)) {
+        if (isCoordinator(to)) {
             this.queue.push(task);
         } else {
             to.phase = 'running';
@@ -390,13 +391,13 @@ export class MockRun {
         }
     }
 
-    /** The center hands the search tree's root to the first worker, rank 1 when it is there. */
+    /** The coordinator hands the search tree's root to the first worker, rank 1 when it is there. */
     protected seed(): void {
-        const center = this.ranks.get(MockTopology.CENTER_ID);
+        const coordinator = this.ranks.get(MockTopology.COORDINATOR_ID);
         const first = this.computing().find(rank => rank.phase === 'available');
-        if (center && first) {
+        if (coordinator && first) {
             const tasksPerSecond = this.computing().reduce((sum, rank) => sum + rank.place.poolThreads * 1000 / this.model.meanTaskMs, 0);
-            this.give(center, first, { tasks: this.model.seedTasks(tasksPerSecond), bytes: this.random.int(8, 64) * KiB });
+            this.give(coordinator, first, { tasks: this.model.seedTasks(tasksPerSecond), bytes: this.random.int(8, 64) * KiB });
         }
     }
 
@@ -427,22 +428,22 @@ export class MockRun {
         }
     }
 
-    /** What the center holds in memory: its own, and every queued task's bytes. */
-    protected centerMemory(center: RankState): number {
-        return center.baseRss + this.queue.bytes;
+    /** What the coordinator holds in memory: its own, and every queued task's bytes. */
+    protected coordinatorMemory(coordinator: RankState): number {
+        return coordinator.baseRss + this.queue.bytes;
     }
 
-    /** Available, and the center has heard so: a worker that finished this step is not handed work in the same step. */
-    protected idleAtCenter(rank: RankState): boolean {
+    /** Available, and the coordinator has heard so: a worker that finished this step is not handed work in the same step. */
+    protected idleAtCoordinator(rank: RankState): boolean {
         return rank.phase === 'available' && rank.availableSinceMs < this.time;
     }
 
     protected computing(): RankState[] {
-        return [...this.ranks.values()].filter(rank => !isCenter(rank));
+        return [...this.ranks.values()].filter(rank => !isCoordinator(rank));
     }
 
     protected pendingOf(rank: RankState): number {
-        return isCenter(rank) && this.scheduler === 'centralized' ? this.queue.length : 0;
+        return isCoordinator(rank) && this.scheduler === 'centralized' ? this.queue.length : 0;
     }
 
     protected sample(): void {
@@ -576,12 +577,12 @@ export class MockRun {
         return `Added rank ${added} on ${this.topologyNow.nodes[nodeIndex].host}`;
     }
 
-    /** Removes a rank from a node that keeps at least one; never the center, nor the last worker beside it. */
+    /** Removes a rank from a node that keeps at least one; never the coordinator, nor the last worker beside it. */
     protected removeRank(): string {
-        const computing = this.topologyNow.ranks.filter(place => place.id !== MockTopology.CENTER_ID);
+        const computing = this.topologyNow.ranks.filter(place => place.id !== MockTopology.COORDINATOR_ID);
         const candidates = computing.length < 2 ? [] : computing.filter(place => this.topologyNow.ranks.filter(other => other.nodeIndex === place.nodeIndex).length > 1);
         if (candidates.length === 0) {
-            return 'No rank can be removed: every node would be left empty, or only the center would remain';
+            return 'No rank can be removed: every node would be left empty, or only the coordinator would remain';
         }
         const gone = this.random.pick(candidates);
         this.release(this.ranks.get(gone.id)!);
@@ -596,7 +597,7 @@ export class MockRun {
     }
 
     protected newRank(place: MockRankPlace): RankState {
-        const baseRss = place.id === MockTopology.CENTER_ID ? 48 * MiB : this.random.int(64, 160) * MiB;
+        const baseRss = place.id === MockTopology.COORDINATOR_ID ? 48 * MiB : this.random.int(64, 160) * MiB;
         return {
             place, pid: this.nextPid++, seqNo: 0, lastSampleMs: this.time, nextSampleMs: this.time, phase: 'available', availableSinceMs: this.time,
             subtree: 0, running: 0,
@@ -610,12 +611,12 @@ export namespace MockRun {
     /** The faults the run carries out itself; dropping clients and sending a malformed line belong to the transport. */
     export type Fault = Exclude<MockFault, 'drop-clients' | 'malformed-line'>;
 
-    /** A rank's state at the center: exploring a subtree, idle, or reserved to receive one (semi-centralized). */
+    /** A rank's state at the coordinator: exploring a subtree, idle, or reserved to receive one (semi-centralized). */
     export type Phase = 'running' | 'available' | 'assigned';
 }
 
-function isCenter(rank: RankState): boolean {
-    return rank.place.id === MockTopology.CENTER_ID;
+function isCoordinator(rank: RankState): boolean {
+    return rank.place.id === MockTopology.COORDINATOR_ID;
 }
 
 function clamp(value: number, min: number, max: number): number {

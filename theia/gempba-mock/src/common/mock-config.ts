@@ -11,10 +11,10 @@ export interface MockConfig {
     readonly seed: number;
 }
 
-/** How the dashboard reaches the mock center: directly in Local mode, through the mock SSH server in Host and Jump. */
+/** How the dashboard reaches the mock's telemetry: directly in Local mode, through the mock SSH server in Host and Jump. */
 export interface MockAccess {
     readonly mode: ConnectionMode;
-    /** The loopback port the mock center listens on, as gempba's does. */
+    /** The loopback port the mock's telemetry listens on, as gempba's does. */
     readonly gempbaPort: number;
     /** The loopback port of the mock SSH server. */
     readonly sshPort: number;
@@ -53,8 +53,8 @@ export interface MockLive {
 export type MockScenario = 'steady' | 'slow' | 'ramp' | 'imbalanced' | 'bursty';
 
 /**
- * gempba's two schedulers. Semi-centralized: the center pairs each busy worker with an idle one, and the worker sends it
- * one task directly. Centralized: workers send spare tasks to a queue at the center, which hands them to idle workers.
+ * gempba's two schedulers. Semi-centralized: the coordinator pairs each busy worker with an idle one, and the worker sends it
+ * one task directly. Centralized: workers send spare tasks to a queue at the coordinator, which hands them to idle workers.
  */
 export type MockScheduler = 'semi-centralized' | 'centralized';
 
@@ -161,7 +161,7 @@ export namespace MockConfig {
         }
         const ranks = MockShape.totalRanks(shape);
         if (ranks < 2 || ranks > MAX_RANKS) {
-            found.push(`The cluster needs from 2 to ${MAX_RANKS} ranks in all: the center and at least one worker; it has ${ranks}.`);
+            found.push(`The cluster needs from 2 to ${MAX_RANKS} ranks in all: the coordinator and at least one worker; it has ${ranks}.`);
         }
         if (shape.cgroupGiB > shape.memPerNodeGiB) {
             found.push('The cgroup limit cannot exceed the memory per node.');
