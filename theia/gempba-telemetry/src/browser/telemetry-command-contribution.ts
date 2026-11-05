@@ -137,7 +137,7 @@ export class TelemetryCommandContribution implements CommandContribution, MenuCo
         }
         const value = await this.quickInput.input({
             title: 'GemPBA: Listen',
-            prompt: 'Port the gempba center listens on',
+            prompt: 'Port gempba\'s telemetry listens on',
             value: String(this.lastPort),
             validateInput: async input => isPort(input) ? undefined : 'Enter a port between 1 and 65535'
         });
