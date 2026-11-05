@@ -22,6 +22,11 @@ export interface WorldSnapshot {
     readonly paused?: boolean;
     /** Whether this is the run's last line, sent at shutdown with its totals. */
     readonly final?: boolean;
+    /**
+     * Whether the line carried its header alone, as gempba's do while paused: the data is the last line's again, and
+     * no new frame. A snapshot or the final line sent while paused carries frames, and leaves this unset.
+     */
+    readonly headerOnly?: boolean;
 }
 
 export namespace WorldSnapshot {

@@ -58,6 +58,14 @@ describe('TelemetryStore', () => {
         expect(model.nodes.map(n => n.host)).to.deep.equal([WorldSnapshotMapper.UNKNOWN_HOST]);
     });
 
+    it('forgets the cached topology when another run\'s line arrives, but keeps it through a schema-1 line, which has no run id', () => {
+        const store = new TelemetryStore();
+        store.ingest({ ...withTopology(1), run_id: 'a' });
+        expect(store.ingest({ ...withoutTopology(2), run_id: 'a' }).nodes.map(n => n.host)).to.deep.equal(['h']);
+        expect(store.ingest(withoutTopology(3)).nodes.map(n => n.host), 'no run id').to.deep.equal(['h']);
+        expect(store.ingest({ ...withoutTopology(4), run_id: 'b' }).nodes.map(n => n.host)).to.deep.equal([WorldSnapshotMapper.UNKNOWN_HOST]);
+    });
+
     it('reset forgets the cached topology', () => {
         const store = new TelemetryStore();
         store.ingest(withTopology(1));
