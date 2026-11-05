@@ -19,12 +19,15 @@ export interface MockAggregatorOptions {
 /**
  * The mock's stand-in for gempba's aggregator, the telemetry server on rank 0: it advances the run with the wall clock and, every broadcast interval,
  * writes the run's latest frames to every client, the first one the moment a client connects. Control lines from any
- * client set the run's intervals, clamped as gempba clamps them, and apply at once.
+ * client set the run's intervals, clamped as gempba clamps them, and apply at once. When it stops, as gempba's process
+ * exits, it closes every client; in schema 2 each one first gets the run's final line.
  */
 export class MockAggregator {
 
     static readonly DEFAULT_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
     static readonly DEFAULT_MAX_INBOUND_BYTES = 64 * 1024;
+    /** How long a closing client has to take what it was last sent, as gempba's aggregator waits for the final frames. */
+    static readonly CLOSE_GRACE_MS = 1000;
 
     protected readonly clientsNow = new Map<Duplex, string>();
     protected readonly startedAt = performance.now();
@@ -49,12 +52,26 @@ export class MockAggregator {
         this.schedule();
     }
 
-    /** Stops broadcasting and closes every client. */
+    /**
+     * Stops broadcasting and closes every client once it has what it was sent, as gempba's process does when it exits.
+     * In schema 2 that is the run's final line: every rank's last frame, marked `"final":true` even while paused, so a
+     * consumer can tell a finished run from a lost connection. gempba 4.2 sends none.
+     */
     stop(): void {
+        if (!this.running) {
+            return;
+        }
         this.running = false;
         clearTimeout(this.timer);
         this.timer = undefined;
-        this.closeAll();
+        const streams = [...this.clientsNow.keys()];
+        if (streams.length > 0 && this.mock.schema === 2) {
+            this.mock.snapshot();
+            const final = this.mock.line(Date.now(), { final: true });
+            streams.forEach(stream => this.send(stream, final));
+            this.log(`Sent the run\'s final line to ${streams.length} client${streams.length === 1 ? '' : 's'}`);
+        }
+        streams.forEach(stream => this.close(stream, true));
     }
 
     /** Serves a connected client, a TCP socket or an SSH channel, named `who` in the log. */
@@ -204,16 +221,22 @@ export class MockAggregator {
         }
     }
 
-    /** Forgets the client at once, so nothing more is written to it, then closes it. */
-    protected close(stream: Duplex): void {
+    /** Forgets the client at once, so nothing more is written to it, then closes it: at once, or once it has what it was sent. */
+    protected close(stream: Duplex, graceful = false): void {
         if (this.clientsNow.delete(stream)) {
             this.options.onChange?.();
         }
-        stream.destroy();
+        if (graceful && !stream.destroyed) {
+            stream.end();
+            // a client that doesn't read what is left is closed anyway
+            setTimeout(() => stream.destroy(), MockAggregator.CLOSE_GRACE_MS).unref();
+        } else {
+            stream.destroy();
+        }
     }
 
     protected end(): void {
-        this.log('The run ended: gempba\'s process exits and every client is closed');
+        this.log('The run ended: gempba\'s process exits and closes every client');
         this.stop();
         this.options.onEnded?.();
     }

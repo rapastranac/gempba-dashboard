@@ -171,11 +171,47 @@ describe('MockAggregator', () => {
         expect(() => BroadcastEnvelope.parse(client.lines[malformed + 1])).not.to.throw();
         expect(aggregator.fault('drop-clients')).to.equal('Dropped 1 client');
         await until(() => client.closed && aggregator.clients === 0);
+        expect(client.lines.some(line => line.includes('"final":true')), 'a dropped client gets no final line').to.equal(false);
         const late = lineClient();
         await until(() => late.lines.length > 0);
         expect(aggregator.fault('end-run')).to.equal('Ended the run, as when gempba\'s process exits');
         await until(() => late.closed);
         expect(ended).to.equal(true);
         expect(aggregator.clients).to.equal(0);
+        expect(BroadcastEnvelope.parse(late.lines[late.lines.length - 1]).final, 'the run\'s final line').to.equal(true);
+    });
+
+    it('ends the run with its final line, every rank\'s last frame, the only line marked final', async () => {
+        await serve();
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        aggregator.fault('end-run');
+        await until(() => client.closed);
+        const lines = client.lines.map(line => BroadcastEnvelope.parse(line));
+        expect(lines.map(line => line.final)).to.deep.equal([...lines.slice(1).map(() => false), true]);
+        const [before, last] = [lines[lines.length - 2], lines[lines.length - 1]];
+        expect(last.ranks!.map(frame => frame.seq_no)).to.deep.equal(before.ranks!.map(frame => frame.seq_no + 1));
+        expect(logged).to.include('Sent the run\'s final line to 1 client');
+    });
+
+    it('sends the final line on Stop too, with every frame though paused', async () => {
+        await serve();
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        client.socket.write('{"kind":"pause"}\n');
+        await until(() => aggregator.run.paused);
+        aggregator.stop();
+        await until(() => client.closed);
+        const last = BroadcastEnvelope.parse(client.lines[client.lines.length - 1]);
+        expect([last.paused, last.final, last.ranks?.length]).to.deep.equal([true, true, aggregator.run.topology.ranks.length]);
+    });
+
+    it('sends no final line in schema 1, as gempba 4.2 has none', async () => {
+        await serve({ fidelity: 'gempba-4.2' });
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        aggregator.fault('end-run');
+        await until(() => client.closed);
+        expect(client.lines.some(line => line.includes('final'))).to.equal(false);
     });
 });
