@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import { RefreshRates, WorldSnapshot } from '@gempba/core';
 import { BroadcastEnvelope, RankFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { WorldSnapshotMapper } from '@gempba/telemetry/lib/node/telemetry/world-snapshot-mapper';
-import { MockConfig, MockLive, MockScheduler, MockShape } from '../../common/mock-config';
+import { MockConfig, MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
 import { MockRun, MockRankView } from './mock-run';
 import { MockScenarioModel } from './mock-scenario';
@@ -17,11 +17,12 @@ describe('MockRun', () => {
         readonly scheduler?: MockScheduler;
         readonly seed?: number;
         readonly rates?: RefreshRates;
+        readonly roles?: MockRoles;
     }
 
     function run(live: Partial<MockLive> = {}, options: Options = {}): MockRun {
         return new MockRun({ ...defaults.shape, ...options.shape }, options.scheduler ?? defaults.scheduler, { ...defaults.live, ...live }, options.seed ?? 42,
-            options.rates);
+            options.rates, options.roles);
     }
 
     function envelope(mock: MockRun): BroadcastEnvelope {
@@ -136,6 +137,33 @@ describe('MockRun', () => {
                 before = new Map(now.map(rank => [rank.id, rank]));
             }
             expect(transfers).to.be.above(10);
+        });
+    });
+
+    describe('with the coordinator on another rank, as another scheduler may put it', () => {
+
+        it('has it seed the root to rank 0 and run no tasks, while rank 0 works like the others', () => {
+            const mock = run({}, { roles: { coordinatorRank: 2 } });
+            mock.advanceTo(60_000);
+            expect(rankFrame(mock, 2)).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0 });
+            expect(view(mock, 2).edges.get(0)?.count, 'the root went to rank 0').to.equal(1);
+            expect(rankFrame(mock, 0).tasks_started_total).to.be.above(0);
+        });
+
+        it('queues the centralized tasks there', () => {
+            const mock = run({}, { scheduler: 'centralized', roles: { coordinatorRank: 2 } });
+            mock.advanceTo(30_000);
+            expect(view(mock, 2).pending).to.be.above(0);
+            expect(mock.rankViews().filter(rank => rank.id !== 2).every(rank => rank.pending === 0)).to.equal(true);
+        });
+
+        it('never removes it', () => {
+            const mock = run({}, { shape: { nodes: 1, ranksPerNode: 3 }, roles: { coordinatorRank: 2 } });
+            mock.advanceTo(1_000);
+            for (let i = 0; i < 4; i++) {
+                mock.fault('remove-rank');
+            }
+            expect(mock.topology.ranks.map(rank => rank.id)).to.have.members([2, mock.topology.ranks.find(rank => rank.id !== 2)!.id]);
         });
     });
 

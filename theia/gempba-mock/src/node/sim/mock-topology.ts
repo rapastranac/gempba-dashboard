@@ -32,7 +32,7 @@ export interface MockRankPlace {
 
 /**
  * Where everything sits in a mocked cluster: nodes named `mock-host-01`…, their sockets and CPUs, and the ranks
- * pinned to them. Rank 0 is the coordinator, and each node's first rank is its sentinel.
+ * pinned to them. Each node's first rank is its sentinel.
  */
 export interface MockTopology {
     readonly nodes: readonly MockNodePlace[];
@@ -41,8 +41,6 @@ export interface MockTopology {
 }
 
 export namespace MockTopology {
-
-    export const COORDINATOR_ID = 0;
 
     export function hostName(index: number): string {
         return `mock-host-${String(index + 1).padStart(2, '0')}`;

@@ -11,6 +11,7 @@ describe('MockDraft', () => {
         const draft = MockDraft.of(config);
         expect(draft.counts.ranksPerNode).to.equal('4');
         expect(draft.seed).to.equal('7');
+        expect(draft.coordinatorRank).to.equal('0');
         expect(MockDraft.toConfig(draft)).to.deep.equal(config);
     });
 

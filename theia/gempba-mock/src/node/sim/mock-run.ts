@@ -1,6 +1,6 @@
 import { RefreshInterval, RefreshRates } from '@gempba/core';
 import { Schema1Frame, Schema1NodeFrame } from './schema1-lines';
-import { MockLive, MockScheduler, MockShape } from '../../common/mock-config';
+import { MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
 import { CoordinatorQueue, QueuedTask } from './coordinator-queue';
 import { MockRandom } from './mock-random';
@@ -79,7 +79,8 @@ interface NodeState {
  * A seeded gempba run, stepped in fixed simulated time so the same seed and the same steps give the same frames
  * whatever the wall clock does. It follows gempba's MPI schedulers (mpi_semi_centralized_scheduler.hpp,
  * mpi_centralized_scheduler.hpp):
- * - the coordinator seeds the search tree's root to rank 1 and runs no tasks itself;
+ * - the coordinator, on rank 0 as gempba's schedulers put it or on the rank set, seeds the search tree's root to the
+ *   lowest rank beside it and runs no tasks itself;
  * - a worker explores one received subtree at a time on its pool, then reports itself available;
  * - semi-centralized: the coordinator reserves an available rank for each running worker that has none, and the worker
  *   sends it one task, a subtree of its own, with nothing else in flight; nothing queues anywhere;
@@ -127,7 +128,7 @@ export class MockRun {
     protected frameOrder?: number[];
 
     constructor(protected readonly shape: MockShape, readonly scheduler: MockScheduler, live: MockLive, seed: number,
-        rates: RefreshRates = RefreshRates.defaults()) {
+        rates: RefreshRates = RefreshRates.defaults(), protected readonly roles: MockRoles = { coordinatorRank: 0 }) {
         this.random = new MockRandom(seed);
         this.liveNow = live;
         this.model = MockScenarioModel.of(live.scenario);
@@ -238,7 +239,7 @@ export class MockRun {
         this.time += MockRun.STEP_MS;
         const scenarioTime = this.time - this.scenarioStartMs;
         for (const rank of this.ranks.values()) {
-            if (isCoordinator(rank)) {
+            if (this.isCoordinator(rank)) {
                 this.runCoordinator(rank);
             } else {
                 this.runRank(rank, scenarioTime);
@@ -249,7 +250,7 @@ export class MockRun {
         } else {
             this.scheduleSemiCentralized();
         }
-        const busy = [...this.ranks.values()].some(rank => !isCoordinator(rank) && rank.phase !== 'available');
+        const busy = [...this.ranks.values()].some(rank => !this.isCoordinator(rank) && rank.phase !== 'available');
         if (!busy && this.queue.length === 0) {
             if (this.model.endsWhenDrained) {
                 this.endedNow = true;
@@ -327,7 +328,7 @@ export class MockRun {
      * It hands its biggest task to each available worker.
      */
     protected scheduleCentralized(): void {
-        const coordinator = this.ranks.get(MockTopology.COORDINATOR_ID)!;
+        const coordinator = this.ranks.get(this.roles.coordinatorRank)!;
         const limit = MockRun.COORDINATOR_TASKS_PER_PROCESS * this.ranks.size;
         for (const rank of this.computing()) {
             if (this.coordinatorFull) {
@@ -383,7 +384,7 @@ export class MockRun {
             this.nodes[from.place.nodeIndex].netOut += task.bytes;
             this.nodes[to.place.nodeIndex].netIn += task.bytes;
         }
-        if (isCoordinator(to)) {
+        if (this.isCoordinator(to)) {
             this.queue.push(task);
         } else {
             to.phase = 'running';
@@ -391,9 +392,9 @@ export class MockRun {
         }
     }
 
-    /** The coordinator hands the search tree's root to the first worker, rank 1 when it is there. */
+    /** The coordinator hands the search tree's root to the first worker, the lowest rank beside it. */
     protected seed(): void {
-        const coordinator = this.ranks.get(MockTopology.COORDINATOR_ID);
+        const coordinator = this.ranks.get(this.roles.coordinatorRank);
         const first = this.computing().find(rank => rank.phase === 'available');
         if (coordinator && first) {
             const tasksPerSecond = this.computing().reduce((sum, rank) => sum + rank.place.poolThreads * 1000 / this.model.meanTaskMs, 0);
@@ -438,12 +439,16 @@ export class MockRun {
         return rank.phase === 'available' && rank.availableSinceMs < this.time;
     }
 
+    protected isCoordinator(rank: RankState): boolean {
+        return rank.place.id === this.roles.coordinatorRank;
+    }
+
     protected computing(): RankState[] {
-        return [...this.ranks.values()].filter(rank => !isCoordinator(rank));
+        return [...this.ranks.values()].filter(rank => !this.isCoordinator(rank));
     }
 
     protected pendingOf(rank: RankState): number {
-        return isCoordinator(rank) && this.scheduler === 'centralized' ? this.queue.length : 0;
+        return this.isCoordinator(rank) && this.scheduler === 'centralized' ? this.queue.length : 0;
     }
 
     protected sample(): void {
@@ -579,7 +584,7 @@ export class MockRun {
 
     /** Removes a rank from a node that keeps at least one; never the coordinator, nor the last worker beside it. */
     protected removeRank(): string {
-        const computing = this.topologyNow.ranks.filter(place => place.id !== MockTopology.COORDINATOR_ID);
+        const computing = this.topologyNow.ranks.filter(place => place.id !== this.roles.coordinatorRank);
         const candidates = computing.length < 2 ? [] : computing.filter(place => this.topologyNow.ranks.filter(other => other.nodeIndex === place.nodeIndex).length > 1);
         if (candidates.length === 0) {
             return 'No rank can be removed: every node would be left empty, or only the coordinator would remain';
@@ -597,7 +602,7 @@ export class MockRun {
     }
 
     protected newRank(place: MockRankPlace): RankState {
-        const baseRss = place.id === MockTopology.COORDINATOR_ID ? 48 * MiB : this.random.int(64, 160) * MiB;
+        const baseRss = place.id === this.roles.coordinatorRank ? 48 * MiB : this.random.int(64, 160) * MiB;
         return {
             place, pid: this.nextPid++, seqNo: 0, lastSampleMs: this.time, nextSampleMs: this.time, phase: 'available', availableSinceMs: this.time,
             subtree: 0, running: 0,
@@ -613,10 +618,6 @@ export namespace MockRun {
 
     /** A rank's state at the coordinator: exploring a subtree, idle, or reserved to receive one (semi-centralized). */
     export type Phase = 'running' | 'available' | 'assigned';
-}
-
-function isCoordinator(rank: RankState): boolean {
-    return rank.place.id === MockTopology.COORDINATOR_ID;
 }
 
 function clamp(value: number, min: number, max: number): number {

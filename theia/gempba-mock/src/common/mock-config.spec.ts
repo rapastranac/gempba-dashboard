@@ -67,6 +67,13 @@ describe('MockConfig', () => {
         expect(MockConfig.problems(withShape({ nodes: 0 })), 'a node count only Jump uses').to.deep.equal([]);
     });
 
+    it('keeps the coordinator on one of the run\'s ranks, rank 0 unless set', () => {
+        expect(MockConfig.of({}).roles).to.deep.equal({ coordinatorRank: 0 });
+        expect(MockConfig.of({ roles: { coordinatorRank: 3 } }).roles.coordinatorRank).to.equal(3);
+        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 3 } })).to.deep.equal([]);
+        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 4 } })).to.deep.equal(['The coordinator\'s rank must be a whole number from 0 to 3.']);
+    });
+
     it('checks the load and the seed', () => {
         expect(MockConfig.problems({ ...defaults, live: { ...defaults.live, loadPct: 101 }, seed: 1.5 }))
             .to.deep.equal(['The load must be from 0 to 100 %.', 'The seed must be a whole number.']);

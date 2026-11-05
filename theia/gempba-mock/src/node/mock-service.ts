@@ -70,7 +70,7 @@ export class MockService implements MockServer {
         this.config = config;
         this.ended = false;
         this.warnings = [];
-        const run = new MockRun(MockConfig.shapeOf(config), config.scheduler, config.live, config.seed);
+        const run = new MockRun(MockConfig.shapeOf(config), config.scheduler, config.live, config.seed, undefined, config.roles);
         const aggregator = new MockAggregator(run, { log: message => this.log(message), onEnded: () => this.onEnded(), onChange: () => this.publish() });
         this.aggregator = aggregator;
         aggregator.start();
