@@ -55,6 +55,10 @@ describe('StatusText', () => {
             .to.deep.equal(['disconnected', 'Refresh rate 500 ms', 'Click for the live controls.']);
     });
 
+    it('gives its words without the icon, for a view to show', () => {
+        expect(StatusText.summary(stream({ condition: 'stopped' }))).to.equal('stopped · data from 12:04:31');
+    });
+
     it('compacts a rate past a thousand a second, and keeps the usual words below', () => {
         expect([1_250, 999, 0.2].map(StatusText.rate)).to.deep.equal(['1.25k tasks/s', '999 tasks/s', '12 tasks/min']);
     });

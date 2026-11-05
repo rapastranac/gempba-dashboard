@@ -10,6 +10,7 @@
   ],
   "references": [
     { "path": "../gempba-core" },
-    { "path": "../gempba-telemetry" }
+    { "path": "../gempba-telemetry" },
+    { "path": "../gempba-ui" }
   ]
 }

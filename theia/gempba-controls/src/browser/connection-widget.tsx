@@ -5,8 +5,12 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog/file-dialog-service';
-import { ConnectionMode, ConnectionState, DashboardSettings, RefreshInterval, SessionSpec, TargetSpec } from '@gempba/core';
-import { TelemetryService } from '@gempba/telemetry/lib/common';
+import {
+    ConnectionMode, ConnectionState, DashboardSettings, RefreshInterval, SessionSpec, StreamCondition, TargetSpec
+} from '@gempba/core';
+import { ObservedIntervals, RankHistoryService, RunControl, StatusText, TelemetryService } from '@gempba/telemetry/lib/common';
+import { LiveIndicator, Panel, SegmentedControl, SegmentedOption, VisibleRefresh } from '@gempba/ui/lib/browser';
+import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { RememberedSettings } from '../common/remembered-settings';
 import { SettingsServer } from '../common/settings-protocol';
 import { RememberedRatesMove } from './remembered-rates-move';
@@ -14,10 +18,15 @@ import { RememberedRatesMove } from './remembered-rates-move';
 /** The arrows of a rate field move by this much; gempba itself takes any value between its bounds. */
 const RATE_STEP_MS = 50;
 
-const MODE_LABELS: Record<ConnectionMode, string> = {
-    [ConnectionMode.LOCAL]: 'Local',
-    [ConnectionMode.HOST]: 'Host (a VM over SSH)',
-    [ConnectionMode.JUMP]: 'Jump host (through a login node)'
+const MODES: Record<ConnectionMode, SegmentedOption<ConnectionMode>> = {
+    [ConnectionMode.LOCAL]: { value: ConnectionMode.LOCAL, label: 'Local', title: 'gempba on this machine' },
+    [ConnectionMode.HOST]: { value: ConnectionMode.HOST, label: 'Host', title: 'A VM over SSH' },
+    [ConnectionMode.JUMP]: { value: ConnectionMode.JUMP, label: 'Jump host', title: 'A compute node through a login node' }
+};
+
+/** The dot beside the stream's words: live, paused, run ended, reconnecting or waiting for a first frame, or not streaming. */
+const TONES: Record<StreamCondition, Liveness> = {
+    live: 'live', paused: 'paused', ended: 'ended', reconnecting: 'stale', stopped: 'off', disconnected: 'off', lost: 'off'
 };
 
 interface Form {
@@ -27,13 +36,29 @@ interface Form {
     targetHost: string;
     gempbaPort: string;
     intervalMs: string;
+    label: string;
+}
+
+interface IconButtonProps {
+    readonly icon: string;
+    readonly label: string;
+    readonly primary?: boolean;
+    readonly disabled?: boolean;
+    readonly onClick: () => void;
+}
+
+function IconButton({ icon, label, primary, disabled, onClick }: IconButtonProps): React.ReactElement {
+    return <button type='button' className={primary ? 'theia-button' : 'theia-button secondary'} disabled={disabled} onClick={onClick}>
+        <span className={`codicon codicon-${icon}`} aria-hidden={true} />
+        {label}
+    </button>;
 }
 
 /**
- * The connection controls: the session (mode, host, key) and the target (compute node, port), pre-filled from the
- * remembered settings and never connecting on its own, and the refresh rate, which the hub keeps as a setting. Only
- * the SSH modes have a session to connect; a local gempba is listened to directly. It only drives TelemetryService,
- * so the palette commands keep working without it.
+ * The connection controls under the stream's state: the session (mode, host, key) and the target (compute node, port),
+ * pre-filled from the remembered settings and never connecting on its own; the refresh rate, which the hub keeps as a
+ * setting; and the run controls. Only the SSH modes have a session to connect; a local gempba is listened to directly.
+ * It only drives TelemetryService, so the palette commands keep working without it.
  */
 @injectable()
 export class ConnectionWidget extends ReactWidget {
@@ -42,6 +67,7 @@ export class ConnectionWidget extends ReactWidget {
     static readonly LABEL = 'Connection';
 
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
+    @inject(RankHistoryService) protected readonly rankHistory: RankHistoryService;
     @inject(SettingsServer) protected readonly settingsServer: SettingsServer;
     @inject(FileDialogService) protected readonly fileDialog: FileDialogService;
     @inject(MessageService) protected readonly messages: MessageService;
@@ -64,8 +90,14 @@ export class ConnectionWidget extends ReactWidget {
         this.title.iconClass = codicon('plug');
         this.title.closable = false;
         this.addClass('gempba-connection');
-        this.toDispose.push(this.telemetry.onStateChange(() => this.update()));
-        this.toDispose.push(this.telemetry.onStatus(() => this.update()));
+        // The header follows every snapshot; a hidden view (a collapsed side panel) draws nothing until it is shown.
+        const refresh = new VisibleRefresh(this, () => this.update());
+        this.toDispose.push(refresh);
+        this.toDispose.push(this.telemetry.onStateChange(() => refresh.request()));
+        this.toDispose.push(this.telemetry.onStatus(() => refresh.request()));
+        this.toDispose.push(this.telemetry.onSnapshot(() => refresh.request()));
+        this.toDispose.push(this.telemetry.onLinkChange(() => refresh.request()));
+        this.toDispose.push(this.telemetry.onClear(() => refresh.request()));
         this.toDispose.push(this.telemetry.onIntervalChange(intervalMs => this.showInterval(intervalMs)));
         this.restore();
     }
@@ -89,7 +121,8 @@ export class ConnectionWidget extends ReactWidget {
             sshKey: session.sshKey,
             targetHost: target.targetHost,
             gempbaPort: String(target.gempbaPort),
-            intervalMs: String(intervalMs)
+            intervalMs: String(intervalMs),
+            label: this.form?.label ?? ''
         };
     }
 
@@ -100,77 +133,131 @@ export class ConnectionWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
-        const state = this.telemetry.state;
-        const disconnected = state === ConnectionState.DISCONNECTED;
-        const ssh = this.mode !== ConnectionMode.LOCAL;
-        // A local gempba needs no session, so it can be listened to straight away; an SSH target needs Connect first.
-        const canListen = state === ConnectionState.CONNECTED || state === ConnectionState.LISTENING || (disconnected && !ssh);
-        const jumpTarget = (disconnected ? this.mode : this.sessionMode) === ConnectionMode.JUMP;
         return <div className='gempba-connection-form'>
-            <section>
-                <h3>Session</h3>
-                <label>Mode
-                    <select className='theia-select' value={this.mode} disabled={!disconnected} onChange={e => this.changeMode(e.target.value as ConnectionMode)}>
-                        {this.modes.map(mode => <option key={mode} value={mode}>{MODE_LABELS[mode]}</option>)}
-                    </select>
-                </label>
-                {ssh && <>
-                    <label>{this.mode === ConnectionMode.JUMP ? 'Login node' : 'Host'}
-                        <input className='theia-input' list={this.mode === ConnectionMode.JUMP ? 'gempba-recent-login-hosts' : undefined}
-                            placeholder='user@host[:port]' value={this.form.host} disabled={!disconnected} onChange={e => this.edit('host', e.target.value)} />
-                    </label>
-                    <label>SSH port
-                        <input className='theia-input' inputMode='numeric' value={this.form.sshPort} disabled={!disconnected}
-                            onChange={e => this.edit('sshPort', digits(e.target.value))} />
-                    </label>
-                    <label>Key
-                        <span className='gempba-connection-row'>
-                            <input className='theia-input' placeholder='default keys in ~/.ssh' value={this.form.sshKey} disabled={!disconnected}
-                                onChange={e => this.edit('sshKey', e.target.value)} />
-                            <button className='theia-button secondary' disabled={!disconnected} onClick={() => this.browseKey()}>…</button>
-                        </span>
-                    </label>
-                    <div className='gempba-connection-row'>
-                        {disconnected
-                            ? <button className='theia-button' onClick={() => this.connect()}>Connect</button>
-                            : <button className='theia-button secondary' onClick={() => this.run(this.telemetry.disconnect())}>
-                                {state === ConnectionState.CONNECTING ? 'Cancel' : 'Disconnect'}
-                            </button>}
-                    </div>
-                </>}
-                {!ssh && <p className='gempba-connection-hint'>A gempba on this machine needs no session: set its port and press Listen.</p>}
-            </section>
-            <section>
-                <h3>Target</h3>
-                {jumpTarget && <label>Compute node
-                    <input className='theia-input' list='gempba-recent-targets' placeholder='as the login node knows it' value={this.form.targetHost}
-                        onChange={e => this.edit('targetHost', e.target.value)} />
-                </label>}
-                <label>gempba port
-                    <input className='theia-input' inputMode='numeric' list='gempba-recent-ports' value={this.form.gempbaPort}
-                        onChange={e => this.edit('gempbaPort', digits(e.target.value))} />
-                </label>
-                <div className='gempba-connection-row'>
-                    <button className='theia-button' disabled={!canListen} onClick={() => this.listen()}>Listen</button>
-                    <button className='theia-button secondary' disabled={state !== ConnectionState.LISTENING} onClick={() => this.run(this.telemetry.stop())}>Stop</button>
-                </div>
-            </section>
-            <section>
-                <h3>Refresh rate</h3>
-                <label>Every (ms)
-                    <input className='theia-input' type='number' min={RefreshInterval.MIN_MS} max={RefreshInterval.MAX_MS} step={RATE_STEP_MS}
-                        value={this.form.intervalMs} onChange={e => this.edit('intervalMs', e.target.value)} />
-                </label>
-                <div className='gempba-connection-row'>
-                    <button className='theia-button secondary' onClick={() => this.applyRate()}>Apply rate</button>
-                </div>
-            </section>
-            {this.problem && <p className='gempba-connection-problem'>{this.problem}</p>}
-            <p className='gempba-connection-status'>{this.telemetry.status || state.toLowerCase()}</p>
+            {this.renderHeader()}
+            {this.problem && <p className='gempba-connection-problem' role='alert'>{this.problem}</p>}
+            {this.renderSession()}
+            {this.renderTarget()}
+            {this.renderRate()}
+            {this.renderRun()}
             <datalist id='gempba-recent-ports'>{this.recentPorts().map(port => <option key={port} value={port} />)}</datalist>
             <datalist id='gempba-recent-targets'>{this.settings.jump.recentTargets.map(node => <option key={node} value={node} />)}</datalist>
             <datalist id='gempba-recent-login-hosts'>{this.settings.jump.recentLoginHosts.map(host => <option key={host} value={host} />)}</datalist>
         </div>;
+    }
+
+    /** The stream's state as the status bar words it, with the hub's latest status line under it. */
+    protected renderHeader(): React.ReactNode {
+        const { state, condition, status } = this.telemetry;
+        const snapshot = this.telemetry.snapshot;
+        const summary = StatusText.summary({
+            state, condition, status, nodes: snapshot?.nodes.length, throughput: this.rankHistory.clusterThroughput().at(-1),
+            intervalMs: this.telemetry.intervalMs, observed: this.telemetry.observedIntervals, run: snapshot?.run, lastFrameAt: this.telemetry.lastFrameAt
+        });
+        const tone: Liveness = condition ? TONES[condition] : state === ConnectionState.LISTENING ? 'stale' : 'off';
+        return <header className='gempba-connection-header'>
+            <LiveIndicator liveness={tone} label={summary.charAt(0).toUpperCase() + summary.slice(1)} />
+            {status && <span className='gempba-connection-status'>{status}</span>}
+        </header>;
+    }
+
+    protected renderSession(): React.ReactNode {
+        const state = this.telemetry.state;
+        const disconnected = state === ConnectionState.DISCONNECTED;
+        const ssh = this.mode !== ConnectionMode.LOCAL;
+        return <Panel title='Session' className='gempba-connection-panel'>
+            <SegmentedControl label='Connection mode' options={this.modes.map(mode => MODES[mode])} value={this.mode} disabled={!disconnected}
+                onChange={mode => this.changeMode(mode)} />
+            {ssh && <>
+                <label>{this.mode === ConnectionMode.JUMP ? 'Login node' : 'Host'}
+                    <input className='theia-input' list={this.mode === ConnectionMode.JUMP ? 'gempba-recent-login-hosts' : undefined}
+                        placeholder='user@host[:port]' value={this.form.host} disabled={!disconnected} onChange={e => this.edit('host', e.target.value)} />
+                </label>
+                <label>SSH port
+                    <input className='theia-input' inputMode='numeric' value={this.form.sshPort} disabled={!disconnected}
+                        onChange={e => this.edit('sshPort', digits(e.target.value))} />
+                </label>
+                <label>Key
+                    <span className='gempba-connection-row'>
+                        <input className='theia-input' placeholder='default keys in ~/.ssh' value={this.form.sshKey} disabled={!disconnected}
+                            onChange={e => this.edit('sshKey', e.target.value)} />
+                        <button type='button' className='theia-button secondary' title='Browse for a private key' disabled={!disconnected}
+                            onClick={() => this.browseKey()}>…</button>
+                    </span>
+                </label>
+                <div className='gempba-connection-row'>
+                    {disconnected
+                        ? <IconButton icon='plug' label='Connect' primary={true} onClick={() => this.connect()} />
+                        : <IconButton icon={state === ConnectionState.CONNECTING ? 'close' : 'debug-disconnect'}
+                            label={state === ConnectionState.CONNECTING ? 'Cancel' : 'Disconnect'} onClick={() => this.run(this.telemetry.disconnect())} />}
+                </div>
+            </>}
+            {!ssh && <p className='gempba-connection-hint'>A gempba on this machine needs no session: set its port and press Listen.</p>}
+        </Panel>;
+    }
+
+    protected renderTarget(): React.ReactNode {
+        const state = this.telemetry.state;
+        const disconnected = state === ConnectionState.DISCONNECTED;
+        // A local gempba needs no session, so it can be listened to straight away; an SSH target needs Connect first.
+        const canListen = state === ConnectionState.CONNECTED || state === ConnectionState.LISTENING || (disconnected && this.mode === ConnectionMode.LOCAL);
+        const jumpTarget = (disconnected ? this.mode : this.sessionMode) === ConnectionMode.JUMP;
+        return <Panel title='Target' className='gempba-connection-panel'>
+            {jumpTarget && <label>Compute node
+                <input className='theia-input' list='gempba-recent-targets' placeholder='as the login node knows it' value={this.form.targetHost}
+                    onChange={e => this.edit('targetHost', e.target.value)} />
+            </label>}
+            <label>gempba port
+                <input className='theia-input' inputMode='numeric' list='gempba-recent-ports' value={this.form.gempbaPort}
+                    onChange={e => this.edit('gempbaPort', digits(e.target.value))} />
+            </label>
+            <div className='gempba-connection-row'>
+                <IconButton icon='radio-tower' label='Listen' primary={true} disabled={!canListen} onClick={() => this.listen()} />
+                <IconButton icon='debug-stop' label='Stop' disabled={state !== ConnectionState.LISTENING} onClick={() => this.run(this.telemetry.stop())} />
+            </div>
+        </Panel>;
+    }
+
+    protected renderRate(): React.ReactNode {
+        const current = this.telemetry.intervalMs;
+        const arriving = this.telemetry.state === ConnectionState.LISTENING ? ObservedIntervals.text(this.telemetry.observedIntervals) : '';
+        return <Panel title='Refresh rate' className='gempba-connection-panel'>
+            <SegmentedControl label='Refresh rate' value={String(current)}
+                options={RefreshInterval.PRESETS_MS.map(ms => ({ value: String(ms), label: RefreshInterval.label(ms) }))}
+                onChange={ms => this.run(this.telemetry.setIntervalMs(Number(ms)))} />
+            <label>Custom (ms)
+                <span className='gempba-connection-row'>
+                    <input className='theia-input' type='number' min={RefreshInterval.MIN_MS} max={RefreshInterval.MAX_MS} step={RATE_STEP_MS}
+                        value={this.form.intervalMs} onChange={e => this.edit('intervalMs', e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && this.applyRate()} />
+                    <IconButton icon='check' label='Apply' onClick={() => this.applyRate()} />
+                </span>
+            </label>
+            {arriving && <p className='gempba-connection-hint'>{arriving.charAt(0).toUpperCase() + arriving.slice(1)}.</p>}
+        </Panel>;
+    }
+
+    protected renderRun(): React.ReactNode {
+        const condition = this.telemetry.condition;
+        const offered = RunControl.offered(condition);
+        return <Panel title='Run' className='gempba-connection-panel'>
+            <div className='gempba-connection-row gempba-connection-wrap'>
+                {condition === 'paused'
+                    ? <IconButton icon='debug-continue' label='Resume' disabled={!offered.resume} onClick={() => this.run(this.telemetry.resume())} />
+                    : <IconButton icon='debug-pause' label='Pause' disabled={!offered.pause} onClick={() => this.run(this.telemetry.pause())} />}
+                <IconButton icon='device-camera' label='Snapshot' disabled={!offered.snapshot} onClick={() => this.run(this.telemetry.requestSnapshot())} />
+            </div>
+            <label>Marker
+                <span className='gempba-connection-row'>
+                    <input className='theia-input' placeholder='a label for this moment' value={this.form.label} disabled={!offered.mark}
+                        onChange={e => this.edit('label', e.target.value)} onKeyDown={e => e.key === 'Enter' && this.mark()} />
+                    <IconButton icon='tag' label='Mark' disabled={!offered.mark} onClick={() => this.mark()} />
+                </span>
+            </label>
+            <div className='gempba-connection-row'>
+                <IconButton icon='clear-all' label='Clear data' disabled={!StreamCondition.isFrozen(condition)} onClick={() => this.telemetry.clear()} />
+            </div>
+        </Panel>;
     }
 
     protected recentPorts(): readonly number[] {
@@ -231,6 +318,16 @@ export class ConnectionWidget extends ReactWidget {
             return this.complain(`Enter the refresh rate in whole milliseconds, between ${RefreshInterval.MIN_MS} and ${RefreshInterval.MAX_MS}.`);
         }
         await this.run(this.telemetry.setIntervalMs(intervalMs));
+    }
+
+    protected async mark(): Promise<void> {
+        const label = this.form.label.trim();
+        const problem = RunControl.labelProblem(label);
+        if (problem) {
+            return this.complain(`Marker: ${problem}.`);
+        }
+        this.form = { ...this.form, label: '' };
+        await this.run(this.telemetry.mark(label));
     }
 
     protected async remember(settings: DashboardSettings): Promise<void> {

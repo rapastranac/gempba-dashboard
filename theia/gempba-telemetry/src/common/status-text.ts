@@ -43,7 +43,7 @@ export namespace StatusText {
     };
 
     export function of(stream: Stream): Shown {
-        return { text: `$(${icon(stream)}) GemPBA: ${words(stream)}`, tooltip: tooltip(stream).join('\n') };
+        return { text: `$(${icon(stream)}) GemPBA: ${summary(stream)}`, tooltip: tooltip(stream).join('\n') };
     }
 
     /** `12.4k tasks/s` past a thousand a second, `3.5 tasks/s` or `12 tasks/min` below. */
@@ -58,7 +58,8 @@ export namespace StatusText {
         return condition ? HELD[condition].icon : EMPTY[state].icon;
     }
 
-    function words({ state, condition, nodes, throughput, intervalMs, lastFrameAt }: Stream): string {
+    /** The entry's words without its icon: `2 nodes · 12.4k tasks/s · 500 ms`, `stopped · data from 12:04:31`, or `disconnected`. */
+    export function summary({ state, condition, nodes, throughput, intervalMs, lastFrameAt }: Stream): string {
         if (condition === 'live') {
             const count = nodes ?? 0;
             return [`${count} ${count === 1 ? 'node' : 'nodes'}`, throughput === undefined ? undefined : rate(throughput), RefreshInterval.label(intervalMs)]
