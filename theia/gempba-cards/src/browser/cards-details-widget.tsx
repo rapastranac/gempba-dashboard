@@ -119,6 +119,9 @@ export class CardsDetailsWidget extends ReactWidget {
         return Liveness.of({
             streaming: this.telemetry.state === ConnectionState.LISTENING,
             lastFrameAt: this.telemetry.lastFrameAt,
+            lastLineAt: this.telemetry.lastLineAt,
+            paused: this.telemetry.snapshot?.paused,
+            ended: this.telemetry.snapshot?.final,
             now: Date.now(),
             intervalMs: this.telemetry.rates.workerIntervalMs
         });

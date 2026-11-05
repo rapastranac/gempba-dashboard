@@ -33,6 +33,8 @@ export class TelemetryServiceImpl implements TelemetryService {
     protected readonly nodeCadence = new FrameCadence();
     protected readonly nodeArrivals = new FrameArrivals();
     protected latestFrameAt: number | undefined;
+    protected latestLineAt: number | undefined;
+    protected runId: string | undefined;
 
     get state(): ConnectionState {
         return this.currentState;
@@ -44,6 +46,10 @@ export class TelemetryServiceImpl implements TelemetryService {
 
     get lastFrameAt(): number | undefined {
         return this.latestFrameAt;
+    }
+
+    get lastLineAt(): number | undefined {
+        return this.latestLineAt;
     }
 
     get status(): string {
@@ -61,11 +67,19 @@ export class TelemetryServiceImpl implements TelemetryService {
     @postConstruct()
     protected init(): void {
         this.receiver.snapshots(snapshot => {
-            this.nodeHistory.update(snapshot);
-            this.rankHistory.update(snapshot);
+            if (snapshot.runId !== undefined && this.runId !== undefined && snapshot.runId !== this.runId) {
+                // gempba restarted on the same port: its charts start afresh, as a new Listen's do
+                this.forget();
+            }
+            this.runId = snapshot.runId ?? this.runId;
             const now = Date.now();
-            this.observe(snapshot, now);
-            this.latestFrameAt = now;
+            this.latestLineAt = now;
+            if (!snapshot.headerOnly) {
+                this.nodeHistory.update(snapshot);
+                this.rankHistory.update(snapshot);
+                this.observe(snapshot, now);
+                this.latestFrameAt = now;
+            }
             this.latestSnapshot = snapshot;
             this.onSnapshotEmitter.fire(snapshot);
         });
@@ -98,13 +112,8 @@ export class TelemetryServiceImpl implements TelemetryService {
     }
 
     async listen(target: TargetSpec): Promise<void> {
-        this.nodeHistory.clear();
-        this.rankHistory.clear();
-        this.workerCadence.clear();
-        this.nodeCadence.clear();
-        this.nodeArrivals.clear();
-        this.latestFrameAt = undefined;
-        this.latestSnapshot = undefined;
+        this.forget();
+        this.runId = undefined;
         await this.sendRates();
         return this.server.listen(target);
     }
@@ -126,6 +135,18 @@ export class TelemetryServiceImpl implements TelemetryService {
         await this.rateSettings.ready;
         const rates = this.rateSettings.rates;
         await this.server.pushRates(rates.workerIntervalMs, rates.nodeIntervalMs);
+    }
+
+    /** Clears what the last stream or run left: the snapshot, the histories, the observed rates and the frame times. */
+    protected forget(): void {
+        this.nodeHistory.clear();
+        this.rankHistory.clear();
+        this.workerCadence.clear();
+        this.nodeCadence.clear();
+        this.nodeArrivals.clear();
+        this.latestFrameAt = undefined;
+        this.latestLineAt = undefined;
+        this.latestSnapshot = undefined;
     }
 
     protected observe(snapshot: WorldSnapshot, now: number): void {

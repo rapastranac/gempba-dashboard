@@ -49,7 +49,8 @@ export class GridWidget extends ReactWidget {
         clusterThroughput: () => this.rankHistory.clusterThroughput(),
         rank: id => this.rankHistory.seriesFor(id),
         nodeFrameAt: host => this.telemetry.nodeFrameAt(host),
-        lastFrameAt: () => this.telemetry.lastFrameAt
+        lastFrameAt: () => this.telemetry.lastFrameAt,
+        lastLineAt: () => this.telemetry.lastLineAt
     };
 
     protected readonly liveness = new LivenessWatch(this, () => {

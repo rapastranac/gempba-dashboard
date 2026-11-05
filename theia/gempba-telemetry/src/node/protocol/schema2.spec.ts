@@ -179,6 +179,7 @@ describe('Telemetry schema 2', () => {
             expect(paused.paused).to.equal(true);
             expect(paused.nodes).to.equal(before.nodes);
             expect([paused.runId, paused.timestampMillis]).to.deep.equal([before.runId, before.timestampMillis]);
+            expect([before.headerOnly, paused.headerOnly], 'no new frame').to.deep.equal([undefined, true]);
         });
 
         it('takes a snapshot sent while paused as new data', () => {
@@ -189,15 +190,23 @@ describe('Telemetry schema 2', () => {
             expect(snapshot.paused).to.equal(true);
             expect(snapshot.timestampMillis).to.equal(BroadcastEnvelope.parse(SNAPSHOT_WHILE_PAUSED).ts);
             expect(WorldSnapshot.totalRanks(snapshot)).to.equal(4);
+            expect(snapshot.headerOnly, 'new frames').to.equal(undefined);
         });
 
         it('maps a paused line as is before any data, and forgets the last data on reset', () => {
             const store = new TelemetryStore();
             const first = store.ingest(BroadcastEnvelope.parse(PAUSED));
-            expect([first.nodes, first.paused]).to.deep.equal([[], true]);
+            expect([first.nodes, first.paused, first.headerOnly]).to.deep.equal([[], true, true]);
             store.ingest(BroadcastEnvelope.parse(FULL));
             store.reset();
             expect(store.ingest(BroadcastEnvelope.parse(PAUSED)).nodes).to.deep.equal([]);
+        });
+
+        it('starts afresh on another run\'s line: a restarted gempba\'s paused line shows none of the last run\'s data', () => {
+            const store = new TelemetryStore();
+            store.ingest(BroadcastEnvelope.parse(FULL));
+            const next = store.ingest({ ...BroadcastEnvelope.parse(PAUSED), run_id: 'the next run' });
+            expect([next.runId, next.nodes, next.headerOnly]).to.deep.equal(['the next run', [], true]);
         });
     });
 });

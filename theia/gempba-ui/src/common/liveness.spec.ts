@@ -24,7 +24,21 @@ describe('Liveness', () => {
         expect(Liveness.of({ ...stream, lastFrameAt: undefined })).to.equal('stale');
     });
 
+    it('is paused while gempba sends its paused lines, though no frames arrive, and stale once those stop too', () => {
+        const paused = { ...stream, paused: true, lastFrameAt: 1_000, lastLineAt: 10_000 };
+        expect(Liveness.of({ ...paused, now: 11_900 })).to.equal('paused');
+        expect(Liveness.of({ ...paused, now: 12_001 })).to.equal('stale');
+        expect(Liveness.of({ ...paused, lastLineAt: undefined })).to.equal('stale');
+    });
+
+    it('says the run ended after its final line, however long ago, until the stream stops', () => {
+        const ended = { ...stream, ended: true, paused: true, now: 600_000 };
+        expect(Liveness.of(ended)).to.equal('ended');
+        expect(Liveness.of({ ...ended, streaming: false })).to.equal('off');
+    });
+
     it('says each state in words', () => {
-        expect((['live', 'stale', 'off'] as const).map(Liveness.label)).to.deep.equal(['Live', 'Waiting for frames', 'Not streaming']);
+        expect((['live', 'paused', 'ended', 'stale', 'off'] as const).map(Liveness.label))
+            .to.deep.equal(['Live', 'Paused', 'Run ended', 'Waiting for frames', 'Not streaming']);
     });
 });

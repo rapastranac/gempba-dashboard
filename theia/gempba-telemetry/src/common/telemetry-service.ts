@@ -11,8 +11,13 @@ export interface TelemetryService {
     readonly state: ConnectionState;
     /** The latest snapshot of the active session, for a view that opens mid-stream. */
     readonly snapshot: WorldSnapshot | undefined;
-    /** When the latest snapshot arrived, on this machine's clock; `undefined` before the first of a stream. */
+    /**
+     * When the latest snapshot with frames arrived, on this machine's clock; `undefined` before the first of a stream or
+     * a run. A paused line, the header alone, leaves it.
+     */
     readonly lastFrameAt: number | undefined;
+    /** When the latest line of any kind arrived, paused lines included; `undefined` before the first of a stream or a run. */
+    readonly lastLineAt: number | undefined;
     /** The latest user-facing status line. */
     readonly status: string;
     readonly onSnapshot: Event<WorldSnapshot>;
@@ -37,7 +42,8 @@ export interface TelemetryService {
     connect(session: SessionSpec): Promise<void>;
     /**
      * Starts a new target over the open session, or on this machine when none is open; the snapshot, the
-     * histories, the observed rates and the frame times are cleared first.
+     * histories, the observed rates and the frame times are cleared first. Another run on the same target, told by
+     * its run id, clears them too, before its first snapshot.
      */
     listen(target: TargetSpec): Promise<void>;
     /** Stops streaming; an SSH session stays open, a local stream ends in DISCONNECTED. */
