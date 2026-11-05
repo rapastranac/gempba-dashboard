@@ -6,7 +6,13 @@ import { inject, injectable, postConstruct } from '@theia/core/shared/inversify'
 import { RefreshInterval } from '@gempba/core';
 
 export namespace RatePreferences {
-    export const INTERVAL = 'gempba.telemetry.workerIntervalMs';
+    export const INTERVAL = 'gempba.telemetry.intervalMs';
+    /**
+     * The worker and node rates saved before one rate drove every frame. They stay in the schema, hidden, so a saved
+     * value can be read once, the worker rate carried over to {@link INTERVAL}, and both cleared.
+     */
+    export const OLD_WORKER_INTERVAL = 'gempba.telemetry.workerIntervalMs';
+    export const OLD_NODE_INTERVAL = 'gempba.telemetry.nodeIntervalMs';
 
     export const SCHEMA: PreferenceSchema = {
         properties: {
@@ -16,7 +22,9 @@ export namespace RatePreferences {
                 maximum: RefreshInterval.MAX_MS,
                 default: RefreshInterval.DEFAULT_MS,
                 description: 'The refresh rate: how often gempba sends every frame, rank and node frames alike, in milliseconds. Applies to every window at once.'
-            }
+            },
+            [OLD_WORKER_INTERVAL]: { type: 'integer', hidden: true, description: `Replaced by ${INTERVAL}.` },
+            [OLD_NODE_INTERVAL]: { type: 'integer', hidden: true, description: `Replaced by ${INTERVAL}, which drives every frame.` }
         }
     };
 }
@@ -40,9 +48,12 @@ export class PreferenceRateSettings implements RateSettings {
 
     protected readonly onChangeEmitter = new Emitter<number>();
     readonly onChange = this.onChangeEmitter.event;
+    protected moving: Promise<void> | undefined;
 
+    /** Resolves once the preferences are read and any rate saved under the old keys has moved. */
     get ready(): Promise<void> {
-        return this.preferences.ready;
+        this.moving ??= this.preferences.ready.then(() => this.moveOldRates());
+        return this.moving;
     }
 
     get intervalMs(): number {
@@ -57,10 +68,35 @@ export class PreferenceRateSettings implements RateSettings {
                 this.onChangeEmitter.fire(this.intervalMs);
             }
         });
+        // at startup, so the rate shown is the one saved, whether or not anything streams
+        this.ready.catch(() => undefined);
     }
 
     async set(intervalMs: number): Promise<void> {
-        await this.preferences.ready;
+        await this.ready;
         await this.preferences.set(RatePreferences.INTERVAL, RefreshInterval.clamp(intervalMs), PreferenceScope.User);
+    }
+
+    /**
+     * Carries a rate saved under the worker rate's old key over to the refresh rate, unless one is set already, then
+     * clears both old keys, as the node rate has no place now. It runs once: nothing is left to move after it. A file
+     * that can't be written keeps the old keys for the next start.
+     */
+    protected async moveOldRates(): Promise<void> {
+        const worker = this.preferences.inspectInScope<number>(RatePreferences.OLD_WORKER_INTERVAL, PreferenceScope.User);
+        const node = this.preferences.inspectInScope<number>(RatePreferences.OLD_NODE_INTERVAL, PreferenceScope.User);
+        if (worker === undefined && node === undefined) {
+            return;
+        }
+        try {
+            if (typeof worker === 'number' && Number.isFinite(worker)
+                && this.preferences.inspectInScope<number>(RatePreferences.INTERVAL, PreferenceScope.User) === undefined) {
+                await this.preferences.set(RatePreferences.INTERVAL, RefreshInterval.clamp(worker), PreferenceScope.User);
+            }
+            await this.preferences.set(RatePreferences.OLD_WORKER_INTERVAL, undefined, PreferenceScope.User);
+            await this.preferences.set(RatePreferences.OLD_NODE_INTERVAL, undefined, PreferenceScope.User);
+        } catch {
+            return;
+        }
     }
 }
