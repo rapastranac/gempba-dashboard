@@ -168,6 +168,8 @@
     "gempba.heat.high": "#c43c3c",
     "gempba.live.active": "#0f8f4f",
     "gempba.live.stale": "#9a7d00",
-    "gempba.live.off": "#7d8791"
+    "gempba.live.off": "#7d8791",
+    "gempba.live.paused": "#7b4bc4",
+    "gempba.live.ended": "#1f2a33"
   }
 }

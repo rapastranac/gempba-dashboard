@@ -34,6 +34,7 @@ function sources(overrides: Partial<GridTiles.Sources> = {}): GridTiles.Sources 
         rank: () => RankSeries.empty(),
         nodeFrameAt: () => 9_500,
         lastFrameAt: () => 9_900,
+        lastLineAt: () => 9_900,
         ...overrides
     };
 }
@@ -105,6 +106,17 @@ describe('GridTiles', () => {
             const frameAt = (host: string) => host === 'alpha' ? 9_500 : 6_000;
             const tiles = GridTiles.of(world(node('alpha'), node('beta')), sources({ nodeFrameAt: frameAt }), CLOCK);
             expect(tiles.map(tile => tile.liveness)).to.deep.equal(['live', 'stale']);
+        });
+
+        it('shows a pause and the run\'s end on every tile, as the stream does, though no node sends new frames', () => {
+            const quiet = sources({ nodeFrameAt: () => 1_000, lastFrameAt: () => 1_000 });
+            const liveness = (paused: boolean, final: boolean) => [
+                ...GridTiles.of({ ...world(node('alpha'), node('beta')), paused, final }, quiet, CLOCK).map(tile => tile.liveness),
+                GridTiles.overview({ ...world(node('alpha')), paused, final }, quiet, CLOCK)!.liveness
+            ];
+            expect(liveness(true, false)).to.deep.equal(['paused', 'paused', 'paused']);
+            expect(liveness(true, true)).to.deep.equal(['ended', 'ended', 'ended']);
+            expect(liveness(false, false)).to.deep.equal(['stale', 'stale', 'stale']);
         });
 
         it('is off once the stream is', () => {

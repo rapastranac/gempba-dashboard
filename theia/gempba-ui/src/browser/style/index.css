@@ -432,6 +432,14 @@
     background: var(--theia-gempba-live-off);
 }
 
+.gempba-live-paused .gempba-live-dot {
+    background: var(--theia-gempba-live-paused);
+}
+
+.gempba-live-ended .gempba-live-dot {
+    background: var(--theia-gempba-live-ended);
+}
+
 .gempba-live-compact .gempba-live-dot {
     animation: none;
 }

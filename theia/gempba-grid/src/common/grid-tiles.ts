@@ -63,6 +63,7 @@ export namespace GridTiles {
         rank(id: number): RankSeries;
         nodeFrameAt(host: string): number | undefined;
         lastFrameAt(): number | undefined;
+        lastLineAt(): number | undefined;
     }
 
     /** What liveness is judged against: whether a stream is open, this machine's time, and the worker interval set. */
@@ -93,7 +94,7 @@ export namespace GridTiles {
                     hint: `Tasks this node's processes sent to and received from other processes over the run; ${NumberText.grouped(moves.acrossNodes)} of `
                         + 'those sent went to other nodes, across the network.'
                 } : undefined,
-                liveness: Liveness.of({ ...clock, lastFrameAt: sources.nodeFrameAt(node.host) })
+                liveness: Liveness.of({ ...clock, ...runState(snapshot, sources), lastFrameAt: sources.nodeFrameAt(node.host) })
             };
         });
     }
@@ -129,7 +130,7 @@ export namespace GridTiles {
             figures.push(memoryFigure(memUsed, memTotal));
         }
         return {
-            liveness: Liveness.of({ ...clock, lastFrameAt: sources.lastFrameAt() }),
+            liveness: Liveness.of({ ...clock, ...runState(snapshot, sources), lastFrameAt: sources.lastFrameAt() }),
             summary: `${plural(nodes.length, 'node')} · ${plural(ranks.length, 'rank')}`,
             figures,
             throughput: throughput.map(rate => Rates.inUnit(rate, unit)),
@@ -185,4 +186,9 @@ export namespace GridTiles {
     function plural(count: number, noun: string): string {
         return `${NumberText.grouped(count)} ${noun}${count === 1 ? '' : 's'}`;
     }
+}
+
+/** What the latest line says of the run, paused or ended, which every tile shows as the stream does; and when any line arrived. */
+function runState(snapshot: WorldSnapshot, sources: GridTiles.Sources): Pick<Liveness.Stream, 'paused' | 'ended' | 'lastLineAt'> {
+    return { paused: snapshot.paused, ended: snapshot.final, lastLineAt: sources.lastLineAt() };
 }

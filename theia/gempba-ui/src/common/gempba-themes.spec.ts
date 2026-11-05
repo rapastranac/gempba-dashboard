@@ -38,7 +38,7 @@ const GRAPHICS: ReadonlyArray<readonly [foreground: string, background: string]>
     ...[UiColors.CHART_CPU, UiColors.CHART_MEMORY, 'charts.blue', 'charts.green', 'charts.purple', 'charts.orange', 'charts.yellow', 'charts.red']
         .map(chart => [chart, UiColors.TILE_BACKGROUND] as const),
     ...[UiColors.CHART_CPU, UiColors.CHART_MEMORY, UiColors.CHART_TASKS, UiColors.CHART_NETWORK, UiColors.CHART_IDLE, UiColors.HEAT_HIGH,
-        UiColors.LIVE_ACTIVE, UiColors.LIVE_STALE, UiColors.LIVE_OFF].map(graphic => [graphic, UiColors.PANEL_BACKGROUND] as const)
+        UiColors.LIVE_ACTIVE, UiColors.LIVE_STALE, UiColors.LIVE_OFF, UiColors.LIVE_PAUSED, UiColors.LIVE_ENDED].map(graphic => [graphic, UiColors.PANEL_BACKGROUND] as const)
 ];
 
 describe('GemPbaThemes', () => {
