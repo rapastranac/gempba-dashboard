@@ -3,7 +3,7 @@ import { FrontendApplicationContribution } from '@theia/core/lib/browser/fronten
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser/status-bar/status-bar-types';
 import { inject, injectable } from '@theia/core/shared/inversify';
 import { ConnectionState, Rates, RefreshInterval, TaskWords } from '@gempba/core';
-import { TelemetryService, WorkerHistoryService } from '../common/telemetry-service';
+import { TelemetryService, RankHistoryService } from '../common/telemetry-service';
 import { TelemetryMenus } from './telemetry-command-contribution';
 
 /**
@@ -17,7 +17,7 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
 
     @inject(StatusBar) protected readonly statusBar: StatusBar;
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
-    @inject(WorkerHistoryService) protected readonly workerHistory: WorkerHistoryService;
+    @inject(RankHistoryService) protected readonly rankHistory: RankHistoryService;
     @inject(ContextMenuRenderer) protected readonly contextMenu: ContextMenuRenderer;
 
     protected shown = '';
@@ -39,7 +39,7 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
             ? `$(pulse) GemPBA: ${nodes} ${nodes === 1 ? 'node' : 'nodes'} · ${rate}`
             : `$(plug) GemPBA: ${state.toLowerCase()}`;
         const lines = [this.telemetry.status || state.toLowerCase()];
-        const throughput = this.workerHistory.clusterThroughput();
+        const throughput = this.rankHistory.clusterThroughput();
         if (listening && throughput.length > 0) {
             lines.push(`${TaskWords.STARTED}: ${Rates.text(throughput[throughput.length - 1])}`);
         }

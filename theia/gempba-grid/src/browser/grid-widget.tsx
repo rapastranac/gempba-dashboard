@@ -5,9 +5,9 @@ import { CommandService } from '@theia/core/lib/common/command';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
-import { ConnectionState, WorkerHistoryStore } from '@gempba/core';
+import { ConnectionState, RankHistoryStore } from '@gempba/core';
 import { LiveTelemetryView, TelemetryCommands } from '@gempba/telemetry/lib/browser';
-import { NodeHistoryService, NodeLink, NodeSelection, TelemetryService, WorkerHistoryService } from '@gempba/telemetry/lib/common';
+import { NodeHistoryService, NodeLink, NodeSelection, TelemetryService, RankHistoryService } from '@gempba/telemetry/lib/common';
 import { EmptyState, HeroStat, LiveIndicator, LivenessWatch, MeterBar, Sparkline, Tile, TileGrid, VisibleRefresh } from '@gempba/ui/lib/browser';
 import { MotionTiming } from '@gempba/ui/lib/common/motion-timing';
 import { GridFigure, GridOverview, GridTile, GridTiles } from '../common/grid-tiles';
@@ -26,7 +26,7 @@ const CPU_TOOLTIP = 'CPU utilization of this node\'s gempba allocation (0–100%
 
 /**
  * The cluster at a glance: an overview of the whole run above one Task Manager style tile per node, each with its
- * CPU and history, its tasks started, its memory, the tasks it moved, and whether its own workers still send frames. Picking a tile
+ * CPU and history, its tasks started, its memory, the tasks it moved, and whether its own ranks still send frames. Picking a tile
  * publishes a NodeSelection, and a node selected elsewhere is highlighted here. Opening a tile opens its node's
  * NodeLink, in whichever view registered to open nodes.
  */
@@ -38,16 +38,16 @@ export class GridWidget extends ReactWidget {
 
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
     @inject(NodeHistoryService) protected readonly nodeHistory: NodeHistoryService;
-    @inject(WorkerHistoryService) protected readonly workerHistory: WorkerHistoryService;
+    @inject(RankHistoryService) protected readonly rankHistory: RankHistoryService;
     @inject(SelectionService) protected readonly selection: SelectionService;
     @inject(OpenerService) protected readonly openers: OpenerService;
     @inject(CommandService) protected readonly commands: CommandService;
 
     protected readonly sources: GridTiles.Sources = {
         node: host => this.nodeHistory.seriesFor(host),
-        throughput: host => this.workerHistory.throughputFor(host),
-        clusterThroughput: () => this.workerHistory.clusterThroughput(),
-        worker: workerId => this.workerHistory.seriesFor(workerId),
+        throughput: host => this.rankHistory.throughputFor(host),
+        clusterThroughput: () => this.rankHistory.clusterThroughput(),
+        rank: id => this.rankHistory.seriesFor(id),
         nodeFrameAt: host => this.telemetry.nodeFrameAt(host),
         lastFrameAt: () => this.telemetry.lastFrameAt
     };
@@ -111,7 +111,7 @@ export class GridWidget extends ReactWidget {
                 {overview.figures.map(figure => <Figure key={figure.label} figure={figure} of='the cluster' />)}
                 <div className='gempba-grid-overview-chart'>
                     <span className='gempba-hero-label'>{overview.throughputTitle}</span>
-                    <Sparkline values={overview.throughput} capacity={WorkerHistoryStore.CAPACITY} tone='tasks' label={`${overview.throughputTitle} by the cluster`} />
+                    <Sparkline values={overview.throughput} capacity={RankHistoryStore.CAPACITY} tone='tasks' label={`${overview.throughputTitle} by the cluster`} />
                 </div>
             </div>
         </section>;

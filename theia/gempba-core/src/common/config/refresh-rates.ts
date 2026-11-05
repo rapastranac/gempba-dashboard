@@ -1,6 +1,6 @@
 import { RefreshInterval } from './refresh-interval';
 
-/** The two refresh intervals gempba accepts: how often each worker, and each node's sentinel, sends a frame. */
+/** The two refresh intervals gempba accepts: how often each rank, and each node's sentinel, sends a frame. */
 export interface RefreshRates {
     readonly workerIntervalMs: number;
     readonly nodeIntervalMs: number;

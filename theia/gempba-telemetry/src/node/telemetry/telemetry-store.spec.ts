@@ -1,39 +1,39 @@
 import { expect } from 'chai';
 import { WorldSnapshot } from '@gempba/core';
-import { BroadcastEnvelope, NodeFrame, WorkerFrame } from '../protocol/wire-protocol';
+import { BroadcastEnvelope, NodeFrame, RankFrame } from '../protocol/wire-protocol';
 import { TelemetryStore } from './telemetry-store';
 import { WorldSnapshotMapper } from './world-snapshot-mapper';
 
-function cpuFrame(id: number, cpu: number): WorkerFrame {
+function cpuFrame(id: number, cpu: number): RankFrame {
     return {
-        worker_id: id, seq_no: 1, worker_local_ms: 0, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
-        tasks_running: 0, scheduler_pending_count: 0, idle_microseconds_per_worker: 0,
+        rank: id, seq_no: 1, rank_local_ms: 0, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
+        tasks_running: 0, scheduler_pending_count: 0, idle_microseconds_per_thread: 0,
         process_cpu_pct: cpu, process_rss_bytes: 0, process_threads: 1, edges_out: []
     };
 }
 
 function nodeFrame(): NodeFrame {
     return {
-        sentinel_worker_id: 0, sentinel_local_ms: 0, hostname: 'h', socket_count: 1, logical_cores: 4,
+        sentinel_rank: 0, sentinel_local_ms: 0, hostname: 'h', socket_count: 1, logical_cores: 4,
         mem_total_bytes: 1000, mem_avail_bytes: 250, cgroup_mem_used_bytes: 0, cgroup_mem_limit_bytes: 0
     };
 }
 
-/** Host "h", worker 0 pegging a 4-core allocation. */
+/** Host "h", rank 0 pegging a 4-core allocation. */
 function withTopology(ts: number): BroadcastEnvelope {
     return {
         version: 7, ts, elapsed_seconds: 0,
         topology: {
-            nodes: [{ hostname: 'h', sentinel_worker_id: 0, total_physical_cores: 0, total_logical_cores: 0, mem_total_bytes: 0, worker_ids: [0], sockets: [] }],
-            identities: [{ worker_id: 0, hostname: 'h', pid: 1000, primary_socket: 0, allowed_cpu_ids: [0, 1, 2, 3] }]
+            nodes: [{ hostname: 'h', sentinel_rank: 0, total_physical_cores: 0, total_logical_cores: 0, mem_total_bytes: 0, ranks: [0], sockets: [] }],
+            identities: [{ rank: 0, hostname: 'h', pid: 1000, primary_socket: 0, allowed_cpu_ids: [0, 1, 2, 3] }]
         },
-        workers: [cpuFrame(0, 400)],
+        ranks: [cpuFrame(0, 400)],
         nodes: [nodeFrame()]
     };
 }
 
 function withoutTopology(ts: number, nodes?: NodeFrame[]): BroadcastEnvelope {
-    return { version: 7, ts, elapsed_seconds: 0, topology: undefined, workers: [cpuFrame(0, 400)], nodes };
+    return { version: 7, ts, elapsed_seconds: 0, topology: undefined, ranks: [cpuFrame(0, 400)], nodes };
 }
 
 describe('TelemetryStore', () => {

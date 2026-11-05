@@ -81,7 +81,7 @@ describe('MockCenter', () => {
         const connectedAt = Date.now();
         await until(() => client.lines.length > 0);
         expect(Date.now() - connectedAt).to.be.below(400);
-        expect(BroadcastEnvelope.parse(client.lines[0]).workers).to.have.lengthOf(8);
+        expect(BroadcastEnvelope.parse(client.lines[0]).ranks).to.have.lengthOf(8);
         expect(logged).to.deep.equal([`TCP client ${client.socket.localPort} connected`]);
     });
 
@@ -104,7 +104,7 @@ describe('MockCenter', () => {
 
     it('drops a client that falls behind, and keeps serving the others', async function (): Promise<void> {
         this.timeout(15_000);
-        await serve({ fidelity: 'full' }, { nodes: 16, workersPerNode: 32 }, { workerIntervalMs: 50, nodeIntervalMs: 1000 }, { maxBufferedBytes: 512 * 1024 });
+        await serve({ fidelity: 'full' }, { nodes: 16, ranksPerNode: 32 }, { workerIntervalMs: 50, nodeIntervalMs: 1000 }, { maxBufferedBytes: 512 * 1024 });
         const stalled = lineClient();
         stalled.socket.pause();
         const healthy = lineClient();

@@ -7,7 +7,7 @@ export interface RunSetup {
     /** `multiprocessing` or `multithreading`. */
     readonly runtimeMode?: string;
     readonly worldSize: number;
-    /** The largest thread pool a worker reports; 0 until a frame arrives. */
+    /** The largest thread pool a rank reports; 0 until a frame arrives. */
     readonly threadsPerProcess: number;
     readonly gempbaVersion?: string;
     /** The key and value pairs the program set, in the order their keys were first set. */
@@ -25,11 +25,11 @@ export interface RunMarker {
 }
 
 /**
- * What telemetry schema 2 adds to a worker's frame: where its time and its tasks' bytes go. Counters are cumulative
+ * What telemetry schema 2 adds to a rank's frame: where its time and its tasks' bytes go. Counters are cumulative
  * since the process started telemetry; a key that doesn't apply to the rank, such as a coordinator-only one on a worker,
  * reads 0. Times marked `Ms` are milliseconds since the scheduler run started, 0 until the event first happens.
  */
-export interface WorkerAccounting {
+export interface RankAccounting {
     readonly bytesSentTotal: number;
     readonly bytesRecvTotal: number;
     /** Time in the MPI calls that send tasks: how long the sender stalled, not wire latency. */

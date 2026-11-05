@@ -5,8 +5,8 @@
  * rank's role and the time accounting, and renames keys: a process is a rank (`ranks`, `rank`, `sentinel_rank`,
  * `rank_local_ms`), idle time is per thread, `tasks_local_total` is `tasks_started_total`, and the role and counters
  * once called center are the coordinator's. Each key is read by its v4.3.0 name first, then by its older one, which
- * schema 1 and builds from before the rename send; fields that schema 1 already had keep its names. Field names stay
- * snake_case as on the wire; only the WorldSnapshotMapper translates them into the camelCase read-model. Parsing mirrors the
+ * schema 1 and builds from before the rename send; the fields below take the v4.3.0 names. Field names stay snake_case
+ * as on the wire; only the WorldSnapshotMapper translates them into the camelCase read-model. Parsing mirrors the
  * Java/Jackson contract: unknown fields are ignored, missing numbers read as 0, and missing objects or
  * lists stay undefined (a missing topology node `sockets` means something different from an empty one).
  */
@@ -24,13 +24,13 @@ export interface BroadcastEnvelope {
     readonly final?: boolean;
     readonly topology?: Topology;
     /** Every rank's frame, whatever its role: `ranks`, or `workers` before the rename. */
-    readonly workers?: readonly WorkerFrame[];
+    readonly ranks?: readonly RankFrame[];
     readonly nodes?: readonly NodeFrame[];
 }
 
 export interface Topology {
     readonly nodes?: readonly TopologyNode[];
-    readonly identities?: readonly WorkerIdentity[];
+    readonly identities?: readonly RankIdentity[];
     /** The run's setup; schema 2. */
     readonly run?: TopologyRun;
 }
@@ -55,13 +55,13 @@ export interface RunMarkerFrame {
 
 export interface TopologyNode {
     readonly hostname?: string;
-    readonly sentinel_worker_id: number;
+    readonly sentinel_rank: number;
     /** 0 when unknown (no hwloc). */
     readonly total_physical_cores: number;
     readonly total_logical_cores: number;
     /** Captured once at startup; the live NodeFrame carries current availability. */
     readonly mem_total_bytes: number;
-    readonly worker_ids?: readonly number[];
+    readonly ranks?: readonly number[];
     readonly sockets?: readonly TopologySocket[];
 }
 
@@ -75,8 +75,8 @@ export interface TopologySocket {
     readonly cpu_ids?: readonly number[];
 }
 
-export interface WorkerIdentity {
-    readonly worker_id: number;
+export interface RankIdentity {
+    readonly rank: number;
     readonly hostname?: string;
     readonly pid: number;
     readonly primary_socket: number;
@@ -86,11 +86,11 @@ export interface WorkerIdentity {
     readonly allowed_cpu_ids?: readonly number[];
 }
 
-/** Per-worker frame, emitted every worker interval (default 500 ms). */
-export interface WorkerFrame {
-    readonly worker_id: number;
+/** Per-rank frame, emitted at the worker interval (default 500 ms). */
+export interface RankFrame {
+    readonly rank: number;
     readonly seq_no: number;
-    readonly worker_local_ms: number;
+    readonly rank_local_ms: number;
     /** Subtrees handed to a pool thread, received ones included, counted at hand-off; schema 1 calls it `tasks_local_total`. */
     readonly tasks_started_total: number;
     readonly tasks_sent_total: number;
@@ -123,8 +123,8 @@ export interface WorkerFrame {
     readonly tasks_running: number;
     /** IPC scheduler queue depth; a different layer from tasks_running. */
     readonly scheduler_pending_count: number;
-    /** Cumulative idle time, already averaged across the pool's threads: `idle_microseconds_per_thread` since the rename. */
-    readonly idle_microseconds_per_worker: number;
+    /** Cumulative idle time, already averaged across the pool's threads: `idle_microseconds_per_worker` before the rename. */
+    readonly idle_microseconds_per_thread: number;
     /** Percent of one core: 400 means four cores pegged. */
     readonly process_cpu_pct: number;
     readonly process_rss_bytes: number;
@@ -132,7 +132,7 @@ export interface WorkerFrame {
     readonly edges_out?: readonly EdgeOut[];
 }
 
-/** Sender-side edge: what this worker has sent to one peer. */
+/** Sender-side edge: what this rank has sent to one peer. */
 export interface EdgeOut {
     readonly to: number;
     readonly bytes: number;
@@ -141,7 +141,7 @@ export interface EdgeOut {
 
 /** Per-node frame, emitted only by the node's elected sentinel (default every 1 s). */
 export interface NodeFrame {
-    readonly sentinel_worker_id: number;
+    readonly sentinel_rank: number;
     readonly sentinel_local_ms: number;
     readonly hostname?: string;
     readonly socket_count: number;
@@ -229,7 +229,7 @@ export namespace BroadcastEnvelope {
             paused: bool(json.paused),
             final: bool(json.final),
             topology: nested(json.topology, Topology.fromJson),
-            workers: list(json.ranks ?? json.workers, WorkerFrame.fromJson),
+            ranks: list(json.ranks ?? json.workers, RankFrame.fromJson),
             nodes: list(json.nodes, NodeFrame.fromJson)
         };
     }
@@ -240,7 +240,7 @@ export namespace Topology {
         const json = objectOf(value);
         return {
             nodes: list(json.nodes, TopologyNode.fromJson),
-            identities: list(json.identities, WorkerIdentity.fromJson),
+            identities: list(json.identities, RankIdentity.fromJson),
             run: nested(json.run, TopologyRun.fromJson)
         };
     }
@@ -277,11 +277,11 @@ export namespace TopologyNode {
         const json = objectOf(value);
         return {
             hostname: str(json.hostname),
-            sentinel_worker_id: num(json.sentinel_rank ?? json.sentinel_worker_id),
+            sentinel_rank: num(json.sentinel_rank ?? json.sentinel_worker_id),
             total_physical_cores: num(json.total_physical_cores),
             total_logical_cores: num(json.total_logical_cores),
             mem_total_bytes: num(json.mem_total_bytes),
-            worker_ids: list(json.ranks ?? json.worker_ids, num),
+            ranks: list(json.ranks ?? json.worker_ids, num),
             sockets: list(json.sockets, TopologySocket.fromJson)
         };
     }
@@ -300,11 +300,11 @@ export namespace TopologySocket {
     }
 }
 
-export namespace WorkerIdentity {
-    export function fromJson(value: unknown): WorkerIdentity {
+export namespace RankIdentity {
+    export function fromJson(value: unknown): RankIdentity {
         const json = objectOf(value);
         return {
-            worker_id: num(json.rank ?? json.worker_id),
+            rank: num(json.rank ?? json.worker_id),
             hostname: str(json.hostname),
             pid: num(json.pid),
             primary_socket: num(json.primary_socket),
@@ -314,13 +314,13 @@ export namespace WorkerIdentity {
     }
 }
 
-export namespace WorkerFrame {
-    export function fromJson(value: unknown): WorkerFrame {
+export namespace RankFrame {
+    export function fromJson(value: unknown): RankFrame {
         const json = objectOf(value);
         return {
-            worker_id: num(json.rank ?? json.worker_id),
+            rank: num(json.rank ?? json.worker_id),
             seq_no: num(json.seq_no),
-            worker_local_ms: num(json.rank_local_ms ?? json.worker_local_ms),
+            rank_local_ms: num(json.rank_local_ms ?? json.worker_local_ms),
             tasks_started_total: num(json.tasks_started_total ?? json.tasks_local_total),
             tasks_sent_total: num(json.tasks_sent_total),
             tasks_recv_total: num(json.tasks_recv_total),
@@ -349,7 +349,7 @@ export namespace WorkerFrame {
             telemetry_microseconds_total: num(json.telemetry_microseconds_total),
             tasks_running: num(json.tasks_running),
             scheduler_pending_count: num(json.scheduler_pending_count),
-            idle_microseconds_per_worker: num(json.idle_microseconds_per_thread ?? json.idle_microseconds_per_worker),
+            idle_microseconds_per_thread: num(json.idle_microseconds_per_thread ?? json.idle_microseconds_per_worker),
             process_cpu_pct: num(json.process_cpu_pct),
             process_rss_bytes: num(json.process_rss_bytes),
             process_threads: num(json.process_threads),
@@ -369,7 +369,7 @@ export namespace NodeFrame {
     export function fromJson(value: unknown): NodeFrame {
         const json = objectOf(value);
         return {
-            sentinel_worker_id: num(json.sentinel_rank ?? json.sentinel_worker_id),
+            sentinel_rank: num(json.sentinel_rank ?? json.sentinel_worker_id),
             sentinel_local_ms: num(json.sentinel_local_ms),
             hostname: str(json.hostname),
             socket_count: num(json.socket_count),

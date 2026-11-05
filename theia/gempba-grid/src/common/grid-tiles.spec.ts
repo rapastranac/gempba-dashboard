@@ -1,22 +1,22 @@
 import { expect } from 'chai';
-import { NodeHistoryStore, NodeSeries, NodeSnapshot, PeerSnapshot, TaskWords, WorkerSeries, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeHistoryStore, NodeSeries, NodeSnapshot, PeerSnapshot, TaskWords, RankSeries, RankSnapshot, WorldSnapshot } from '@gempba/core';
 import { GridTiles } from './grid-tiles';
 
 const GiB = 1024 ** 3;
 
-function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
+function rank(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
     return {
-        workerId: 3, seqNo: 1, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
-        tasksStartedTotal: 6_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0,
+        id: 3, seqNo: 1, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
+        tasksStartedTotal: 6_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0,
         cpuPct: 300, rssBytes: 0, threads: 5, elapsedSeconds: 100, peers: [], ...overrides
     };
 }
 
-function node(host: string, overrides: Partial<NodeSnapshot> = {}, workers = [worker()]): NodeSnapshot {
+function node(host: string, overrides: Partial<NodeSnapshot> = {}, ranks = [rank()]): NodeSnapshot {
     return {
         host, socketCount: 1, physicalCores: 4, logicalCores: 8, hasLiveMemory: true, memTotalBytes: 16 * GiB, memUsedBytes: 4 * GiB,
-        sentinelWorkerId: 3, sentinelLocalMillis: 0, nodeUtilPct: 75,
-        sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 8, cpuIds: [], hasTopology: false, coreUsage: [], workers }], ...overrides
+        sentinelRank: 3, sentinelLocalMillis: 0, nodeUtilPct: 75,
+        sockets: [{ socketId: 0, physicalCores: 4, logicalCores: 8, cpuIds: [], hasTopology: false, coreUsage: [], ranks }], ...overrides
     };
 }
 
@@ -31,7 +31,7 @@ function sources(overrides: Partial<GridTiles.Sources> = {}): GridTiles.Sources 
         node: () => SERIES,
         throughput: () => [100, 100, 100, 100, 100, 130, 130, 130, 130, 130],
         clusterThroughput: () => CLUSTER_THROUGHPUT,
-        worker: () => WorkerSeries.empty(),
+        rank: () => RankSeries.empty(),
         nodeFrameAt: () => 9_500,
         lastFrameAt: () => 9_900,
         ...overrides
@@ -42,15 +42,15 @@ const CLUSTER_THROUGHPUT = [200, 200, 200, 200, 200, 260, 260, 260, 260, 260];
 
 const CLOCK: GridTiles.Clock = { streaming: true, now: 10_000, intervalMs: 500 };
 
-const sentTo = (peerWorkerId: number, count: number): PeerSnapshot => ({ peerWorkerId, count, bytes: count * 100 });
+const sentTo = (peerRank: number, count: number): PeerSnapshot => ({ peerRank, count, bytes: count * 100 });
 
-/** Three processes on two nodes: the coordinator on alpha sent the root to worker 1, which shared work with worker 2 on beta. */
+/** Three processes on two nodes: the coordinator on alpha sent the root to rank 1, which shared work with rank 2 on beta. */
 const SHARED = world(
     node('alpha', {}, [
-        worker({ workerId: 0, tasksStartedTotal: 0, tasksSentTotal: 1, peers: [sentTo(1, 1)] }),
-        worker({ workerId: 1, tasksStartedTotal: 142, tasksSentTotal: 78, tasksRecvTotal: 21, peers: [sentTo(2, 78)] })
+        rank({ id: 0, tasksStartedTotal: 0, tasksSentTotal: 1, peers: [sentTo(1, 1)] }),
+        rank({ id: 1, tasksStartedTotal: 142, tasksSentTotal: 78, tasksRecvTotal: 21, peers: [sentTo(2, 78)] })
     ]),
-    node('beta', {}, [worker({ workerId: 2, tasksStartedTotal: 3609, tasksSentTotal: 20, tasksRecvTotal: 78, peers: [sentTo(1, 20)] })])
+    node('beta', {}, [rank({ id: 2, tasksStartedTotal: 3609, tasksSentTotal: 20, tasksRecvTotal: 78, peers: [sentTo(1, 20)] })])
 );
 
 describe('GridTiles', () => {
@@ -101,7 +101,7 @@ describe('GridTiles', () => {
             expect(unknown.memory).to.equal(undefined);
         });
 
-        it('is live while the node\'s workers send new frames, and waiting once they stop although the stream goes on', () => {
+        it('is live while the node\'s ranks send new frames, and waiting once they stop although the stream goes on', () => {
             const frameAt = (host: string) => host === 'alpha' ? 9_500 : 6_000;
             const tiles = GridTiles.of(world(node('alpha'), node('beta')), sources({ nodeFrameAt: frameAt }), CLOCK);
             expect(tiles.map(tile => tile.liveness)).to.deep.equal(['live', 'stale']);
@@ -124,16 +124,16 @@ describe('GridTiles', () => {
             expect(GridTiles.overview(world(), sources(), CLOCK)).to.equal(undefined);
         });
 
-        it('counts the nodes and workers, and follows the stream\'s liveness', () => {
-            const cluster = world(node('alpha', {}, [worker(), worker({ workerId: 4 })]), node('beta'));
+        it('counts the nodes and ranks, and follows the stream\'s liveness', () => {
+            const cluster = world(node('alpha', {}, [rank(), rank({ id: 4 })]), node('beta'));
             const overview = GridTiles.overview(cluster, sources(), CLOCK)!;
-            expect([overview.summary, overview.liveness]).to.deep.equal(['2 nodes · 3 workers', 'live']);
-            expect(GridTiles.overview(world(node('alpha')), sources({ lastFrameAt: () => 1_000 }), CLOCK)!.summary).to.equal('1 node · 1 worker');
+            expect([overview.summary, overview.liveness]).to.deep.equal(['2 nodes · 3 ranks', 'live']);
+            expect(GridTiles.overview(world(node('alpha')), sources({ lastFrameAt: () => 1_000 }), CLOCK)!.summary).to.equal('1 node · 1 rank');
             expect(GridTiles.overview(world(node('alpha')), sources({ lastFrameAt: () => 1_000 }), CLOCK)!.liveness).to.equal('stale');
         });
 
         it('sums the cores busy over the cores allocated on every node', () => {
-            const cluster = world(node('alpha', {}, [worker(), worker({ workerId: 4, cpuPct: 50, allowedCpuIds: [4, 5] })]), node('beta'));
+            const cluster = world(node('alpha', {}, [rank(), rank({ id: 4, cpuPct: 50, allowedCpuIds: [4, 5] })]), node('beta'));
             expect(GridTiles.overview(cluster, sources(), CLOCK)!.figures[0]).to.include({ label: 'Cores busy', value: '6.5', unit: 'of 10' });
         });
 
@@ -152,15 +152,15 @@ describe('GridTiles', () => {
             const moved = GridTiles.overview(SHARED, sources(), CLOCK)!.figures.find(figure => figure.label === 'Tasks moved');
             expect(moved).to.include({ value: '99', detail: '2.6% of started · 98 across nodes', tone: 'network' });
             const busy = world(...SHARED.nodes.map(each => ({ ...each, sockets: each.sockets.map(socket => ({
-                ...socket, workers: socket.workers.map(one => ({ ...one, tasksStartedTotal: one.tasksStartedTotal * 1000 }))
+                ...socket, ranks: socket.ranks.map(one => ({ ...one, tasksStartedTotal: one.tasksStartedTotal * 1000 }))
             })) })));
             expect(GridTiles.overview(busy, sources(), CLOCK)!.figures.find(figure => figure.label === 'Tasks moved')?.detail).to.equal('<0.1% of started · 98 across nodes');
         });
 
         it('averages how idle the workers are now, leaving out the coordinator, which runs no tasks', () => {
             const idlePct = new Map([[0, [0]], [1, [5, 10]], [2, [30]]]);
-            const series = (id: number): WorkerSeries => ({ ...WorkerSeries.empty(), idlePct: idlePct.get(id) ?? [] });
-            const idle = GridTiles.overview(SHARED, sources({ worker: series }), CLOCK)!.figures.find(figure => figure.label === 'Idle');
+            const series = (id: number): RankSeries => ({ ...RankSeries.empty(), idlePct: idlePct.get(id) ?? [] });
+            const idle = GridTiles.overview(SHARED, sources({ rank: series }), CLOCK)!.figures.find(figure => figure.label === 'Idle');
             expect(idle).to.include({ value: '20', unit: '%', tone: 'idle' });
             const fresh = GridTiles.overview(SHARED, sources(), CLOCK)!.figures.find(figure => figure.label === 'Idle');
             expect([fresh?.value, fresh?.unit]).to.deep.equal(['—', undefined]);

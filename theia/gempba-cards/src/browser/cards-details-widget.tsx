@@ -2,8 +2,8 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { codicon } from '@theia/core/lib/browser/widgets/widget';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
-import { ConnectionState, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
-import { NodeHistoryService, TelemetryService, WorkerHistoryService } from '@gempba/telemetry/lib/common';
+import { ConnectionState, RankSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeHistoryService, TelemetryService, RankHistoryService } from '@gempba/telemetry/lib/common';
 import { Gauge, HeatStrip, HeroStat, LiveIndicator, LivenessWatch, MeterBar, Panel, Sparkline } from '@gempba/ui/lib/browser';
 import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { MotionTiming } from '@gempba/ui/lib/common/motion-timing';
@@ -15,7 +15,7 @@ import { PeersDialog } from './peers-dialog';
 interface Shown {
     readonly panel: CardsPanel.Panel;
     readonly icon: string;
-    readonly worker?: WorkerSnapshot;
+    readonly rank?: RankSnapshot;
 }
 
 /**
@@ -29,7 +29,7 @@ export class CardsDetailsWidget extends ReactWidget {
 
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
     @inject(NodeHistoryService) protected readonly nodeHistory: NodeHistoryService;
-    @inject(WorkerHistoryService) protected readonly workerHistory: WorkerHistoryService;
+    @inject(RankHistoryService) protected readonly rankHistory: RankHistoryService;
 
     protected snapshot: WorldSnapshot | undefined;
     protected row: CardsTreeNode | undefined;
@@ -37,8 +37,8 @@ export class CardsDetailsWidget extends ReactWidget {
 
     protected readonly histories: CardsPanel.Histories = {
         node: host => this.nodeHistory.seriesFor(host),
-        worker: workerId => this.workerHistory.seriesFor(workerId),
-        throughput: host => this.workerHistory.throughputFor(host)
+        rank: id => this.rankHistory.seriesFor(id),
+        throughput: host => this.rankHistory.throughputFor(host)
     };
 
     @postConstruct()
@@ -59,9 +59,9 @@ export class CardsDetailsWidget extends ReactWidget {
         const shown = this.find();
         if (!shown) {
             this.liveness.none();
-            return <p className='gempba-cards-empty'>Pick a node, socket or worker to see its details.</p>;
+            return <p className='gempba-cards-empty'>Pick a node, socket or rank to see its details.</p>;
         }
-        const { panel, icon, worker } = shown;
+        const { panel, icon, rank } = shown;
         return <div className='gempba-cards-panel' style={{ '--gempba-motion-duration': `${this.motionMs()}ms` } as React.CSSProperties}>
             <header className='gempba-cards-details-header'>
                 <div>
@@ -85,7 +85,7 @@ export class CardsDetailsWidget extends ReactWidget {
             {panel.strips.map(strip => <Panel key={strip.title} title={`${strip.title}: load per CPU`}>
                 <HeatStrip cells={strip.cells} label={`Estimated load on each CPU of ${strip.title}`} />
             </Panel>)}
-            {panel.bars.map(bars => <Panel key={bars.title} title={bars.title} actions={bars.peers && worker ? this.renderViewAll(worker) : undefined}>
+            {panel.bars.map(bars => <Panel key={bars.title} title={bars.title} actions={bars.peers && rank ? this.renderViewAll(rank) : undefined}>
                 {bars.rows.map(bar => <div key={bar.label} className='gempba-cards-bar'>
                     <span className='gempba-cards-bar-label'>{bar.label}</span>
                     <MeterBar fraction={bar.fraction} tone={bar.tone} label={`${bars.title}: ${bar.label}`} />
@@ -105,14 +105,14 @@ export class CardsDetailsWidget extends ReactWidget {
         </div>;
     }
 
-    protected renderViewAll(worker: WorkerSnapshot): React.ReactNode {
+    protected renderViewAll(rank: RankSnapshot): React.ReactNode {
         return <button className='theia-button secondary gempba-cards-view-all'
             title='Every outgoing peer, the tasks sent to it and the bytes, as of now; reopen for fresh numbers.'
-            onClick={() => this.openPeers(worker)}>View all…</button>;
+            onClick={() => this.openPeers(rank)}>View all…</button>;
     }
 
-    protected openPeers(worker: WorkerSnapshot): void {
-        new PeersDialog(worker, this.snapshot).open();
+    protected openPeers(rank: RankSnapshot): void {
+        new PeersDialog(rank, this.snapshot).open();
     }
 
     protected streamLiveness(): Liveness {
@@ -144,7 +144,7 @@ export class CardsDetailsWidget extends ReactWidget {
         if (row.kind === 'socket') {
             return { panel: CardsPanel.forSocket(this.snapshot, node, socket), icon: codicon('circuit-board') };
         }
-        const worker = socket.workers.find(candidate => candidate.workerId === row.workerId);
-        return worker && { panel: CardsPanel.forWorker(this.snapshot, socket, worker, this.histories), icon: codicon(worker.sentinel ? 'star-full' : 'gear'), worker };
+        const rank = socket.ranks.find(candidate => candidate.id === row.rank);
+        return rank && { panel: CardsPanel.forRank(this.snapshot, socket, rank, this.histories), icon: codicon(rank.sentinel ? 'star-full' : 'gear'), rank };
     }
 }

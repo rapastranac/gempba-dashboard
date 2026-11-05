@@ -1,7 +1,7 @@
 import { Emitter } from '@theia/core/lib/common/event';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import {
-    ConnectionMode, ConnectionState, FrameArrivals, FrameCadence, NodeHistoryStore, RefreshRates, SessionSpec, TargetSpec, WorkerHistoryStore, WorldSnapshot
+    ConnectionMode, ConnectionState, FrameArrivals, FrameCadence, NodeHistoryStore, RefreshRates, SessionSpec, TargetSpec, RankHistoryStore, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { TelemetryService } from '../common/telemetry-service';
@@ -14,7 +14,7 @@ export class TelemetryServiceImpl implements TelemetryService {
     @inject(TelemetryServer) protected readonly server: TelemetryServer;
     @inject(TelemetryServerClientImpl) protected readonly receiver: TelemetryServerClientImpl;
     @inject(NodeHistoryStore) protected readonly nodeHistory: NodeHistoryStore;
-    @inject(WorkerHistoryStore) protected readonly workerHistory: WorkerHistoryStore;
+    @inject(RankHistoryStore) protected readonly rankHistory: RankHistoryStore;
     @inject(RateSettings) protected readonly rateSettings: RateSettings;
 
     protected readonly onSnapshotEmitter = new Emitter<WorldSnapshot>();
@@ -62,7 +62,7 @@ export class TelemetryServiceImpl implements TelemetryService {
     protected init(): void {
         this.receiver.snapshots(snapshot => {
             this.nodeHistory.update(snapshot);
-            this.workerHistory.update(snapshot);
+            this.rankHistory.update(snapshot);
             const now = Date.now();
             this.observe(snapshot, now);
             this.latestFrameAt = now;
@@ -99,7 +99,7 @@ export class TelemetryServiceImpl implements TelemetryService {
 
     async listen(target: TargetSpec): Promise<void> {
         this.nodeHistory.clear();
-        this.workerHistory.clear();
+        this.rankHistory.clear();
         this.workerCadence.clear();
         this.nodeCadence.clear();
         this.nodeArrivals.clear();
@@ -134,9 +134,9 @@ export class TelemetryServiceImpl implements TelemetryService {
                 this.nodeCadence.record(node.host, node.sentinelLocalMillis, node.sentinelLocalMillis);
             }
             for (const socket of node.sockets) {
-                for (const worker of socket.workers) {
-                    this.workerCadence.record(String(worker.workerId), worker.seqNo, worker.localMillis);
-                    this.nodeArrivals.record(node.host, String(worker.workerId), worker.seqNo, now);
+                for (const rank of socket.ranks) {
+                    this.workerCadence.record(String(rank.id), rank.seqNo, rank.localMillis);
+                    this.nodeArrivals.record(node.host, String(rank.id), rank.seqNo, now);
                 }
             }
         }

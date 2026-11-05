@@ -7,13 +7,13 @@ import { MockEmitter } from './mock-emitter';
 function frame(seq: number): BroadcastEnvelope {
     return {
         version: 1, ts: 0, elapsed_seconds: seq,
-        workers: [{
-            worker_id: 0, seq_no: seq, worker_local_ms: 0, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
-            tasks_running: 0, scheduler_pending_count: 0, idle_microseconds_per_worker: 0, process_cpu_pct: 0,
+        ranks: [{
+            rank: 0, seq_no: seq, rank_local_ms: 0, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
+            tasks_running: 0, scheduler_pending_count: 0, idle_microseconds_per_thread: 0, process_cpu_pct: 0,
             process_rss_bytes: 0, process_threads: 1, edges_out: []
         }],
         nodes: [{
-            sentinel_worker_id: 0, sentinel_local_ms: 0, hostname: 'h', socket_count: 1, logical_cores: 1,
+            sentinel_rank: 0, sentinel_local_ms: 0, hostname: 'h', socket_count: 1, logical_cores: 1,
             mem_total_bytes: 0, mem_avail_bytes: 0, cgroup_mem_used_bytes: 0, cgroup_mem_limit_bytes: 0
         }]
     };
@@ -68,7 +68,7 @@ describe('MockEmitter', () => {
 
     it('replays the recording from its first frame and loops at the end', async () => {
         const lines = await (await connect(new MockEmitter({ frames: [frame(1), frame(2)], workerIntervalMs: 50 }))).waitFor(3);
-        expect(lines.slice(0, 3).map(line => line.workers![0].seq_no)).to.deep.equal([1, 2, 1]);
+        expect(lines.slice(0, 3).map(line => line.ranks![0].seq_no)).to.deep.equal([1, 2, 1]);
     });
 
     it('stamps each frame with the current time', async () => {
