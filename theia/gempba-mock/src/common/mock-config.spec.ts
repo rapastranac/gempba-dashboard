@@ -73,10 +73,12 @@ describe('MockConfig', () => {
     });
 
     it('keeps the coordinator on one of the run\'s ranks, rank 0 unless set', () => {
-        expect(MockConfig.of({}).roles).to.deep.equal({ coordinatorRank: 0 });
-        expect(MockConfig.of({ roles: { coordinatorRank: 3 } }).roles.coordinatorRank).to.equal(3);
-        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 3 } })).to.deep.equal([]);
-        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 4 } })).to.deep.equal(['The coordinator\'s rank must be a whole number from 0 to 3.']);
+        expect(MockConfig.of({}).roles).to.deep.equal({ coordinatorRank: 0, declared: true });
+        expect(MockConfig.of({ roles: { coordinatorRank: 3, declared: true } }).roles.coordinatorRank).to.equal(3);
+        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 3, declared: true } })).to.deep.equal([]);
+        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 4, declared: true } })).to.deep.equal(['The coordinator\'s rank must be a whole number from 0 to 3.']);
+        expect(MockConfig.problems({ ...defaults, roles: { coordinatorRank: 4, declared: false } }), 'no coordinator to place').to.deep.equal([]);
+        expect(MockConfig.of({ roles: { declared: false } }).roles.declared).to.equal(false);
     });
 
     it('checks the load and the seed', () => {

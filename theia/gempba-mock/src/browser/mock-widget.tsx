@@ -92,7 +92,11 @@ export class MockWidget extends ReactWidget {
             <section>
                 <h3>Cluster</h3>
                 {this.select('Scheduler', MockLabels.SCHEDULERS, this.draft.scheduler, running, scheduler => this.edit({ scheduler }))}
-                {this.field('Coordinator on rank', this.draft.coordinatorRank, running, coordinatorRank => this.edit({ coordinatorRank }),
+                <label className='gempba-mock-check' title='Off, the scheduler declares nothing, as a custom one may: no coordinator, and every rank, rank 0 included, a worker'>
+                    <input type='checkbox' checked={this.draft.declareRoles} disabled={running} onChange={e => this.edit({ declareRoles: e.target.checked })} />
+                    Declare roles
+                </label>
+                {this.field('Coordinator on rank', this.draft.coordinatorRank, running || !this.draft.declareRoles, coordinatorRank => this.edit({ coordinatorRank }),
                     { hint: 'The rank the scheduler\'s coordinator runs on: 0, as gempba\'s schedulers put it, or another, as other schedulers may; every other rank runs tasks' })}
                 {this.draft.mode !== ConnectionMode.JUMP
                     && <p className='gempba-mock-hint'>One node: {this.draft.mode === ConnectionMode.LOCAL ? 'this machine' : 'the VM'}. Jump reaches a cluster.</p>}

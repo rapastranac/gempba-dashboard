@@ -64,6 +64,11 @@ export type MockScheduler = 'semi-centralized' | 'centralized';
 export interface MockRoles {
     /** Every other rank runs tasks, rank 0 too when the coordinator is elsewhere. */
     readonly coordinatorRank: number;
+    /**
+     * Whether the scheduler declares its roles, as gempba's do. Off, it runs as a custom scheduler that declares nothing:
+     * no coordinator, ranks that pair up among themselves, and every rank, rank 0 included, reported as a worker that runs tasks.
+     */
+    readonly declared: boolean;
 }
 
 /**
@@ -106,7 +111,7 @@ export namespace MockConfig {
                 nodes: 2, socketsPerNode: 2, coresPerSocket: 8, smt: false, ranksPerNode: 4, poolThreads: 0, memPerNodeGiB: 64, cgroupGiB: 0
             },
             scheduler: 'semi-centralized',
-            roles: { coordinatorRank: 0 },
+            roles: { coordinatorRank: 0, declared: true },
             live: { scenario: 'steady', loadPct: 85, fidelity: 'gempba-4.3' },
             seed: 42
         };
@@ -141,7 +146,10 @@ export namespace MockConfig {
                 cgroupGiB: numberOr(shape.cgroupGiB, fallback.shape.cgroupGiB)
             },
             scheduler: oneOf(json.scheduler, SCHEDULERS, fallback.scheduler),
-            roles: { coordinatorRank: numberOr(roles.coordinatorRank, fallback.roles.coordinatorRank) },
+            roles: {
+                coordinatorRank: numberOr(roles.coordinatorRank, fallback.roles.coordinatorRank),
+                declared: typeof roles.declared === 'boolean' ? roles.declared : fallback.roles.declared
+            },
             live: {
                 scenario: oneOf(live.scenario, SCENARIOS, fallback.live.scenario),
                 loadPct: numberOr(live.loadPct, fallback.live.loadPct),
@@ -184,7 +192,7 @@ export namespace MockConfig {
         const ranks = MockShape.totalRanks(shape);
         if (ranks < 2 || ranks > MAX_RANKS) {
             found.push(`The cluster needs from 2 to ${MAX_RANKS} ranks in all: the coordinator and at least one worker; it has ${ranks}.`);
-        } else if (Number.isInteger(ranks) && !whole(config.roles.coordinatorRank, 0, ranks - 1)) {
+        } else if (config.roles.declared && Number.isInteger(ranks) && !whole(config.roles.coordinatorRank, 0, ranks - 1)) {
             found.push(`The coordinator's rank must be a whole number from 0 to ${ranks - 1}.`);
         }
         if (shape.cgroupGiB > shape.memPerNodeGiB) {

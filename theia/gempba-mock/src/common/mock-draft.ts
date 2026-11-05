@@ -13,6 +13,7 @@ export interface MockDraft {
     readonly smt: boolean;
     readonly scheduler: MockScheduler;
     readonly coordinatorRank: string;
+    readonly declareRoles: boolean;
     readonly seed: string;
     readonly live: MockLive;
 }
@@ -25,7 +26,7 @@ export namespace MockDraft {
         return {
             mode: access.mode, gempbaPort: String(access.gempbaPort), sshPort: String(access.sshPort), keySource: access.keySource, mfa: access.mfa,
             mfaCode: access.mfaCode, counts, smt: shape.smt, scheduler: config.scheduler, coordinatorRank: String(config.roles.coordinatorRank),
-            seed: String(config.seed), live: config.live
+            declareRoles: config.roles.declared,            seed: String(config.seed), live: config.live
         };
     }
 
@@ -39,7 +40,7 @@ export namespace MockDraft {
             },
             shape: { ...shape, smt: draft.smt },
             scheduler: draft.scheduler,
-            roles: { coordinatorRank: number(draft.coordinatorRank) },
+            roles: { coordinatorRank: number(draft.coordinatorRank), declared: draft.declareRoles },
             live: draft.live,
             seed: number(draft.seed)
         };

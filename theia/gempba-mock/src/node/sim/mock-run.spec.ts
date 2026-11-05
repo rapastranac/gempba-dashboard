@@ -147,7 +147,7 @@ describe('MockRun', () => {
     describe('with the coordinator on another rank, as another scheduler may put it', () => {
 
         it('has it seed the root to rank 0 and run no tasks, while rank 0 works like the others', () => {
-            const mock = run({}, { roles: { coordinatorRank: 2 } });
+            const mock = run({}, { roles: { coordinatorRank: 2, declared: true } });
             mock.advanceTo(60_000);
             expect(rankFrame(mock, 2)).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0 });
             expect(view(mock, 2).edges.get(0)?.count, 'the root went to rank 0').to.equal(1);
@@ -155,19 +155,44 @@ describe('MockRun', () => {
         });
 
         it('queues the centralized tasks there', () => {
-            const mock = run({}, { scheduler: 'centralized', roles: { coordinatorRank: 2 } });
+            const mock = run({}, { scheduler: 'centralized', roles: { coordinatorRank: 2, declared: true } });
             mock.advanceTo(30_000);
             expect(view(mock, 2).pending).to.be.above(0);
             expect(mock.rankViews().filter(rank => rank.id !== 2).every(rank => rank.pending === 0)).to.equal(true);
         });
 
         it('never removes it', () => {
-            const mock = run({}, { shape: { nodes: 1, ranksPerNode: 3 }, roles: { coordinatorRank: 2 } });
+            const mock = run({}, { shape: { nodes: 1, ranksPerNode: 3 }, roles: { coordinatorRank: 2, declared: true } });
             mock.advanceTo(1_000);
             for (let i = 0; i < 4; i++) {
                 mock.fault('remove-rank');
             }
             expect(mock.topology.ranks.map(rank => rank.id)).to.have.members([2, mock.topology.ranks.find(rank => rank.id !== 2)!.id]);
+        });
+    });
+
+    describe('with no roles declared, as a custom scheduler may run', () => {
+
+        const NO_ROLES = { coordinatorRank: 0, declared: false };
+
+        it('reports every rank a worker, starts the root on rank 0, and pairs the ranks among themselves', () => {
+            const mock = run({}, { roles: NO_ROLES });
+            mock.advanceTo(30_000);
+            const line = envelope(mock);
+            expect(line.topology!.identities!.map(identity => identity.role)).to.deep.equal(Array(8).fill('worker'));
+            expect(line.topology!.run!.scheduler).to.equal('decentralized');
+            expect(rankFrame(mock, 0).tasks_started_total).to.be.above(0);
+            expect(rankFrame(mock, 0).tasks_recv_total, 'the root was its own').to.equal(0);
+            expect(line.ranks!.reduce((sum, frame) => sum + frame.tasks_sent_total, 0)).to.be.above(0);
+        });
+
+        it('fills no coordinator\'s counters, and no rank holds a queue, whatever the scheduler chosen', () => {
+            const mock = run({}, { scheduler: 'centralized', roles: NO_ROLES });
+            mock.advanceTo(30_000);
+            for (const frame of envelope(mock).ranks!) {
+                expect([frame.assign_count, frame.coordinator_state_msgs_total, frame.coordinator_score_proposals_total, frame.score_proposals_sent,
+                    frame.scheduler_pending_count], `rank ${frame.rank}`).to.deep.equal([0, 0, 0, 0, 0]);
+            }
         });
     });
 

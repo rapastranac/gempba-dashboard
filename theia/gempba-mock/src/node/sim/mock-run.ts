@@ -209,7 +209,7 @@ export class MockRun {
     readonly runId = randomUUID();
 
     constructor(protected readonly shape: MockShape, readonly scheduler: MockScheduler, live: MockLive, seed: number,
-        rates: RefreshRates = RefreshRates.defaults(), protected readonly roles: MockRoles = { coordinatorRank: 0 }) {
+        rates: RefreshRates = RefreshRates.defaults(), protected readonly roles: MockRoles = { coordinatorRank: 0, declared: true }) {
         this.random = new MockRandom(seed);
         this.noise = new MockRandom(seed + 0x5eed);
         this.runSeed = seed;
@@ -342,7 +342,7 @@ export class MockRun {
                 this.runRank(rank, scenarioTime);
             }
         }
-        if (this.scheduler === 'centralized') {
+        if (this.centralized) {
             this.scheduleCentralized();
         } else {
             this.scheduleSemiCentralized();
@@ -403,7 +403,7 @@ export class MockRun {
         coordinator.running = 0;
         coordinator.idleMicros += dt * 1000;
         coordinator.acct.idleStarved += dt * 1000;
-        if (this.scheduler === 'centralized') {
+        if (this.centralized) {
             if (this.coordinatorFull) {
                 coordinator.acct.fullMicros += dt * 1000;
             }
@@ -547,7 +547,7 @@ export class MockRun {
         }
         const refused = this.noise.poisson(finished * MockRun.SPAWN_TRIES_PER_TASK);
         rank.acct.spawnRejectedPoolFull += refused;
-        const channel = this.scheduler === 'centralized' ? !this.coordinatorFull : rank.next !== undefined;
+        const channel = this.centralized ? !this.coordinatorFull : rank.next !== undefined;
         if (!channel) {
             rank.acct.spawnRemoteRejected += refused;
         }
@@ -568,16 +568,25 @@ export class MockRun {
     }
 
     protected coordinatorRank(): RankState | undefined {
-        return this.ranks.get(this.roles.coordinatorRank);
+        return this.roles.declared ? this.ranks.get(this.roles.coordinatorRank) : undefined;
     }
 
     /** The coordinator hands the search tree's root to the first worker, the lowest rank beside it. */
     protected seed(): void {
-        const coordinator = this.ranks.get(this.roles.coordinatorRank);
+        const coordinator = this.coordinatorRank();
         const first = this.computing().find(rank => rank.phase === 'available');
-        if (coordinator && first) {
-            const tasksPerSecond = this.computing().reduce((sum, rank) => sum + rank.place.poolThreads * 1000 / this.model.meanTaskMs, 0);
-            this.give(coordinator, first, { tasks: this.model.seedTasks(tasksPerSecond), bytes: this.random.int(8, 64) * KiB });
+        if (!first) {
+            return;
+        }
+        const tasksPerSecond = this.computing().reduce((sum, rank) => sum + rank.place.poolThreads * 1000 / this.model.meanTaskMs, 0);
+        const root = { tasks: this.model.seedTasks(tasksPerSecond), bytes: this.random.int(8, 64) * KiB };
+        if (coordinator) {
+            this.give(coordinator, first, root);
+        } else {
+            // without a coordinator, the lowest rank starts on the root itself
+            first.phase = 'running';
+            first.subtree = root.tasks;
+            first.acct.firstTaskMs = this.time;
         }
     }
 
@@ -625,7 +634,12 @@ export class MockRun {
     }
 
     protected isCoordinator(rank: RankState): boolean {
-        return rank.place.id === this.roles.coordinatorRank;
+        return this.roles.declared && rank.place.id === this.roles.coordinatorRank;
+    }
+
+    /** The centralized scheduler queues at its coordinator; a run that declares no roles has none, so it pairs ranks instead. */
+    protected get centralized(): boolean {
+        return this.scheduler === 'centralized' && this.roles.declared;
     }
 
     /** A sample due sooner under the intervals now in force is brought forward. */
@@ -644,14 +658,14 @@ export class MockRun {
     }
 
     protected roleOf(id: number): SchedulerRole {
-        return id === this.roles.coordinatorRank ? 'coordinator' : 'worker';
+        return this.roles.declared && id === this.roles.coordinatorRank ? 'coordinator' : 'worker';
     }
 
     protected topologySchema2(pidOf: (id: number) => number): Schema2Topology {
         return {
             ...MockTopology.toSchema2(this.topologyNow, pidOf, id => this.roleOf(id)),
             run: {
-                scheduler: this.scheduler === 'centralized' ? 'centralized' : 'semi_centralized',
+                scheduler: !this.roles.declared ? 'decentralized' : this.centralized ? 'centralized' : 'semi_centralized',
                 load_balancer: 'quasi_horizontal',
                 runtime_mode: 'multiprocessing',
                 world_size: this.topologyNow.ranks.length,
@@ -695,7 +709,7 @@ export class MockRun {
     }
 
     protected pendingOf(rank: RankState): number {
-        return this.isCoordinator(rank) && this.scheduler === 'centralized' ? this.queue.length : 0;
+        return this.isCoordinator(rank) && this.centralized ? this.queue.length : 0;
     }
 
     protected sample(): void {
@@ -802,7 +816,7 @@ export class MockRun {
 
     /** Removes a rank from a node that keeps at least one; never the coordinator, nor the last worker beside it. */
     protected removeRank(): string {
-        const computing = this.topologyNow.ranks.filter(place => place.id !== this.roles.coordinatorRank);
+        const computing = this.topologyNow.ranks.filter(place => !this.roles.declared || place.id !== this.roles.coordinatorRank);
         const candidates = computing.length < 2 ? [] : computing.filter(place => this.topologyNow.ranks.filter(other => other.nodeIndex === place.nodeIndex).length > 1);
         if (candidates.length === 0) {
             return 'No rank can be removed: every node would be left empty, or only the coordinator would remain';
@@ -820,7 +834,7 @@ export class MockRun {
     }
 
     protected newRank(place: MockRankPlace): RankState {
-        const baseRss = place.id === this.roles.coordinatorRank ? 48 * MiB : this.random.int(64, 160) * MiB;
+        const baseRss = this.roles.declared && place.id === this.roles.coordinatorRank ? 48 * MiB : this.random.int(64, 160) * MiB;
         return {
             place, pid: this.nextPid++, seqNo: 0, lastSampleMs: this.time, nextSampleMs: this.time, phase: 'available', availableSinceMs: this.time,
             subtree: 0, running: 0,
