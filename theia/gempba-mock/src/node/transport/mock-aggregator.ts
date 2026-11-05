@@ -4,7 +4,7 @@ import { ControlKind, ControlLine } from '@gempba/telemetry/lib/node/protocol/wi
 import { MockFault } from '../../common/mock-fault';
 import { MockRun } from '../sim/mock-run';
 
-export interface MockCenterOptions {
+export interface MockAggregatorOptions {
     readonly log?: (message: string) => void;
     /** Once the run ends, after every client is closed: gempba's process has exited. */
     readonly onEnded?: () => void;
@@ -17,21 +17,24 @@ export interface MockCenterOptions {
 }
 
 /**
- * The mock's stand-in for gempba's center: it advances the run with the wall clock and, every broadcast interval,
+ * The mock's stand-in for gempba's aggregator, the telemetry server on rank 0: it advances the run with the wall clock and, every broadcast interval,
  * writes the run's latest frames to every client, the first one the moment a client connects. Control lines from any
- * client set the run's intervals, clamped as gempba clamps them, and apply at once.
+ * client set the run's intervals, clamped as gempba clamps them, and apply at once. When it stops, as gempba's process
+ * exits, it closes every client; in schema 2 each one first gets the run's final line.
  */
-export class MockCenter {
+export class MockAggregator {
 
     static readonly DEFAULT_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
     static readonly DEFAULT_MAX_INBOUND_BYTES = 64 * 1024;
+    /** How long a closing client has to take what it was last sent, as gempba's aggregator waits for the final frames. */
+    static readonly CLOSE_GRACE_MS = 1000;
 
     protected readonly clientsNow = new Map<Duplex, string>();
     protected readonly startedAt = performance.now();
     protected timer: NodeJS.Timeout | undefined;
     protected running = false;
 
-    constructor(protected readonly mock: MockRun, protected readonly options: MockCenterOptions = {}) { }
+    constructor(protected readonly mock: MockRun, protected readonly options: MockAggregatorOptions = {}) { }
 
     get run(): MockRun {
         return this.mock;
@@ -49,12 +52,26 @@ export class MockCenter {
         this.schedule();
     }
 
-    /** Stops broadcasting and closes every client. */
+    /**
+     * Stops broadcasting and closes every client once it has what it was sent, as gempba's process does when it exits.
+     * In schema 2 that is the run's final line: every rank's last frame, marked `"final":true` even while paused, so a
+     * consumer can tell a finished run from a lost connection. gempba 4.2 sends none.
+     */
     stop(): void {
+        if (!this.running) {
+            return;
+        }
         this.running = false;
         clearTimeout(this.timer);
         this.timer = undefined;
-        this.closeAll();
+        const streams = [...this.clientsNow.keys()];
+        if (streams.length > 0 && this.mock.schema === 2) {
+            this.mock.snapshot();
+            const final = this.mock.line(Date.now(), { final: true });
+            streams.forEach(stream => this.send(stream, final));
+            this.log(`Sent the run\'s final line to ${streams.length} client${streams.length === 1 ? '' : 's'}`);
+        }
+        streams.forEach(stream => this.close(stream, true));
     }
 
     /** Serves a connected client, a TCP socket or an SSH channel, named `who` in the log. */
@@ -74,7 +91,7 @@ export class MockCenter {
                 inbound = inbound.slice(newline + 1);
                 newline = inbound.indexOf('\n');
             }
-            if (inbound.length > (this.options.maxInboundBytes ?? MockCenter.DEFAULT_MAX_INBOUND_BYTES)) {
+            if (inbound.length > (this.options.maxInboundBytes ?? MockAggregator.DEFAULT_MAX_INBOUND_BYTES)) {
                 this.drop(stream, 'it sent too much without a newline');
             }
         });
@@ -133,30 +150,62 @@ export class MockCenter {
     }
 
     protected send(stream: Duplex, line: string): void {
-        if (stream.writableLength > (this.options.maxBufferedBytes ?? MockCenter.DEFAULT_MAX_BUFFERED_BYTES)) {
+        if (stream.writableLength > (this.options.maxBufferedBytes ?? MockAggregator.DEFAULT_MAX_BUFFERED_BYTES)) {
             this.drop(stream, 'it fell too far behind');
             return;
         }
         stream.write(line + '\n');
     }
 
+    /**
+     * Answers a control line as the gempba the fidelity imitates: v4.2.0 knows its two intervals alone; v4.3.0 takes the
+     * one interval under either name, ignores the node interval, and pauses, resumes, snapshots and marks.
+     */
     protected control(line: string, who: string): void {
         const message = ControlLine.parse(line);
         if (!message) {
             this.log(`Ignored a malformed control line from ${who}`);
             return;
         }
-        const applied = RefreshInterval.clamp(message.value);
-        const clamped = applied === message.value ? '' : ` (clamped from ${message.value})`;
-        if (message.kind === ControlKind.SetWorkerIntervalMs) {
-            this.mock.setIntervals(applied, this.mock.nodeIntervalMs);
-        } else {
-            this.mock.setIntervals(this.mock.workerIntervalMs, applied);
+        const schema = this.mock.schema;
+        if (schema === 1 && message.kind !== ControlKind.SetWorkerIntervalMs && message.kind !== ControlKind.SetNodeIntervalMs) {
+            this.log(`Ignored ${message.kind} from ${who}: gempba 4.2 doesn't know it`);
+            return;
         }
-        this.log(`${message.kind} → ${applied} ms${clamped}, from ${who}`);
-        // the broadcast may follow the worker rate; a shorter one starts now rather than after the old wait
-        if (this.running) {
-            this.schedule();
+        if (ControlLine.isInterval(message)) {
+            if (schema === 2 && message.kind === ControlKind.SetNodeIntervalMs) {
+                this.log(`Ignored ${message.kind} from ${who}: gempba 4.3 drives node frames at the one interval`);
+                return;
+            }
+            const applied = RefreshInterval.clamp(message.value);
+            const clamped = applied === message.value ? '' : ` (clamped from ${message.value})`;
+            if (message.kind === ControlKind.SetNodeIntervalMs) {
+                this.mock.setIntervals(this.mock.workerIntervalMs, applied);
+            } else {
+                this.mock.setIntervals(applied, this.mock.nodeIntervalMs);
+            }
+            this.log(`${message.kind} → ${applied} ms${clamped}, from ${who}`);
+            // the broadcast may follow the worker rate; a shorter one starts now rather than after the old wait
+            if (this.running) {
+                this.schedule();
+            }
+        } else if (message.kind === ControlKind.Mark) {
+            this.log(this.mock.mark(message.label)
+                ? `Marked "${message.label}", from ${who}`
+                : `Ignored a marker from ${who}: the run holds ${MockRun.MAX_MARKERS} already`);
+        } else if (message.kind === ControlKind.Snapshot) {
+            this.mock.snapshot();
+            const full = this.mock.line(Date.now(), { full: true });
+            for (const stream of this.clientsNow.keys()) {
+                this.send(stream, full);
+            }
+            this.log(`Sent a snapshot, for ${who}`);
+        } else if (message.kind === ControlKind.Pause) {
+            this.mock.pause();
+            this.log(`Paused, for ${who}: the ranks stop sending frames and the lines carry the header alone`);
+        } else {
+            this.mock.resume();
+            this.log(`Resumed, for ${who}`);
         }
         this.options.onChange?.();
     }
@@ -172,16 +221,22 @@ export class MockCenter {
         }
     }
 
-    /** Forgets the client at once, so nothing more is written to it, then closes it. */
-    protected close(stream: Duplex): void {
+    /** Forgets the client at once, so nothing more is written to it, then closes it: at once, or once it has what it was sent. */
+    protected close(stream: Duplex, graceful = false): void {
         if (this.clientsNow.delete(stream)) {
             this.options.onChange?.();
         }
-        stream.destroy();
+        if (graceful && !stream.destroyed) {
+            stream.end();
+            // a client that doesn't read what is left is closed anyway
+            setTimeout(() => stream.destroy(), MockAggregator.CLOSE_GRACE_MS).unref();
+        } else {
+            stream.destroy();
+        }
     }
 
     protected end(): void {
-        this.log('The run ended: gempba\'s process exits and every client is closed');
+        this.log('The run ended: gempba\'s process exits and closes every client');
         this.stop();
         this.options.onEnded?.();
     }

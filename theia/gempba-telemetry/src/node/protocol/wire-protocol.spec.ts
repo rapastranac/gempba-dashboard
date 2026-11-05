@@ -149,11 +149,21 @@ describe('ControlLine', () => {
             .to.deep.equal({ kind: ControlKind.SetNodeIntervalMs, value: 750 });
     });
 
+    it('reads gempba 4.3\'s controls: the one interval, pause, resume, snapshot, and a marker with its label', () => {
+        expect(ControlLine.parse('{"kind":"set_interval_ms","value":250}')).to.deep.equal({ kind: ControlKind.SetIntervalMs, value: 250 });
+        expect(['pause', 'resume', 'snapshot'].map(kind => ControlLine.parse(`{"kind":"${kind}"}`)))
+            .to.deep.equal([{ kind: ControlKind.Pause }, { kind: ControlKind.Resume }, { kind: ControlKind.Snapshot }]);
+        expect(ControlLine.parse('{"kind":"mark","label":"phase 2"}')).to.deep.equal({ kind: ControlKind.Mark, label: 'phase 2' });
+        expect(ControlLine.parse(`{"kind":"mark","label":"${'é'.repeat(32)}"}`), '64 bytes').to.deep.equal({ kind: ControlKind.Mark, label: 'é'.repeat(32) });
+        expect(ControlLine.isInterval({ kind: ControlKind.Pause })).to.equal(false);
+    });
+
     it('reads anything malformed or unknown as undefined', () => {
         const lines = [
             'not json', '[]', '{"kind":"set_rate","value":1}', '{"kind":"set_worker_interval_ms"}',
             '{"kind":"set_worker_interval_ms","value":"500"}', '{"kind":"set_worker_interval_ms","value":-1}',
-            '{"kind":"set_worker_interval_ms","value":2.5}', '{"kind":"set_worker_interval_ms","value":true}'
+            '{"kind":"set_worker_interval_ms","value":2.5}', '{"kind":"set_worker_interval_ms","value":true}',
+            '{"kind":"mark"}', '{"kind":"mark","label":""}', `{"kind":"mark","label":"${'é'.repeat(33)}"}`, '{"kind":"mark","label":7}'
         ];
         for (const line of lines) {
             expect(ControlLine.parse(line), line).to.equal(undefined);

@@ -1,14 +1,14 @@
-/** A task waiting at the centralized center: the subtree it roots, and the bytes of its serialized subproblem. */
+/** A task waiting at the centralized coordinator: the subtree it roots, and the bytes of its serialized subproblem. */
 export interface QueuedTask {
     readonly tasks: number;
     readonly bytes: number;
 }
 
 /**
- * The centralized center's queue: a max-heap that hands out the biggest subtree first. gempba orders it by an
+ * The centralized coordinator's queue: a max-heap that hands out the biggest subtree first. gempba orders it by an
  * application-specific measure of the packet (its set bits), for which the subtree's size stands in here.
  */
-export class CenterQueue {
+export class CoordinatorQueue {
 
     protected readonly heap: QueuedTask[] = [];
     protected bytesNow = 0;
@@ -17,7 +17,7 @@ export class CenterQueue {
         return this.heap.length;
     }
 
-    /** The bytes every queued task holds, which the center keeps in memory. */
+    /** The bytes every queued task holds, which the coordinator keeps in memory. */
     get bytes(): number {
         return this.bytesNow;
     }

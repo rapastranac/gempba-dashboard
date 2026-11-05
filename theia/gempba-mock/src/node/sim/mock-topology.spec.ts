@@ -58,7 +58,7 @@ describe('MockTopology', () => {
     });
 
     it('describes itself as gempba does, with each rank\'s process id', () => {
-        const wire = MockTopology.toWire(MockTopology.of(shape()), id => 10_000 + id);
+        const wire = MockTopology.toSchema1(MockTopology.of(shape()), id => 10_000 + id);
         expect(wire.nodes![1]).to.include({ hostname: 'mock-host-02', sentinel_worker_id: 4, total_physical_cores: 16, total_logical_cores: 16 });
         expect(wire.nodes![1].worker_ids).to.deep.equal([4, 5, 6, 7]);
         expect(wire.nodes![1].sockets![0]).to.deep.include({ socket_id: 0, name: 'Mock 8-core CPU', cpu_ids: [0, 1, 2, 3, 4, 5, 6, 7] });

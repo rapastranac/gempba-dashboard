@@ -6,15 +6,17 @@ export interface MockConfig {
     readonly shape: MockShape;
     /** Fixed for the run, as gempba's is. */
     readonly scheduler: MockScheduler;
+    /** Where the scheduler puts its coordinator; fixed for the run too. */
+    readonly roles: MockRoles;
     readonly live: MockLive;
     /** The same seed and shape give the same run. */
     readonly seed: number;
 }
 
-/** How the dashboard reaches the mock center: directly in Local mode, through the mock SSH server in Host and Jump. */
+/** How the dashboard reaches the mock's telemetry: directly in Local mode, through the mock SSH server in Host and Jump. */
 export interface MockAccess {
     readonly mode: ConnectionMode;
-    /** The loopback port the mock center listens on, as gempba's does. */
+    /** The loopback port the mock's telemetry listens on, as gempba's does. */
     readonly gempbaPort: number;
     /** The loopback port of the mock SSH server. */
     readonly sshPort: number;
@@ -53,19 +55,40 @@ export interface MockLive {
 export type MockScenario = 'steady' | 'slow' | 'ramp' | 'imbalanced' | 'bursty';
 
 /**
- * gempba's two schedulers. Semi-centralized: the center pairs each busy worker with an idle one, and the worker sends it
- * one task directly. Centralized: workers send spare tasks to a queue at the center, which hands them to idle workers.
+ * gempba's two schedulers. Semi-centralized: the coordinator pairs each busy worker with an idle one, and the worker sends it
+ * one task directly. Centralized: workers send spare tasks to a queue at the coordinator, which hands them to idle workers.
  */
 export type MockScheduler = 'semi-centralized' | 'centralized';
 
-/** `gempba` sends what gempba sends today, zeros and its fixed broadcast included; `full` fills every field. */
-export type MockFidelity = 'gempba' | 'full';
+/** gempba's two schedulers put their coordinator on rank 0; another rank tries what other schedulers may do. */
+export interface MockRoles {
+    /** Every other rank runs tasks, rank 0 too when the coordinator is elsewhere. */
+    readonly coordinatorRank: number;
+    /**
+     * Whether the scheduler declares its roles, as gempba's do. Off, it runs as a custom scheduler that declares nothing:
+     * no coordinator, ranks that pair up among themselves, and every rank, rank 0 included, reported as a worker that runs tasks.
+     */
+    readonly declared: boolean;
+}
+
+/**
+ * What the mocker sends: `gempba-4.3` telemetry schema 2 as gempba v4.3.0 sends it, `gempba-4.2` schema 1 as gempba v4.2.0
+ * and earlier send it, zeros and the fixed 500 ms broadcast included, and `full` schema 2 with every field filled in.
+ */
+export type MockFidelity = 'gempba-4.3' | 'gempba-4.2' | 'full';
+
+export namespace MockFidelity {
+    /** The telemetry schema the fidelity sends. */
+    export function schema(fidelity: MockFidelity): 1 | 2 {
+        return fidelity === 'gempba-4.2' ? 1 : 2;
+    }
+}
 
 export namespace MockConfig {
 
     export const SCENARIOS: readonly MockScenario[] = ['steady', 'slow', 'ramp', 'imbalanced', 'bursty'];
     export const SCHEDULERS: readonly MockScheduler[] = ['semi-centralized', 'centralized'];
-    export const FIDELITIES: readonly MockFidelity[] = ['gempba', 'full'];
+    export const FIDELITIES: readonly MockFidelity[] = ['gempba-4.3', 'gempba-4.2', 'full'];
     export const KEY_SOURCES: readonly MockKeySource[] = ['system', 'generated'];
 
     export const MAX_RANKS = 4096;
@@ -88,7 +111,8 @@ export namespace MockConfig {
                 nodes: 2, socketsPerNode: 2, coresPerSocket: 8, smt: false, ranksPerNode: 4, poolThreads: 0, memPerNodeGiB: 64, cgroupGiB: 0
             },
             scheduler: 'semi-centralized',
-            live: { scenario: 'steady', loadPct: 85, fidelity: 'gempba' },
+            roles: { coordinatorRank: 0, declared: true },
+            live: { scenario: 'steady', loadPct: 85, fidelity: 'gempba-4.3' },
             seed: 42
         };
     }
@@ -100,6 +124,7 @@ export namespace MockConfig {
         const access = objectOf(json.access);
         const shape = objectOf(json.shape);
         const live = objectOf(json.live);
+        const roles = objectOf(json.roles);
         return {
             access: {
                 mode: oneOf(access.mode, Object.values(ConnectionMode), fallback.access.mode),
@@ -121,10 +146,15 @@ export namespace MockConfig {
                 cgroupGiB: numberOr(shape.cgroupGiB, fallback.shape.cgroupGiB)
             },
             scheduler: oneOf(json.scheduler, SCHEDULERS, fallback.scheduler),
+            roles: {
+                coordinatorRank: numberOr(roles.coordinatorRank, fallback.roles.coordinatorRank),
+                declared: typeof roles.declared === 'boolean' ? roles.declared : fallback.roles.declared
+            },
             live: {
                 scenario: oneOf(live.scenario, SCENARIOS, fallback.live.scenario),
                 loadPct: numberOr(live.loadPct, fallback.live.loadPct),
-                fidelity: oneOf(live.fidelity, FIDELITIES, fallback.live.fidelity)
+                // a run saved before schema 2 says gempba for what is now gempba-4.2
+                fidelity: oneOf(live.fidelity === 'gempba' ? 'gempba-4.2' : live.fidelity, FIDELITIES, fallback.live.fidelity)
             },
             seed: numberOr(json.seed, fallback.seed)
         };
@@ -161,7 +191,9 @@ export namespace MockConfig {
         }
         const ranks = MockShape.totalRanks(shape);
         if (ranks < 2 || ranks > MAX_RANKS) {
-            found.push(`The cluster needs from 2 to ${MAX_RANKS} ranks in all: the center and at least one worker; it has ${ranks}.`);
+            found.push(`The cluster needs from 2 to ${MAX_RANKS} ranks in all: the coordinator and at least one worker; it has ${ranks}.`);
+        } else if (config.roles.declared && Number.isInteger(ranks) && !whole(config.roles.coordinatorRank, 0, ranks - 1)) {
+            found.push(`The coordinator's rank must be a whole number from 0 to ${ranks - 1}.`);
         }
         if (shape.cgroupGiB > shape.memPerNodeGiB) {
             found.push('The cgroup limit cannot exceed the memory per node.');

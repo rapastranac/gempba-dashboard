@@ -9,7 +9,7 @@ import { MockLabels } from '../common/mock-labels';
 import { MockClient, MockLogLine, MockReach, MockServer, MockStatus } from '../common/mock-protocol';
 import { MockRun } from './sim/mock-run';
 import { MockTopology } from './sim/mock-topology';
-import { MockCenter } from './transport/mock-center';
+import { MockAggregator } from './transport/mock-aggregator';
 import { MockKeys } from './transport/mock-keys';
 import { MockSshEndpoint } from './transport/ssh-endpoint';
 import { MockTcpEndpoint } from './transport/tcp-endpoint';
@@ -25,7 +25,7 @@ export class MockService implements MockServer {
 
     protected readonly clients = new Set<MockClient>();
     protected readonly lines: MockLogLine[] = [];
-    protected center?: MockCenter;
+    protected aggregator?: MockAggregator;
     protected tcp?: MockTcpEndpoint;
     protected ssh?: MockSshEndpoint;
     protected config?: MockConfig;
@@ -42,12 +42,12 @@ export class MockService implements MockServer {
     }
 
     async status(): Promise<MockStatus> {
-        const run = this.center?.run;
-        if (!this.center || !run) {
+        const run = this.aggregator?.run;
+        if (!this.aggregator || !run) {
             return this.ended ? { ...MockStatus.stopped(), ended: true, config: this.config } : MockStatus.stopped();
         }
         return {
-            running: true, ended: false, config: this.config, clients: this.center.clients, workerIntervalMs: run.workerIntervalMs,
+            running: true, ended: false, config: this.config, clients: this.aggregator.clients, workerIntervalMs: run.workerIntervalMs,
             nodeIntervalMs: run.nodeIntervalMs, ranks: run.topology.ranks.length, reach: this.reach, warnings: this.warnings
         };
     }
@@ -70,18 +70,18 @@ export class MockService implements MockServer {
         this.config = config;
         this.ended = false;
         this.warnings = [];
-        const run = new MockRun(MockConfig.shapeOf(config), config.scheduler, config.live, config.seed);
-        const center = new MockCenter(run, { log: message => this.log(message), onEnded: () => this.onEnded(), onChange: () => this.publish() });
-        this.center = center;
-        center.start();
+        const run = new MockRun(MockConfig.shapeOf(config), config.scheduler, config.live, config.seed, undefined, config.roles);
+        const aggregator = new MockAggregator(run, { log: message => this.log(message), onEnded: () => this.onEnded(), onChange: () => this.publish() });
+        this.aggregator = aggregator;
+        aggregator.start();
         const { access } = config;
         try {
             if (access.mode === ConnectionMode.LOCAL) {
-                this.tcp = new MockTcpEndpoint(center);
+                this.tcp = new MockTcpEndpoint(aggregator);
                 await this.tcp.listen(access.gempbaPort);
                 this.reach = { mode: access.mode, gempbaPort: access.gempbaPort };
             } else {
-                await this.openSsh(config, center, run);
+                await this.openSsh(config, aggregator, run);
             }
         } catch (error) {
             await this.shutDown();
@@ -97,7 +97,7 @@ export class MockService implements MockServer {
     }
 
     async stop(): Promise<void> {
-        if (!this.center) {
+        if (!this.aggregator) {
             return;
         }
         await this.shutDown();
@@ -107,7 +107,7 @@ export class MockService implements MockServer {
     }
 
     async setLive(live: MockLive): Promise<void> {
-        const run = this.center?.run;
+        const run = this.aggregator?.run;
         if (!run || !this.config) {
             throw new Error('The mock is not running.');
         }
@@ -127,10 +127,10 @@ export class MockService implements MockServer {
     }
 
     async fault(fault: MockFault): Promise<string> {
-        if (!this.center) {
+        if (!this.aggregator) {
             throw new Error('The mock is not running.');
         }
-        const message = this.center.fault(fault);
+        const message = this.aggregator.fault(fault);
         this.publish();
         return message;
     }
@@ -157,7 +157,7 @@ export class MockService implements MockServer {
         return this.shutDown();
     }
 
-    protected async openSsh(config: MockConfig, center: MockCenter, run: MockRun): Promise<void> {
+    protected async openSsh(config: MockConfig, aggregator: MockAggregator, run: MockRun): Promise<void> {
         const { access } = config;
         const keysDir = MockKeys.dir(this.home);
         const hostKey = MockKeys.hostKey(keysDir);
@@ -172,7 +172,7 @@ export class MockService implements MockServer {
         }
         const hosts = new Set(run.topology.nodes.map(node => node.host));
         const mode = access.mode as ConnectionMode.HOST | ConnectionMode.JUMP;
-        this.ssh = new MockSshEndpoint(center, {
+        this.ssh = new MockSshEndpoint(aggregator, {
             mode, hostKey: hostKey.privateKey, authorizedKeys, mfaCode: access.mfa ? access.mfaCode.trim() : undefined, gempbaPort: access.gempbaPort,
             isNode: name => hosts.has(name), log: message => this.log(message)
         });
@@ -192,10 +192,10 @@ export class MockService implements MockServer {
     }
 
     protected async shutDown(): Promise<void> {
-        const { center, tcp, ssh } = this;
-        this.center = this.tcp = this.ssh = undefined;
+        const { aggregator, tcp, ssh } = this;
+        this.aggregator = this.tcp = this.ssh = undefined;
         this.reach = undefined;
-        center?.stop();
+        aggregator?.stop();
         await Promise.all([tcp?.close(), ssh?.close()]);
     }
 
@@ -220,7 +220,7 @@ export class MockService implements MockServer {
     }
 }
 
-/** `Steady, load 85 %, As gempba today`: what the run does, in the panel's words. */
+/** `Steady, load 85 %, gempba 4.3`: what the run does, in the panel's words. */
 function describe(live: MockLive): string[] {
     return [
         MockLabels.of(MockLabels.SCENARIOS, live.scenario).label,

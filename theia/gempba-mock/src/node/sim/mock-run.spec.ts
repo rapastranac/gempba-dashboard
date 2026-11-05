@@ -1,8 +1,10 @@
 import { expect } from 'chai';
+import * as fs from 'fs';
+import * as path from 'path';
 import { RefreshRates, WorldSnapshot } from '@gempba/core';
 import { BroadcastEnvelope, RankFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { WorldSnapshotMapper } from '@gempba/telemetry/lib/node/telemetry/world-snapshot-mapper';
-import { MockConfig, MockLive, MockScheduler, MockShape } from '../../common/mock-config';
+import { MockConfig, MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
 import { MockRun, MockRankView } from './mock-run';
 import { MockScenarioModel } from './mock-scenario';
@@ -17,11 +19,12 @@ describe('MockRun', () => {
         readonly scheduler?: MockScheduler;
         readonly seed?: number;
         readonly rates?: RefreshRates;
+        readonly roles?: MockRoles;
     }
 
     function run(live: Partial<MockLive> = {}, options: Options = {}): MockRun {
         return new MockRun({ ...defaults.shape, ...options.shape }, options.scheduler ?? defaults.scheduler, { ...defaults.live, ...live }, options.seed ?? 42,
-            options.rates);
+            options.rates, options.roles);
     }
 
     function envelope(mock: MockRun): BroadcastEnvelope {
@@ -45,14 +48,16 @@ describe('MockRun', () => {
         const b = run();
         const c = run({}, { seed: 7 });
         [a, b, c].forEach(mock => mock.advanceTo(30_000));
-        expect(a.line(TS)).to.equal(b.line(TS));
-        expect(a.line(TS)).not.to.equal(c.line(TS));
+        // the run id is drawn at each start, whatever the seed
+        const frames = (mock: MockRun) => mock.line(TS).replace(/"run_id":"[^"]+",/, '');
+        expect(frames(a)).to.equal(frames(b));
+        expect(frames(a)).not.to.equal(frames(c));
     });
 
     it('sends lines gempba\'s way, which the dashboard parses and maps into its nodes, sockets and ranks', () => {
         const mock = run();
         const first = envelope(mock);
-        expect(first).to.include({ version: 1, ts: TS, elapsed_seconds: 0 });
+        expect(first).to.include({ version: 2, ts: TS, elapsed_seconds: 0 });
         expect(first.ranks!.map(frame => frame.rank)).to.deep.equal([0, 1, 2, 3, 4, 5, 6, 7]);
         expect(first.nodes!.map(frame => frame.hostname)).to.deep.equal(['mock-host-01', 'mock-host-02']);
         mock.advanceTo(10_000);
@@ -102,15 +107,15 @@ describe('MockRun', () => {
 
     describe('semi-centralized, as gempba schedules it', () => {
 
-        it('has the center seed the root and nothing more, and run no tasks while it polls', () => {
+        it('has the coordinator seed the root and nothing more, and run no tasks while it polls', () => {
             const mock = run();
             mock.advanceTo(60_000);
-            const center = rankFrame(mock, 0);
-            expect(center).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0, scheduler_pending_count: 0 });
-            expect(center.process_cpu_pct).to.be.within(90, 100);
+            const coordinator = rankFrame(mock, 0);
+            expect(coordinator).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0, scheduler_pending_count: 0 });
+            expect(coordinator.process_cpu_pct).to.be.within(90, 100);
         });
 
-        it('sends one task at a time to an idle rank the center reserved, so no worker ever queues one', () => {
+        it('sends one task at a time to an idle rank the coordinator reserved, so no worker ever queues one', () => {
             const mock = run();
             let before = new Map(mock.rankViews().map(rank => [rank.id, rank]));
             let transfers = 0;
@@ -139,30 +144,82 @@ describe('MockRun', () => {
         });
     });
 
+    describe('with the coordinator on another rank, as another scheduler may put it', () => {
+
+        it('has it seed the root to rank 0 and run no tasks, while rank 0 works like the others', () => {
+            const mock = run({}, { roles: { coordinatorRank: 2, declared: true } });
+            mock.advanceTo(60_000);
+            expect(rankFrame(mock, 2)).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0 });
+            expect(view(mock, 2).edges.get(0)?.count, 'the root went to rank 0').to.equal(1);
+            expect(rankFrame(mock, 0).tasks_started_total).to.be.above(0);
+        });
+
+        it('queues the centralized tasks there', () => {
+            const mock = run({}, { scheduler: 'centralized', roles: { coordinatorRank: 2, declared: true } });
+            mock.advanceTo(30_000);
+            expect(view(mock, 2).pending).to.be.above(0);
+            expect(mock.rankViews().filter(rank => rank.id !== 2).every(rank => rank.pending === 0)).to.equal(true);
+        });
+
+        it('never removes it', () => {
+            const mock = run({}, { shape: { nodes: 1, ranksPerNode: 3 }, roles: { coordinatorRank: 2, declared: true } });
+            mock.advanceTo(1_000);
+            for (let i = 0; i < 4; i++) {
+                mock.fault('remove-rank');
+            }
+            expect(mock.topology.ranks.map(rank => rank.id)).to.have.members([2, mock.topology.ranks.find(rank => rank.id !== 2)!.id]);
+        });
+    });
+
+    describe('with no roles declared, as a custom scheduler may run', () => {
+
+        const NO_ROLES = { coordinatorRank: 0, declared: false };
+
+        it('reports every rank a worker, starts the root on rank 0, and pairs the ranks among themselves', () => {
+            const mock = run({}, { roles: NO_ROLES });
+            mock.advanceTo(30_000);
+            const line = envelope(mock);
+            expect(line.topology!.identities!.map(identity => identity.role)).to.deep.equal(Array(8).fill('worker'));
+            expect(line.topology!.run!.scheduler).to.equal('decentralized');
+            expect(rankFrame(mock, 0).tasks_started_total).to.be.above(0);
+            expect(rankFrame(mock, 0).tasks_recv_total, 'the root was its own').to.equal(0);
+            expect(line.ranks!.reduce((sum, frame) => sum + frame.tasks_sent_total, 0)).to.be.above(0);
+        });
+
+        it('fills no coordinator\'s counters, and no rank holds a queue, whatever the scheduler chosen', () => {
+            const mock = run({}, { scheduler: 'centralized', roles: NO_ROLES });
+            mock.advanceTo(30_000);
+            for (const frame of envelope(mock).ranks!) {
+                expect([frame.assign_count, frame.coordinator_state_msgs_total, frame.coordinator_score_proposals_total, frame.score_proposals_sent,
+                    frame.scheduler_pending_count], `rank ${frame.rank}`).to.deep.equal([0, 0, 0, 0, 0]);
+            }
+        });
+    });
+
     describe('centralized, as gempba schedules it', () => {
 
-        it('queues the tasks workers send at the center, which alone reports them pending', () => {
+        it('queues the tasks workers send at the coordinator, which alone reports them pending', () => {
             const mock = run({}, { scheduler: 'centralized' });
             mock.advanceTo(30_000);
-            const center = view(mock, 0);
-            expect(center.pending).to.equal(center.recv - (center.sent - 1));
-            expect(center.pending).to.be.above(0);
+            const coordinator = view(mock, 0);
+            expect(coordinator.pending).to.equal(coordinator.recv - (coordinator.sent - 1));
+            expect(coordinator.pending).to.be.above(0);
             expect(computing(mock).every(rank => rank.pending === 0)).to.equal(true);
             // the frame was sampled up to a worker interval ago
-            expect(rankFrame(mock, 0).scheduler_pending_count).to.be.within(1, center.pending);
+            expect(rankFrame(mock, 0).scheduler_pending_count).to.be.within(1, coordinator.pending);
             expect(envelope(mock).ranks!.filter(frame => frame.rank !== 0).every(frame => frame.scheduler_pending_count === 0)).to.equal(true);
         });
 
         it('fills its queue to gempba\'s limit, then takes no more while it is full', () => {
             const mock = run({}, { scheduler: 'centralized', shape: { nodes: 1, ranksPerNode: 3 } });
-            const limit = MockRun.CENTER_TASKS_PER_PROCESS * 3;
+            const limit = MockRun.COORDINATOR_TASKS_PER_PROCESS * 3;
             let filled = false;
             let highest = 0;
             for (let step = 1; step <= 400_000 / MockRun.STEP_MS; step++) {
                 mock.advanceTo(step * MockRun.STEP_MS);
-                const center = view(mock, 0);
-                highest = Math.max(highest, center.pending);
-                filled = filled || center.pending > limit;
+                const coordinator = view(mock, 0);
+                highest = Math.max(highest, coordinator.pending);
+                filled = filled || coordinator.pending > limit;
             }
             expect(filled, 'it filled').to.equal(true);
             // past the limit by at most one task per worker, sent in the step it filled
@@ -211,8 +268,12 @@ describe('MockRun', () => {
 
     it('rests between bursts', () => {
         const mock = run({ scenario: 'bursty' });
+        const running = () => computing(mock).reduce((sum, rank) => sum + rank.running, 0);
+        mock.advanceTo(MockScenarioModel.BURST_PERIOD_MS * 3 + 5000);
+        const busy = running();
         mock.advanceTo(MockScenarioModel.BURST_PERIOD_MS * 3 + MockScenarioModel.BURST_BUSY_MS + 5000);
-        expect(computing(mock).reduce((sum, rank) => sum + rank.running, 0)).to.be.at.most(4);
+        // a tenth of the load: at most one thread a rank, against most of every pool in a burst
+        expect(running()).to.be.at.most(computing(mock).length).and.below(busy / 3);
     });
 
     it('leaves the pools idle at no load', () => {
@@ -264,7 +325,7 @@ describe('MockRun', () => {
             expect(mock.rankViews().some(rank => rank.next === id)).to.equal(false);
         });
 
-        it('adds and removes ranks, keeping every node and the center', () => {
+        it('adds and removes ranks, keeping every node and the coordinator', () => {
             const mock = run({}, { shape: { nodes: 1, ranksPerNode: 2 } });
             expect(mock.fault('add-rank')).to.equal('Added rank 2 on mock-host-01');
             expect(envelope(mock).ranks!.map(frame => frame.rank)).to.deep.equal([0, 1, 2]);
@@ -281,11 +342,142 @@ describe('MockRun', () => {
         });
     });
 
+    describe('time accounting, as gempba 4.3 counts it', () => {
+
+        const COORDINATOR_KEYS = [
+            'assign_latency_microseconds_total', 'assign_count', 'assign_latency_microseconds_max', 'available_microseconds_queue_empty',
+            'coordinator_state_msgs_total', 'coordinator_score_proposals_total', 'coordinator_score_broadcasts_total', 'last_score_improvement_ms',
+            'coordinator_full_microseconds'
+        ] as const;
+        const WORKER_KEYS = ['sched_running_microseconds', 'sched_waiting_microseconds', 'first_task_ms', 'last_task_ms', 'score_proposals_sent'] as const;
+
+        it('splits each rank\'s idle time into starved and imbalanced, and a worker\'s time into running and waiting', () => {
+            const mock = run();
+            mock.advanceTo(30_000);
+            for (const frame of envelope(mock).ranks!) {
+                expect(frame.idle_microseconds_starved! + frame.idle_microseconds_imbalanced!).to.be.closeTo(frame.idle_microseconds_per_thread, 1);
+                if (frame.rank === 0) {
+                    expect(frame.idle_microseconds_starved).to.equal(frame.idle_microseconds_per_thread);
+                } else {
+                    expect(frame.sched_running_microseconds! + frame.sched_waiting_microseconds!).to.be.within(29_000_000, 30_000_000);
+                }
+            }
+        });
+
+        it('counts the bytes and the time of every task moved, at both ends', () => {
+            const mock = run({}, { shape: { nodes: 2 } });
+            mock.advanceTo(30_000);
+            for (const frame of envelope(mock).ranks!) {
+                expect(frame.bytes_sent_total).to.equal(frame.edges_out!.reduce((sum, edge) => sum + edge.bytes, 0));
+                expect(frame.tasks_sent_total > 0 ? frame.send_microseconds_total : 0).to.be.at.least(frame.tasks_sent_total > 0 ? 15 : 0);
+                expect(frame.tasks_recv_total > 0).to.equal(frame.bytes_recv_total! > 0);
+            }
+        });
+
+        it('fills the coordinator\'s counters on the coordinator alone, and the workers\' on the workers alone', () => {
+            const mock = run();
+            mock.advanceTo(30_000);
+            const [coordinator, ...workers] = envelope(mock).ranks!;
+            expect(coordinator.assign_count).to.be.above(0);
+            expect(coordinator.assign_latency_microseconds_total).to.be.at.least(200 * coordinator.assign_count!);
+            expect(coordinator.assign_latency_microseconds_max).to.be.within(1, coordinator.assign_latency_microseconds_total!);
+            expect(coordinator.coordinator_state_msgs_total).to.be.above(0);
+            expect(coordinator.coordinator_score_proposals_total).to.be.at.least(coordinator.coordinator_score_broadcasts_total!);
+            expect(coordinator.coordinator_score_broadcasts_total).to.be.above(0);
+            expect(coordinator.last_score_improvement_ms).to.be.within(1, 30_000);
+            expect(WORKER_KEYS.map(key => coordinator[key])).to.deep.equal(WORKER_KEYS.map(() => 0));
+            for (const worker of workers) {
+                expect(COORDINATOR_KEYS.map(key => worker[key]), `rank ${worker.rank}`).to.deep.equal(COORDINATOR_KEYS.map(() => 0));
+            }
+            expect(workers.reduce((sum, worker) => sum + worker.score_proposals_sent!, 0)).to.be.above(0);
+        });
+
+        it('counts the time ranks wait while the centralized queue is empty, and the time it is full', () => {
+            const mock = run({}, { scheduler: 'centralized', shape: { nodes: 1, ranksPerNode: 3 } });
+            mock.advanceTo(400_000);
+            const coordinator = rankFrame(mock, 0);
+            expect(coordinator.available_microseconds_queue_empty).to.be.above(0);
+            expect(coordinator.coordinator_full_microseconds).to.be.above(0);
+        });
+
+        it('refuses spawns while a pool is full, and remote ones while there is no channel to send them on', () => {
+            const mock = run({ loadPct: 100 });
+            mock.advanceTo(30_000);
+            const workers = envelope(mock).ranks!.filter(frame => frame.rank !== 0);
+            expect(workers.every(frame => frame.spawn_rejected_pool_full! >= frame.spawn_remote_rejected!)).to.equal(true);
+            expect(workers.some(frame => frame.spawn_remote_rejected! > 0)).to.equal(true);
+        });
+
+        it('counts telemetry\'s own time, most of it on rank 0, the aggregator', () => {
+            const mock = run();
+            mock.advanceTo(10_000);
+            const [aggregator, ...others] = envelope(mock).ranks!;
+            expect(others.every(frame => frame.telemetry_microseconds_total! > 0 && frame.telemetry_microseconds_total! < aggregator.telemetry_microseconds_total!)).to.equal(true);
+        });
+    });
+
+    describe('controls, as gempba 4.3 answers them', () => {
+
+        it('pauses: the run goes on, its ranks send no frames, and the lines carry the header alone, as gempba\'s do', () => {
+            const recorded = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../../gempba-telemetry/fixtures/schema2-run.ndjson'), 'utf8').split('\n')[1]);
+            const mock = run();
+            mock.advanceTo(10_000);
+            const was = rankFrame(mock, 1);
+            mock.pause();
+            mock.advanceTo(20_000);
+            const paused = JSON.parse(mock.line(TS));
+            expect(Object.keys(paused)).to.deep.equal(Object.keys(recorded));
+            expect(paused).to.include({ version: 2, run_id: mock.runId, elapsed_seconds: 20, paused: true, final: false });
+            expect(JSON.parse(mock.line(TS, { full: true })).ranks[1].seq_no, 'no frame while paused').to.equal(was.seq_no);
+            mock.resume();
+            mock.advanceTo(21_000);
+            const now = rankFrame(mock, 1);
+            expect(envelope(mock).paused).to.equal(false);
+            const perSecond = was.tasks_started_total / 10;
+            expect(now.tasks_started_total - was.tasks_started_total, 'the counters kept counting').to.be.above(5 * perSecond);
+        });
+
+        it('answers a snapshot with every frame taken now, paused or not', () => {
+            const mock = run();
+            mock.advanceTo(10_000);
+            mock.pause();
+            mock.advanceTo(15_000);
+            const frozen = JSON.parse(mock.line(TS, { full: true }));
+            mock.snapshot();
+            const snapshot = JSON.parse(mock.line(TS, { full: true }));
+            expect(snapshot.paused).to.equal(true);
+            expect(snapshot.ranks.map((frame: RankFrame) => frame.seq_no)).to.deep.equal(frozen.ranks.map((frame: RankFrame) => frame.seq_no + 1));
+            expect(snapshot.nodes[0].sentinel_local_ms).to.be.above(frozen.nodes[0].sentinel_local_ms);
+        });
+
+        it('lists a marker a dashboard sent in the run\'s setup, up to gempba\'s 32', () => {
+            const mock = run();
+            mock.advanceTo(4_000);
+            expect(mock.mark('phase 2')).to.equal(true);
+            expect(envelope(mock).topology!.run!.markers).to.deep.equal([{ elapsed_ms: 4_000, label: 'phase 2', source: 'dashboard' }]);
+            for (let i = 1; i < MockRun.MAX_MARKERS; i++) {
+                mock.mark(`marker ${i}`);
+            }
+            expect(mock.mark('one too many')).to.equal(false);
+            expect(envelope(mock).topology!.run!.markers).to.have.lengthOf(MockRun.MAX_MARKERS);
+        });
+
+        it('has no pause in schema 1, as gempba 4.2 has none', () => {
+            const mock = run();
+            mock.pause();
+            mock.setLive({ ...mock.live, fidelity: 'gempba-4.2' });
+            expect(mock.paused).to.equal(false);
+        });
+    });
+
     describe('fidelity', () => {
 
-        it('sends what gempba sends today: zeros for socket CPU and use, network and disk, every 500 ms', () => {
-            const mock = run({}, { rates: { workerIntervalMs: 100, nodeIntervalMs: 1000 } });
+        it('sends schema 1 as gempba 4.2 does: zeros for socket CPU and use, network and disk, every 500 ms', () => {
+            const mock = run({ fidelity: 'gempba-4.2' }, { rates: { workerIntervalMs: 100, nodeIntervalMs: 1000 } });
             mock.advanceTo(20_000);
+            const line = JSON.parse(mock.line(TS));
+            expect(Object.keys(line)).to.deep.equal(['version', 'ts', 'elapsed_seconds', 'topology', 'workers', 'nodes']);
+            expect(Object.keys(line.workers[0])).to.include.members(['worker_id', 'worker_local_ms', 'idle_microseconds_per_worker']);
             const node = envelope(mock).nodes![0];
             expect(node.sockets!.map(socket => [socket.cpu_pct, socket.mem_used_bytes])).to.deep.equal([[0, 0], [0, 0]]);
             expect(node.sockets![0].mem_total_bytes).to.equal(32 * 1024 ** 3);
@@ -294,14 +486,65 @@ describe('MockRun', () => {
             expect(mock.broadcastIntervalMs).to.equal(500);
         });
 
-        it('fills every field when asked, and broadcasts at the worker rate', () => {
+        it('sends schema 2 by default, with every key gempba 4.3 sends, in its order, and the run\'s id, roles and setup', () => {
+            const recorded = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../../gempba-telemetry/fixtures/schema2-run.ndjson'), 'utf8').split('\n')[0]);
+            const mock = run({}, { rates: { workerIntervalMs: 100, nodeIntervalMs: 1000 } });
+            mock.advanceTo(20_000);
+            const line = JSON.parse(mock.line(TS));
+            const keys = (value: object) => Object.keys(value);
+            expect(keys(line)).to.deep.equal(keys(recorded));
+            expect(keys(line.topology)).to.deep.equal(keys(recorded.topology));
+            expect(keys(line.topology.nodes[0])).to.deep.equal(keys(recorded.topology.nodes[0]));
+            expect(keys(line.topology.identities[0])).to.deep.equal(keys(recorded.topology.identities[0]));
+            expect(keys(line.topology.run)).to.deep.equal(keys(recorded.topology.run));
+            expect(line.ranks.every((frame: object) => JSON.stringify(keys(frame)) === JSON.stringify(keys(recorded.ranks[0])))).to.equal(true);
+            expect(keys(line.nodes[0])).to.deep.equal(keys(recorded.nodes[0]));
+            expect([line.version, line.run_id, line.paused, line.final]).to.deep.equal([2, mock.runId, false, false]);
+            expect(line.topology.identities.map((identity: { role: string }) => identity.role)).to.deep.equal(['coordinator', ...Array(7).fill('worker')]);
+            expect(line.topology.run).to.deep.equal({
+                scheduler: 'semi_centralized', load_balancer: 'quasi_horizontal', runtime_mode: 'multiprocessing', world_size: 8,
+                threads_per_process: Math.max(...mock.topology.ranks.map(place => place.poolThreads)), gempba_version: '4.3.0',
+                annotations: { mock: 'seed 42' }, markers: []
+            });
+            expect(mock.broadcastIntervalMs).to.equal(100);
+        });
+
+        it('samples node frames at the one interval in schema 2, as gempba 4.3 does', () => {
+            const mock = run({}, { rates: { workerIntervalMs: 100, nodeIntervalMs: 1000 } });
+            mock.advanceTo(10_000);
+            const before = envelope(mock).nodes![0].sentinel_local_ms;
+            mock.advanceTo(10_200);
+            expect(envelope(mock).nodes![0].sentinel_local_ms - before).to.be.within(100, 200);
+        });
+
+        it('fills every field when asked: schema 2 with socket CPU and memory', () => {
             const mock = run({ fidelity: 'full' }, { rates: { workerIntervalMs: 100, nodeIntervalMs: 1000 } });
             mock.advanceTo(20_000);
             const node = envelope(mock).nodes![1];
+            expect(envelope(mock).version).to.equal(2);
             expect(node.sockets!.every(socket => socket.cpu_pct > 0 && socket.mem_used_bytes > 0)).to.equal(true);
-            expect(node.net_aggregate!.bytes_in).to.be.above(0);
-            expect(node.disk_aggregate!.write_bytes).to.be.above(0);
+            expect([node.net_aggregate, node.disk_aggregate]).to.deep.equal([undefined, undefined]);
             expect(mock.broadcastIntervalMs).to.equal(100);
+        });
+
+        it('draws a new run id at each start, whatever the seed', () => {
+            const [first, second] = [run(), run()];
+            expect(first.runId).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+            expect(second.runId).not.to.equal(first.runId);
+        });
+
+        it('keeps each line in one schema when the fidelity changes while it runs', () => {
+            const mock = run();
+            mock.advanceTo(5_000);
+            mock.setLive({ ...mock.live, fidelity: 'gempba-4.2' });
+            const old = JSON.parse(mock.line(TS));
+            expect(old.version).to.equal(1);
+            expect(old.workers.every((frame: object) => 'worker_id' in frame && !('rank' in frame))).to.equal(true);
+            expect('worker_ids' in old.topology.nodes[0] && !('run' in old.topology)).to.equal(true);
+            mock.setLive({ ...mock.live, fidelity: 'gempba-4.3' });
+            const now = JSON.parse(mock.line(TS));
+            expect(now.version).to.equal(2);
+            expect(now.ranks.every((frame: object) => 'rank' in frame && !('worker_id' in frame))).to.equal(true);
         });
 
         it('reports the job\'s cgroup when it runs in one', () => {

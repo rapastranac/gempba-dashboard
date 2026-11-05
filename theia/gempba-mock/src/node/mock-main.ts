@@ -19,7 +19,9 @@ const USAGE = `Usage: npm run mock -- [options]
   --sockets N --cores N --smt --ranks N --pool N --mem GiB --cgroup GiB
   --scenario steady|slow|ramp|imbalanced|bursty
   --scheduler semi-centralized|centralized
-  --load PCT --fidelity gempba|full --seed N
+  --coordinator N          the rank the scheduler's coordinator runs on (0)
+  --no-roles               declare no roles: no coordinator, every rank a worker
+  --load PCT --fidelity gempba-4.3|gempba-4.2|full --seed N
   --bench                  time building and serializing frames, then exit`;
 
 const { values } = parseArgs({
@@ -27,8 +29,8 @@ const { values } = parseArgs({
         mode: { type: 'string' }, port: { type: 'string' }, 'ssh-port': { type: 'string' }, key: { type: 'string' }, mfa: { type: 'string' },
         nodes: { type: 'string' }, sockets: { type: 'string' }, cores: { type: 'string' }, smt: { type: 'boolean' }, ranks: { type: 'string' },
         pool: { type: 'string' }, mem: { type: 'string' }, cgroup: { type: 'string' }, scenario: { type: 'string' },
-        scheduler: { type: 'string' }, load: { type: 'string' }, fidelity: { type: 'string' }, seed: { type: 'string' }, bench: { type: 'boolean' },
-        help: { type: 'boolean' }
+        scheduler: { type: 'string' }, coordinator: { type: 'string' }, load: { type: 'string' }, fidelity: { type: 'string' }, seed: { type: 'string' },
+        'no-roles': { type: 'boolean' }, bench: { type: 'boolean' }, help: { type: 'boolean' }
     }
 });
 
@@ -60,6 +62,7 @@ const config: MockConfig = {
     },
     shape,
     scheduler: choice(values.scheduler, MockConfig.SCHEDULERS, defaults.scheduler, '--scheduler'),
+    roles: { coordinatorRank: number(values.coordinator, defaults.roles.coordinatorRank), declared: !values['no-roles'] },
     live: {
         scenario: choice(values.scenario, MockConfig.SCENARIOS, defaults.live.scenario, '--scenario'),
         loadPct: number(values.load, defaults.live.loadPct),

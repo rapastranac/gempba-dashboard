@@ -5,7 +5,7 @@ import { TelemetryClient } from '@gempba/telemetry/lib/node/client/telemetry-cli
 import { BroadcastEnvelope, ControlKind } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { MockConfig, MockLive, MockShape } from '../../common/mock-config';
 import { MockRun } from '../sim/mock-run';
-import { MockCenter, MockCenterOptions } from './mock-center';
+import { MockAggregator, MockAggregatorOptions } from './mock-aggregator';
 import { MockTcpEndpoint } from './tcp-endpoint';
 
 /** A raw client that collects the lines it reads. */
@@ -33,23 +33,23 @@ class LineClient {
     }
 }
 
-describe('MockCenter', () => {
+describe('MockAggregator', () => {
 
     const defaults = MockConfig.defaults();
-    let center: MockCenter;
+    let aggregator: MockAggregator;
     let endpoint: MockTcpEndpoint;
     let port: number;
     let logged: string[];
     let ended: boolean;
     const clients: { close(): void }[] = [];
 
-    async function serve(live: Partial<MockLive> = {}, shape: Partial<MockShape> = {}, rates?: RefreshRates, options: MockCenterOptions = {}): Promise<void> {
+    async function serve(live: Partial<MockLive> = {}, shape: Partial<MockShape> = {}, rates?: RefreshRates, options: MockAggregatorOptions = {}): Promise<void> {
         logged = [];
         ended = false;
         const run = new MockRun({ ...defaults.shape, ...shape }, defaults.scheduler, { ...defaults.live, ...live }, 42, rates);
-        center = new MockCenter(run, { ...options, log: message => logged.push(message), onEnded: () => ended = true });
-        center.start();
-        endpoint = new MockTcpEndpoint(center);
+        aggregator = new MockAggregator(run, { ...options, log: message => logged.push(message), onEnded: () => ended = true });
+        aggregator.start();
+        endpoint = new MockTcpEndpoint(aggregator);
         port = await endpoint.listen(0);
     }
 
@@ -71,7 +71,7 @@ describe('MockCenter', () => {
 
     afterEach(async () => {
         clients.splice(0).forEach(client => client.close());
-        center.stop();
+        aggregator.stop();
         await endpoint.close();
     });
 
@@ -93,13 +93,45 @@ describe('MockCenter', () => {
         telemetry.start();
         await until(() => frames.length > 0);
         expect(telemetry.sendControl(ControlKind.SetWorkerIntervalMs, 10)).to.equal(true);
-        await until(() => center.run.workerIntervalMs === 50);
+        await until(() => aggregator.run.workerIntervalMs === 50);
         expect(logged.some(message => message.startsWith('set_worker_interval_ms → 50 ms (clamped from 10), from TCP client'))).to.equal(true);
         const counted = frames.length;
         await new Promise(resolve => setTimeout(resolve, 600));
         expect(frames.length - counted).to.be.at.least(5);
         telemetry.sendControl(ControlKind.SetNodeIntervalMs, 2000);
-        await until(() => center.run.nodeIntervalMs === 2000);
+        await until(() => logged.some(message => message.startsWith('Ignored set_node_interval_ms')));
+        expect(aggregator.run.nodeIntervalMs, 'gempba 4.3 ignores the node interval').to.equal(1000);
+    });
+
+    it('pauses, marks, snapshots and resumes when a client asks, as gempba 4.3 does', async () => {
+        await serve();
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        const write = (control: object) => client.socket.write(JSON.stringify(control) + '\n');
+        const parsed = () => client.lines.map(line => BroadcastEnvelope.parse(line));
+        write({ kind: 'set_interval_ms', value: 100 });
+        await until(() => aggregator.run.workerIntervalMs === 100);
+        write({ kind: 'pause' });
+        await until(() => parsed().some(line => line.paused && line.ranks === undefined));
+        write({ kind: 'mark', label: 'phase 2' });
+        await until(() => logged.some(message => message.startsWith('Marked "phase 2"')));
+        write({ kind: 'snapshot' });
+        await until(() => parsed().some(line => line.paused && line.ranks !== undefined));
+        expect(parsed().find(line => line.paused && line.ranks !== undefined)!.topology!.run!.markers![0].label).to.equal('phase 2');
+        write({ kind: 'resume' });
+        const seen = client.lines.length;
+        await until(() => parsed().slice(seen).some(line => line.paused === false && line.ranks !== undefined));
+    });
+
+    it('answers as gempba 4.2 in schema 1: its two intervals, and nothing else', async () => {
+        await serve({ fidelity: 'gempba-4.2' });
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        client.socket.write('{"kind":"set_interval_ms","value":100}\n{"kind":"pause"}\n{"kind":"set_node_interval_ms","value":2000}\n');
+        await until(() => aggregator.run.nodeIntervalMs === 2000);
+        expect(logged.filter(message => message.startsWith('Ignored')).map(message => message.split(' from ')[0]))
+            .to.deep.equal(['Ignored set_interval_ms', 'Ignored pause']);
+        expect([aggregator.run.workerIntervalMs, aggregator.run.paused]).to.deep.equal([500, false]);
     });
 
     it('drops a client that falls behind, and keeps serving the others', async function (): Promise<void> {
@@ -110,7 +142,7 @@ describe('MockCenter', () => {
         const healthy = lineClient();
         // a paused client reads nothing, so it never sees the close itself
         await until(() => logged.some(message => message.endsWith('it fell too far behind')), 12_000);
-        expect(center.clients).to.equal(1);
+        expect(aggregator.clients).to.equal(1);
         const seen = healthy.lines.length;
         await until(() => healthy.lines.length > seen + 2);
         expect(healthy.closed).to.equal(false);
@@ -131,19 +163,55 @@ describe('MockCenter', () => {
         await serve({ fidelity: 'full' });
         const client = lineClient();
         await until(() => client.lines.length > 0);
-        expect(center.fault('malformed-line')).to.equal('Sent a malformed line');
+        expect(aggregator.fault('malformed-line')).to.equal('Sent a malformed line');
         await until(() => client.lines.length > 2);
         const malformed = client.lines.indexOf('{"version":1,"ts":');
         expect(malformed).to.be.above(0);
         expect(() => BroadcastEnvelope.parse(client.lines[malformed])).to.throw();
         expect(() => BroadcastEnvelope.parse(client.lines[malformed + 1])).not.to.throw();
-        expect(center.fault('drop-clients')).to.equal('Dropped 1 client');
-        await until(() => client.closed && center.clients === 0);
+        expect(aggregator.fault('drop-clients')).to.equal('Dropped 1 client');
+        await until(() => client.closed && aggregator.clients === 0);
+        expect(client.lines.some(line => line.includes('"final":true')), 'a dropped client gets no final line').to.equal(false);
         const late = lineClient();
         await until(() => late.lines.length > 0);
-        expect(center.fault('end-run')).to.equal('Ended the run, as when gempba\'s process exits');
+        expect(aggregator.fault('end-run')).to.equal('Ended the run, as when gempba\'s process exits');
         await until(() => late.closed);
         expect(ended).to.equal(true);
-        expect(center.clients).to.equal(0);
+        expect(aggregator.clients).to.equal(0);
+        expect(BroadcastEnvelope.parse(late.lines[late.lines.length - 1]).final, 'the run\'s final line').to.equal(true);
+    });
+
+    it('ends the run with its final line, every rank\'s last frame, the only line marked final', async () => {
+        await serve();
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        aggregator.fault('end-run');
+        await until(() => client.closed);
+        const lines = client.lines.map(line => BroadcastEnvelope.parse(line));
+        expect(lines.map(line => line.final)).to.deep.equal([...lines.slice(1).map(() => false), true]);
+        const [before, last] = [lines[lines.length - 2], lines[lines.length - 1]];
+        expect(last.ranks!.map(frame => frame.seq_no)).to.deep.equal(before.ranks!.map(frame => frame.seq_no + 1));
+        expect(logged).to.include('Sent the run\'s final line to 1 client');
+    });
+
+    it('sends the final line on Stop too, with every frame though paused', async () => {
+        await serve();
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        client.socket.write('{"kind":"pause"}\n');
+        await until(() => aggregator.run.paused);
+        aggregator.stop();
+        await until(() => client.closed);
+        const last = BroadcastEnvelope.parse(client.lines[client.lines.length - 1]);
+        expect([last.paused, last.final, last.ranks?.length]).to.deep.equal([true, true, aggregator.run.topology.ranks.length]);
+    });
+
+    it('sends no final line in schema 1, as gempba 4.2 has none', async () => {
+        await serve({ fidelity: 'gempba-4.2' });
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        aggregator.fault('end-run');
+        await until(() => client.closed);
+        expect(client.lines.some(line => line.includes('final'))).to.equal(false);
     });
 });
