@@ -10,9 +10,9 @@ export namespace CardsText {
         readonly bytes: string;
     }
 
-    /** The short caption of a node's tree row, counting the sockets the tree lists, e.g. `2 sockets · 4 workers`. */
+    /** The short caption of a node's tree row, counting the sockets the tree lists, e.g. `2 sockets · 4 ranks`. */
     export function nodeCaption(node: NodeSnapshot): string {
-        return `${plural(node.sockets.length, 'socket')} · ${plural(NodeSnapshot.rankCount(node), 'worker')}`;
+        return `${plural(node.sockets.length, 'socket')} · ${plural(NodeSnapshot.rankCount(node), 'rank')}`;
     }
 
     /** `Socket 0`, or `Socket 0: Xeon Gold 6148` when the topology names it. */
@@ -20,17 +20,17 @@ export namespace CardsText {
         return socket.hasTopology && socket.name ? `Socket ${socket.socketId}: ${socket.name}` : `Socket ${socket.socketId}`;
     }
 
-    /** The short caption of a socket's tree row, e.g. `2 workers`. */
+    /** The short caption of a socket's tree row, e.g. `2 ranks`. */
     export function socketCaption(socket: SocketSnapshot): string {
-        return plural(socket.ranks.length, 'worker');
+        return plural(socket.ranks.length, 'rank');
     }
 
-    /** `Worker 3`, `Worker 3 · sentinel`, or `Worker 0 · coordinator · sentinel`; the view marks the sentinel with a star icon. */
+    /** `Rank 3`, `Rank 3 · sentinel`, or `Rank 0 · coordinator · sentinel`; the view marks the sentinel with a star icon. */
     export function rankTitle(rank: RankSnapshot, coordinator = false): string {
-        return [`Worker ${rank.id}`, ...(coordinator ? ['coordinator'] : []), ...(rank.sentinel ? ['sentinel'] : [])].join(' · ');
+        return [`Rank ${rank.id}`, ...(coordinator ? ['coordinator'] : []), ...(rank.sentinel ? ['sentinel'] : [])].join(' · ');
     }
 
-    /** The short caption of a worker's tree row, its CPU as a share of the cores it may use, as its meter shows: `22% CPU · 256.0 MB`. */
+    /** The short caption of a rank's tree row, its CPU as a share of the cores it may use, as its meter shows: `22% CPU · 256.0 MB`. */
     export function rankCaption(rank: RankSnapshot, accessibleCores: number): string {
         return `${NumberText.fixed(rank.cpuPct / Math.max(accessibleCores, 1), 0)}% CPU · ${Bytes.human(rank.rssBytes)}`;
     }
@@ -42,14 +42,14 @@ export namespace CardsText {
         return parts.join(' · ');
     }
 
-    /** Every outgoing peer of a worker, busiest first, with the node each one runs on. */
+    /** Every outgoing peer of a rank, busiest first, with the node each one runs on. */
     export function peerRows(rank: RankSnapshot, world: WorldSnapshot | undefined): PeerRow[] {
         const hostOf = new Map<number, string>();
         world?.nodes.forEach(node => node.sockets.forEach(socket => socket.ranks.forEach(each => hostOf.set(each.id, node.host))));
         return [...rank.peers]
             .sort((a, b) => b.count - a.count || b.bytes - a.bytes || a.peerRank - b.peerRank)
             .map(peer => ({
-                peer: `Worker ${peer.peerRank}`,
+                peer: `Rank ${peer.peerRank}`,
                 host: hostOf.get(peer.peerRank) ?? '—',
                 tasks: NumberText.grouped(peer.count),
                 bytes: Bytes.human(peer.bytes)

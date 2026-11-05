@@ -5,11 +5,11 @@ import { BroadcastEnvelope, NodeFrame, TopologyNode, TopologyRun, TopologySocket
 
 /**
  * The one place wire types meet the read-model: a pure BroadcastEnvelope → WorldSnapshot mapping.
- * Order is preserved: nodes in first-seen host order, sockets by ascending id, workers in frame order.
+ * Order is preserved: nodes in first-seen host order, sockets by ascending id, ranks in frame order.
  */
 export namespace WorldSnapshotMapper {
 
-    /** Host bucket for workers with no identity or topology mapping. */
+    /** Host bucket for ranks with no identity or topology mapping. */
     export const UNKNOWN_HOST = '(unknown host)';
 
     /** The first schema with the run's id and setup, each rank's role and the time accounting. */

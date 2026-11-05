@@ -7,7 +7,7 @@ import { CardsText } from '../common/cards-text';
 const COLUMNS = [{ label: 'Peer' }, { label: 'Host' }, { label: 'Tasks sent', align: 'end' as const }, { label: 'Bytes', align: 'end' as const }];
 
 /**
- * Every outgoing peer of one worker, busiest first, as the snapshot held them when the dialog opened (like the
+ * Every outgoing peer of one rank, busiest first, as the snapshot held them when the dialog opened (like the
  * Java dialog): live frames keep flowing behind it, and reopening it shows fresh numbers.
  */
 export class PeersDialog extends ReactDialog<void> {
@@ -16,7 +16,7 @@ export class PeersDialog extends ReactDialog<void> {
     protected readonly total: string;
 
     constructor(rank: RankSnapshot, world: WorldSnapshot | undefined) {
-        super({ title: `Outgoing peers — Worker ${rank.id}`, maxWidth: 640 });
+        super({ title: `Outgoing peers — Rank ${rank.id}`, maxWidth: 640 });
         this.rows = CardsText.peerRows(rank, world);
         this.total = `Total: ${Peers.summarize(rank.peers)}`;
         this.appendAcceptButton('OK');

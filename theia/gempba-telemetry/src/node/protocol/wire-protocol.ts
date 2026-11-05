@@ -86,7 +86,7 @@ export interface RankIdentity {
     readonly allowed_cpu_ids?: readonly number[];
 }
 
-/** Per-worker frame, emitted every worker interval (default 500 ms). */
+/** Per-rank frame, emitted at the worker interval (default 500 ms). */
 export interface RankFrame {
     readonly rank: number;
     readonly seq_no: number;
@@ -132,7 +132,7 @@ export interface RankFrame {
     readonly edges_out?: readonly EdgeOut[];
 }
 
-/** Sender-side edge: what this worker has sent to one peer. */
+/** Sender-side edge: what this rank has sent to one peer. */
 export interface EdgeOut {
     readonly to: number;
     readonly bytes: number;

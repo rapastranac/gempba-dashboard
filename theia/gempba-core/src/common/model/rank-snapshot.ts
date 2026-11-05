@@ -10,14 +10,14 @@ export type SchedulerRole = 'coordinator' | 'worker';
 export interface RankSnapshot {
     readonly id: number;
     readonly seqNo: number;
-    /** The worker's own monotonic clock when it took the frame; only the difference between two of its frames means anything. */
+    /** The rank's own monotonic clock when it took the frame; only the difference between two of its frames means anything. */
     readonly localMillis: number;
     /** 0 when unknown. */
     readonly pid: number;
     readonly sentinel: boolean;
     /** The rank's declared scheduler role; absent before telemetry schema 2. */
     readonly role?: SchedulerRole;
-    /** The CPUs the worker may run on; empty when unrestricted or unknown. */
+    /** The CPUs the rank may run on; empty when unrestricted or unknown. */
     readonly allowedCpuIds: readonly number[];
     /** Subtrees handed to a pool thread, received ones included, counted at hand-off. */
     readonly tasksStartedTotal: number;
@@ -31,6 +31,6 @@ export interface RankSnapshot {
     readonly threads: number;
     readonly elapsedSeconds: number;
     readonly peers: readonly PeerSnapshot[];
-    /** Where the worker's time and its tasks' bytes go; absent before telemetry schema 2. */
+    /** Where the rank's time and its tasks' bytes go; absent before telemetry schema 2. */
     readonly accounting?: RankAccounting;
 }

@@ -35,7 +35,7 @@ export interface MockShape {
     /** Two hardware threads per core, so twice as many logical CPUs. */
     readonly smt: boolean;
     readonly ranksPerNode: number;
-    /** Each worker's pool threads; 0 gives one per CPU the worker may use. */
+    /** Each rank's pool threads; 0 gives one per CPU the rank may use. */
     readonly poolThreads: number;
     readonly memPerNodeGiB: number;
     /** The job's memory-cgroup limit on each node; 0 runs outside a memory cgroup. */
@@ -161,7 +161,7 @@ export namespace MockConfig {
         }
         const ranks = MockShape.totalRanks(shape);
         if (ranks < 2 || ranks > MAX_RANKS) {
-            found.push(`The cluster needs from 2 to ${MAX_RANKS} workers in all: the center and at least one worker; it has ${ranks}.`);
+            found.push(`The cluster needs from 2 to ${MAX_RANKS} ranks in all: the center and at least one worker; it has ${ranks}.`);
         }
         if (shape.cgroupGiB > shape.memPerNodeGiB) {
             found.push('The cgroup limit cannot exceed the memory per node.');
@@ -179,7 +179,7 @@ export namespace MockConfig {
         nodes: 'Nodes',
         socketsPerNode: 'Sockets per node',
         coresPerSocket: 'Cores per socket',
-        ranksPerNode: 'Workers per node',
+        ranksPerNode: 'Ranks per node',
         poolThreads: 'Pool threads',
         memPerNodeGiB: 'Memory per node',
         cgroupGiB: 'The cgroup limit'

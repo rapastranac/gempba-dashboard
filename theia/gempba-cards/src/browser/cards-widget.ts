@@ -12,9 +12,9 @@ import { CardsTree, CardsTreeNode } from './cards-tree';
 import { CardsTreeWidget } from './cards-tree-widget';
 
 /**
- * The Cards view: Theia's split widget with the node, socket and worker tree on the left and the picked row's
+ * The Cards view: Theia's split widget with the node, socket and rank tree on the left and the picked row's
  * details on the right. It follows the node picked in any view and publishes the node of the row picked here.
- * When nothing is picked yet it picks the first node's sentinel worker, as the Java cards opened it. Hidden (a
+ * When nothing is picked yet it picks the first node's sentinel rank, as the Java cards opened it. Hidden (a
  * background tab, or a minimized window) it does no work, and only expanded rows are ever built. A node opened
  * from another view (see {@link revealNode}) is picked and expanded.
  */
@@ -50,7 +50,7 @@ export class CardsWidget extends SplitWidget {
         super({ orientation: 'horizontal' });
         this.id = CardsWidget.ID;
         this.title.label = CardsWidget.LABEL;
-        this.title.caption = 'GemPBA nodes, sockets and workers';
+        this.title.caption = 'GemPBA nodes, sockets and ranks';
         this.title.iconClass = codicon('list-tree');
         this.title.closable = false;
         this.addClass('gempba-cards');
@@ -119,7 +119,7 @@ export class CardsWidget extends SplitWidget {
         this.details.showDetails(this.snapshot, this.pickedRow());
     }
 
-    /** Picks the node another view picked, or else the first node's sentinel worker once, when nothing is picked. */
+    /** Picks the node another view picked, or else the first node's sentinel rank once, when nothing is picked. */
     protected pickRow(): void {
         const host = this.followHost;
         if (host !== undefined) {

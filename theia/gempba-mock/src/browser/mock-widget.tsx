@@ -214,8 +214,8 @@ const COUNTS: { readonly [K in MockShape.Count]: { readonly label: string, reado
     nodes: { label: 'Nodes', hint: 'Compute nodes behind the login node' },
     socketsPerNode: { label: 'Sockets per node' },
     coresPerSocket: { label: 'Cores per socket', hint: 'Physical cores; SMT doubles the logical CPUs' },
-    ranksPerNode: { label: 'Workers per node', hint: 'gempba processes, one MPI rank each; rank 0 is the center' },
-    poolThreads: { label: 'Pool threads', hint: '0 gives each worker one thread per CPU it may use' },
+    ranksPerNode: { label: 'Ranks per node', hint: 'gempba processes, one MPI rank each; rank 0 is the center' },
+    poolThreads: { label: 'Pool threads', hint: '0 gives each rank one thread per CPU it may use' },
     memPerNodeGiB: { label: 'Memory (GiB)', hint: 'The memory of each node' },
     cgroupGiB: { label: 'Cgroup (GiB)', hint: 'The job\'s memory-cgroup limit on each node; 0 runs outside a memory cgroup' }
 };

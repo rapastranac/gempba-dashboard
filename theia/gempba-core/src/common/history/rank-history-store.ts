@@ -4,13 +4,13 @@ import { RankSeries } from './rank-series';
 import { RankTrack } from './rank-track';
 
 /**
- * Per-worker rolling history with live rates, and the throughput of each node and of the whole run; the telemetry
- * stream itself keeps none. The frames repeat a worker's latest sample until it sends a new one, so only a frame with
- * a new sequence number adds a sample. Workers and nodes that leave the frames are dropped.
+ * Per-rank rolling history with live rates, and the throughput of each node and of the whole run; the telemetry
+ * stream itself keeps none. The frames repeat a rank's latest sample until it sends a new one, so only a frame with
+ * a new sequence number adds a sample. Ranks and nodes that leave the frames are dropped.
  */
 export class RankHistoryStore {
 
-    /** Samples kept per series: one minute at the default 500 ms worker cadence. */
+    /** Samples kept per series: one minute at the default 500 ms between a rank's frames. */
     static readonly CAPACITY = 120;
 
     protected readonly tracks = new Map<number, RankTrack>();
@@ -42,7 +42,7 @@ export class RankHistoryStore {
                     }
                 }
             }
-            // a node adds a sample when one of its workers sent a new frame, once one of them has a rate
+            // a node adds a sample when one of its ranks sent a new frame, once one of them has a rate
             if (changed && rated) {
                 this.throughputRingOf(node.host).push(total);
                 clusterChanged = true;
@@ -60,17 +60,17 @@ export class RankHistoryStore {
         return this.tracks.get(id)?.series() ?? RankSeries.empty();
     }
 
-    /** Tasks started per second by all of one node's workers, oldest first. */
+    /** Tasks started per second by all of one node's ranks, oldest first. */
     throughputFor(host: string): readonly number[] {
         return this.throughputByHost.get(host)?.values() ?? [];
     }
 
-    /** Tasks started per second by every worker, oldest first. */
+    /** Tasks started per second by every rank, oldest first. */
     clusterThroughput(): readonly number[] {
         return this.throughputOfCluster.values();
     }
 
-    /** Workers with a history, in first-seen order. */
+    /** Ranks with a history, in first-seen order. */
     ranks(): readonly number[] {
         return [...this.tracks.keys()];
     }

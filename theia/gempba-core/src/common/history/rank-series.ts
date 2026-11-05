@@ -1,10 +1,10 @@
-/** A copy of one worker's recent history for drawing; each series is oldest first. */
+/** A copy of one rank's recent history for drawing; each series is oldest first. */
 export interface RankSeries {
     /** Percent of one core, as in the frames. */
     readonly cpu: readonly number[];
-    /** Tasks started per second, handed to its threads, over the last 10 s of the worker's frames. */
+    /** Tasks started per second, handed to its threads, over the last 10 s of the rank's frames. */
     readonly tasksPerSecond: readonly number[];
-    /** Percent of the time the worker's pool threads were idle, between two consecutive frames. */
+    /** Percent of the time the rank's pool threads were idle, between two consecutive frames. */
     readonly idlePct: readonly number[];
     readonly rssBytes: readonly number[];
 }

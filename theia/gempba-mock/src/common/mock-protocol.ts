@@ -71,7 +71,7 @@ export namespace MockStatus {
         return { running: false, ended: false, clients: 0, warnings: [] };
     }
 
-    /** e.g. `Running · Local on 127.0.0.1:9000 · 1 node, 4 workers · 1 client`. */
+    /** e.g. `Running · Local on 127.0.0.1:9000 · 1 node, 4 ranks · 1 client`. */
     export function summary(status: MockStatus): string {
         if (!status.running || !status.config) {
             return status.ended ? 'Ended: gempba\'s process exited' : 'Stopped';
@@ -85,6 +85,6 @@ export namespace MockStatus {
 
     function cluster(shape: MockShape, ranks: number | undefined): string {
         const total = ranks ?? MockShape.totalRanks(shape);
-        return `${shape.nodes} node${shape.nodes === 1 ? '' : 's'}, ${total} workers`;
+        return `${shape.nodes} node${shape.nodes === 1 ? '' : 's'}, ${total} ranks`;
     }
 }

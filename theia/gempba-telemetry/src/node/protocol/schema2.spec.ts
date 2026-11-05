@@ -142,7 +142,7 @@ describe('Telemetry schema 2', () => {
             expect([0, 1].map(id => WorldSnapshot.isCoordinator(world, id))).to.deep.equal([true, false]);
         });
 
-        it('carries each worker\'s time accounting', () => {
+        it('carries each rank\'s time accounting', () => {
             const envelope = BroadcastEnvelope.parse(FULL);
             const world = WorldSnapshotMapper.toWorldSnapshot(envelope);
             const coordinator = WorldSnapshot.rankOf(world, 0)!;

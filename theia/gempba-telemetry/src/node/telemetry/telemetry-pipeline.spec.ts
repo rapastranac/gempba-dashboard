@@ -51,7 +51,7 @@ describe('Telemetry pipeline against the mock emitter', () => {
         await emitter.close();
     });
 
-    it('lists hosts in first-seen order, orphan workers under the unknown host', () => {
+    it('lists hosts in first-seen order, orphan ranks under the unknown host', () => {
         expect(snapshots[0].nodes.map(n => n.host)).to.deep.equal(['alpha', 'beta', WorldSnapshotMapper.UNKNOWN_HOST]);
         const orphan = node(snapshots[0], WorldSnapshotMapper.UNKNOWN_HOST);
         expect(orphan.sockets[0].hasTopology).to.equal(false);

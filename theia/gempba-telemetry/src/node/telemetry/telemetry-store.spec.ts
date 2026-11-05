@@ -19,7 +19,7 @@ function nodeFrame(): NodeFrame {
     };
 }
 
-/** Host "h", worker 0 pegging a 4-core allocation. */
+/** Host "h", rank 0 pegging a 4-core allocation. */
 function withTopology(ts: number): BroadcastEnvelope {
     return {
         version: 7, ts, elapsed_seconds: 0,

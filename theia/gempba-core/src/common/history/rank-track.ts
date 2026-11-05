@@ -3,11 +3,11 @@ import { CounterRate } from './counter-rate';
 import { RingSeries } from './ring-series';
 import { RankSeries } from './rank-series';
 
-/** One worker's rolling history: a ring per series, the frame its next idle time is measured from, and its recent task counts. */
+/** One rank's rolling history: a ring per series, the frame its next idle time is measured from, and its recent task counts. */
 export class RankTrack {
 
     /**
-     * Tasks per second are measured over this much of the worker's own time, not between two frames: a worker that
+     * Tasks per second are measured over this much of the rank's own time, not between two frames: a rank that
      * finishes a task every few seconds reads a steady rate, rather than 0 with a spike whenever a frame catches one.
      */
     static readonly RATE_WINDOW_MS = 10_000;
@@ -27,7 +27,7 @@ export class RankTrack {
         this.rssBytes = new RingSeries(capacity);
     }
 
-    /** Records a frame the worker has not sent before, and returns whether it was one. */
+    /** Records a frame the rank has not sent before, and returns whether it was one. */
     record(rank: RankSnapshot): boolean {
         const last = this.last;
         if (last?.seqNo === rank.seqNo) {
@@ -35,7 +35,7 @@ export class RankTrack {
         }
         this.cpu.push(rank.cpuPct);
         this.rssBytes.push(rank.rssBytes);
-        // a lower sequence number means the worker restarted, and its counters with it
+        // a lower sequence number means the rank restarted, and its counters with it
         if (last && rank.seqNo > last.seqNo) {
             const idleMicros = CounterRate.perSecond(last.idleMicrosPerThread, rank.idleMicrosPerThread, rank.localMillis - last.localMillis);
             if (idleMicros !== undefined) {
@@ -60,7 +60,7 @@ export class RankTrack {
         return true;
     }
 
-    /** The newest tasks-per-second rate, or `undefined` before the worker sent two frames. */
+    /** The newest tasks-per-second rate, or `undefined` before the rank sent two frames. */
     latestTasksPerSecond(): number | undefined {
         return this.tasksPerSecond.latest();
     }

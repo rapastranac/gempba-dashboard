@@ -30,17 +30,17 @@ function node(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
 describe('CardsText', () => {
 
     it('captions tree rows briefly', () => {
-        expect(CardsText.nodeCaption(node({ sockets: [socket(), socket({ socketId: 1, ranks: [] })] }))).to.equal('2 sockets · 2 workers');
+        expect(CardsText.nodeCaption(node({ sockets: [socket(), socket({ socketId: 1, ranks: [] })] }))).to.equal('2 sockets · 2 ranks');
         expect(CardsText.socketTitle(socket())).to.equal('Socket 0: Xeon');
         expect(CardsText.socketTitle(socket({ hasTopology: false }))).to.equal('Socket 0');
-        expect(CardsText.socketCaption(socket({ ranks: [rank()] }))).to.equal('1 worker');
-        expect(CardsText.rankTitle(rank())).to.equal('Worker 3');
-        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }))).to.equal('Worker 0 · sentinel');
-        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }), true)).to.equal('Worker 0 · coordinator · sentinel');
+        expect(CardsText.socketCaption(socket({ ranks: [rank()] }))).to.equal('1 rank');
+        expect(CardsText.rankTitle(rank())).to.equal('Rank 3');
+        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }))).to.equal('Rank 0 · sentinel');
+        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }), true)).to.equal('Rank 0 · coordinator · sentinel');
         expect(CardsText.rankCaption(rank(), 4)).to.equal('22% CPU · 256.0 MB');
     });
 
-    it('subtitles a worker with its process, frame and node', () => {
+    it('subtitles a rank with its process, frame and node', () => {
         expect(CardsText.rankSubtitle('alpha', rank())).to.equal('PID 4100 · frame #17 · on alpha');
         expect(CardsText.rankSubtitle('alpha', rank({ pid: 0 }))).to.equal('frame #17 · on alpha');
     });
@@ -53,9 +53,9 @@ describe('CardsText', () => {
             nodes: [node({ host: 'alpha', sockets: [socket()] }), node({ host: 'beta', sockets: [socket({ ranks: [rank({ id: 9 })] })] })]
         } as unknown as WorldSnapshot;
         expect(CardsText.peerRows(sender, world)).to.deep.equal([
-            { peer: 'Worker 9', host: 'beta', tasks: '1,200', bytes: '1.0 MB' },
-            { peer: 'Worker 4', host: 'alpha', tasks: '3', bytes: '2.0 KB' },
-            { peer: 'Worker 7', host: '—', tasks: '3', bytes: '10 B' }
+            { peer: 'Rank 9', host: 'beta', tasks: '1,200', bytes: '1.0 MB' },
+            { peer: 'Rank 4', host: 'alpha', tasks: '3', bytes: '2.0 KB' },
+            { peer: 'Rank 7', host: '—', tasks: '3', bytes: '10 B' }
         ]);
     });
 });

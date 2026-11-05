@@ -44,7 +44,7 @@ const CLOCK: GridTiles.Clock = { streaming: true, now: 10_000, intervalMs: 500 }
 
 const sentTo = (peerRank: number, count: number): PeerSnapshot => ({ peerRank, count, bytes: count * 100 });
 
-/** Three processes on two nodes: the coordinator on alpha sent the root to worker 1, which shared work with worker 2 on beta. */
+/** Three processes on two nodes: the coordinator on alpha sent the root to rank 1, which shared work with rank 2 on beta. */
 const SHARED = world(
     node('alpha', {}, [
         rank({ id: 0, tasksStartedTotal: 0, tasksSentTotal: 1, peers: [sentTo(1, 1)] }),
@@ -101,7 +101,7 @@ describe('GridTiles', () => {
             expect(unknown.memory).to.equal(undefined);
         });
 
-        it('is live while the node\'s workers send new frames, and waiting once they stop although the stream goes on', () => {
+        it('is live while the node\'s ranks send new frames, and waiting once they stop although the stream goes on', () => {
             const frameAt = (host: string) => host === 'alpha' ? 9_500 : 6_000;
             const tiles = GridTiles.of(world(node('alpha'), node('beta')), sources({ nodeFrameAt: frameAt }), CLOCK);
             expect(tiles.map(tile => tile.liveness)).to.deep.equal(['live', 'stale']);
@@ -124,11 +124,11 @@ describe('GridTiles', () => {
             expect(GridTiles.overview(world(), sources(), CLOCK)).to.equal(undefined);
         });
 
-        it('counts the nodes and workers, and follows the stream\'s liveness', () => {
+        it('counts the nodes and ranks, and follows the stream\'s liveness', () => {
             const cluster = world(node('alpha', {}, [rank(), rank({ id: 4 })]), node('beta'));
             const overview = GridTiles.overview(cluster, sources(), CLOCK)!;
-            expect([overview.summary, overview.liveness]).to.deep.equal(['2 nodes · 3 workers', 'live']);
-            expect(GridTiles.overview(world(node('alpha')), sources({ lastFrameAt: () => 1_000 }), CLOCK)!.summary).to.equal('1 node · 1 worker');
+            expect([overview.summary, overview.liveness]).to.deep.equal(['2 nodes · 3 ranks', 'live']);
+            expect(GridTiles.overview(world(node('alpha')), sources({ lastFrameAt: () => 1_000 }), CLOCK)!.summary).to.equal('1 node · 1 rank');
             expect(GridTiles.overview(world(node('alpha')), sources({ lastFrameAt: () => 1_000 }), CLOCK)!.liveness).to.equal('stale');
         });
 

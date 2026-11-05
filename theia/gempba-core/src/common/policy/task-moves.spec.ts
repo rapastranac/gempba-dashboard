@@ -36,7 +36,7 @@ const RUN: WorldSnapshot = {
 
 describe('TaskMoves', () => {
 
-    it('sums what every worker started, sent and received', () => {
+    it('sums what every rank started, sent and received', () => {
         expect(TaskMoves.of(RUN)).to.include({ started: 7288, sent: 118, received: 118 });
     });
 

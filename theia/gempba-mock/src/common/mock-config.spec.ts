@@ -50,10 +50,10 @@ describe('MockConfig', () => {
         expect(MockConfig.problems(withShape({ cgroupGiB: 65 }))).to.deep.equal(['The cgroup limit cannot exceed the memory per node.']);
     });
 
-    it('needs the center and at least one worker, and no more workers than gempba handles', () => {
+    it('needs the center and at least one worker, and no more ranks than gempba handles', () => {
         const jump = (shape: Partial<MockShape>) => ({ ...withShape(shape), access: { ...defaults.access, mode: ConnectionMode.JUMP } });
         expect(MockConfig.problems(withShape({ ranksPerNode: 1 })))
-            .to.deep.equal(['The cluster needs from 2 to 4096 workers in all: the center and at least one worker; it has 1.']);
+            .to.deep.equal(['The cluster needs from 2 to 4096 ranks in all: the center and at least one worker; it has 1.']);
         expect(MockConfig.problems(jump({ nodes: 64, ranksPerNode: 128 }))).to.have.lengthOf(1);
         expect(MockConfig.problems(jump({ nodes: 16, ranksPerNode: 256 }))).to.deep.equal([]);
     });
@@ -75,7 +75,7 @@ describe('MockConfig', () => {
 
 describe('MockShape', () => {
 
-    it('counts workers and logical CPUs', () => {
+    it('counts ranks and logical CPUs', () => {
         const shape = { ...MockConfig.defaults().shape, smt: true };
         expect(MockShape.totalRanks(shape)).to.equal(8);
         expect(MockShape.logicalPerSocket(shape)).to.equal(16);

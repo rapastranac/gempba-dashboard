@@ -28,8 +28,8 @@ export interface TelemetryService {
     readonly onRatesChange: Event<RefreshRates>;
 
     /**
-     * When one of the node's workers last sent a new frame, on this machine's clock; `undefined` before any. A node whose
-     * workers stalled keeps its time while the stream goes on.
+     * When one of the node's ranks last sent a new frame, on this machine's clock; `undefined` before any. A node whose
+     * ranks stalled keeps its time while the stream goes on.
      */
     nodeFrameAt(host: string): number | undefined;
     availableModes(): Promise<ConnectionMode[]>;
@@ -55,13 +55,13 @@ export interface NodeHistoryService {
     hosts(): readonly string[];
 }
 
-/** Per-worker live history of the active session, with node and cluster throughput, updated before each snapshot is announced. */
-export const RankHistoryService = Symbol('WorkerHistoryService');
+/** Per-rank live history of the active session, with node and cluster throughput, updated before each snapshot is announced. */
+export const RankHistoryService = Symbol('RankHistoryService');
 
 export interface RankHistoryService {
     seriesFor(id: number): RankSeries;
-    /** Tasks started per second by all of one node's workers, oldest first. */
+    /** Tasks started per second by all of one node's ranks, oldest first. */
     throughputFor(host: string): readonly number[];
-    /** Tasks started per second by every worker, oldest first. */
+    /** Tasks started per second by every rank, oldest first. */
     clusterThroughput(): readonly number[];
 }

@@ -32,18 +32,18 @@ export interface GridTile {
     readonly memory?: GridFigure;
     /** The tasks the node's processes sent to and received from other processes, as a line and a tooltip; absent in a run of one process. */
     readonly moved?: { readonly text: string, readonly hint: string };
-    /** Whether the node's own workers still send new frames, while the stream goes on. */
+    /** Whether the node's own ranks still send new frames, while the stream goes on. */
     readonly liveness: Liveness;
 }
 
 /** The whole cluster above the tiles: the stream's liveness, its size, and its figures summed over the nodes. */
 export interface GridOverview {
     readonly liveness: Liveness;
-    /** `4 nodes · 32 workers`. */
+    /** `4 nodes · 32 ranks`. */
     readonly summary: string;
     /** Memory, with a meter, only once a node reports it. */
     readonly figures: readonly GridFigure[];
-    /** Tasks completed by every worker, oldest first, in {@link throughputUnit} for the whole history. */
+    /** Tasks completed by every rank, oldest first, in {@link throughputUnit} for the whole history. */
     readonly throughput: readonly number[];
     readonly throughputUnit: Rates.Unit;
     /** `Tasks completed per second`, or per minute, as the history is counted. */
@@ -115,7 +115,7 @@ export namespace GridTiles {
         const figures: GridFigure[] = [
             {
                 label: 'Cores busy', value: NumberText.fixed(NodeUtilization.coresBusy(ranks), 1), unit: `of ${allocated}`,
-                hint: 'The cores the workers keep busy, of those allocated to them.'
+                hint: 'The cores the ranks keep busy, of those allocated to them.'
             },
             {
                 label: TaskWords.STARTED, ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks',
@@ -130,7 +130,7 @@ export namespace GridTiles {
         }
         return {
             liveness: Liveness.of({ ...clock, lastFrameAt: sources.lastFrameAt() }),
-            summary: `${plural(nodes.length, 'node')} · ${plural(ranks.length, 'worker')}`,
+            summary: `${plural(nodes.length, 'node')} · ${plural(ranks.length, 'rank')}`,
             figures,
             throughput: throughput.map(rate => Rates.inUnit(rate, unit)),
             throughputUnit: unit,

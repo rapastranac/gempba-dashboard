@@ -26,7 +26,7 @@ const CPU_TOOLTIP = 'CPU utilization of this node\'s gempba allocation (0–100%
 
 /**
  * The cluster at a glance: an overview of the whole run above one Task Manager style tile per node, each with its
- * CPU and history, its tasks started, its memory, the tasks it moved, and whether its own workers still send frames. Picking a tile
+ * CPU and history, its tasks started, its memory, the tasks it moved, and whether its own ranks still send frames. Picking a tile
  * publishes a NodeSelection, and a node selected elsewhere is highlighted here. Opening a tile opens its node's
  * NodeLink, in whichever view registered to open nodes.
  */

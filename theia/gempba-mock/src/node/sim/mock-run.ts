@@ -11,7 +11,7 @@ const KiB = 1024;
 const MiB = 1024 ** 2;
 const GiB = 1024 ** 3;
 
-/** A worker's live state, for specs and status; the frames carry the same counters as last sampled. */
+/** A rank's live state, for specs and status; the frames carry the same counters as last sampled. */
 export interface MockRankView {
     readonly id: number;
     readonly phase: MockRun.Phase;
@@ -40,7 +40,7 @@ interface RankState {
     seqNo: number;
     lastSampleMs: number;
     nextSampleMs: number;
-    /** The latest frame, serialized when it was sampled; gempba's center repeats it until the worker sends a new one. */
+    /** The latest frame, serialized when it was sampled; gempba's center repeats it until the rank sends a new one. */
     frameJson?: string;
     phase: MockRun.Phase;
     /** When it last reported itself available: the center hears of it from the next step on. */
@@ -57,7 +57,7 @@ interface RankState {
     baseRss: number;
     efficiency: number;
     edges: Map<number, Edge>;
-    /** Its edges serialized, kept until it sends again: a worker's edges reach every rank it ever sent to, as gempba's do. */
+    /** Its edges serialized, kept until it sends again: a rank's edges reach every rank it ever sent to, as gempba's do. */
     edgesJson?: string;
 }
 
@@ -86,7 +86,7 @@ interface NodeState {
  * - centralized: running workers send spare tasks to the center while it isn't full, and it hands the biggest it holds
  *   to each available worker; its queue is the only pending count.
  * The counters follow from that, so they agree with one another as gempba's do. Frames are sampled at the worker and
- * node intervals and serialized once; a line is the latest frame of every worker and node with the topology, as
+ * node intervals and serialized once; a line is the latest frame of every rank and node with the topology, as
  * gempba's center broadcasts them.
  */
 export class MockRun {
@@ -207,16 +207,16 @@ export class MockRun {
     fault(fault: MockRun.Fault): string {
         switch (fault) {
             case 'stall-node': return this.stallNode();
-            case 'restart-worker': return this.restartRank();
-            case 'add-worker': return this.addRank();
-            case 'remove-worker': return this.removeRank();
+            case 'restart-rank': return this.restartRank();
+            case 'add-rank': return this.addRank();
+            case 'remove-rank': return this.removeRank();
             case 'end-run':
                 this.endedNow = true;
                 return 'Ended the run, as when gempba\'s process exits';
         }
     }
 
-    /** One broadcast line, without its newline: the latest frame of every worker and node, as gempba's center sends it. */
+    /** One broadcast line, without its newline: the latest frame of every rank and node, as gempba's center sends it. */
     line(nowEpochMs: number): string {
         this.topologyJson ??= JSON.stringify(MockTopology.toWire(this.topologyNow, id => this.ranks.get(id)?.pid ?? 0));
         // node by node, as gempba's center walks its topology
@@ -463,7 +463,7 @@ export class MockRun {
         const first = rank.seqNo === 0;
         rank.seqNo += 1;
         rank.lastSampleMs = this.time;
-        // a worker's samples drift apart from the others', as separate processes' do
+        // a rank's samples drift apart from the others', as separate processes' do
         rank.nextSampleMs = first ? this.time + this.random.int(1, this.workerInterval) : nextAfter(rank.nextSampleMs, this.workerInterval, this.time);
         rank.edgesJson ??= JSON.stringify([...rank.edges.entries()].sort(([a], [b]) => a - b).map(([to, edge]) => ({ to, bytes: edge.bytes, count: edge.count })));
         const frame: Schema1Frame = {
@@ -545,7 +545,7 @@ export class MockRun {
         return `Stalled ${this.topologyNow.nodes[index].host}: its frames stop for ${MockFault.STALL_MS / 1000} s`;
     }
 
-    /** A restarted worker is a new process: a new PID, its sequence number and counters from zero, and its subtree lost. */
+    /** A restarted rank is a new process: a new PID, its sequence number and counters from zero, and its subtree lost. */
     protected restartRank(): string {
         const rank = this.random.pick(this.computing());
         this.release(rank);
@@ -553,7 +553,7 @@ export class MockRun {
         this.ranks.set(rank.place.id, fresh);
         this.sampleRank(fresh);
         this.topologyJson = undefined;
-        return `Restarted worker ${rank.place.id} as PID ${fresh.pid}`;
+        return `Restarted rank ${rank.place.id} as PID ${fresh.pid}`;
     }
 
     protected addRank(): string {
@@ -573,15 +573,15 @@ export class MockRun {
         this.topologyJson = undefined;
         this.frameOrder = undefined;
         const added = Math.max(...this.topologyNow.ranks.map(rank => rank.id));
-        return `Added worker ${added} on ${this.topologyNow.nodes[nodeIndex].host}`;
+        return `Added rank ${added} on ${this.topologyNow.nodes[nodeIndex].host}`;
     }
 
-    /** Removes a worker from a node that keeps at least one; never the center, nor the last worker beside it. */
+    /** Removes a rank from a node that keeps at least one; never the center, nor the last worker beside it. */
     protected removeRank(): string {
         const computing = this.topologyNow.ranks.filter(place => place.id !== MockTopology.CENTER_ID);
         const candidates = computing.length < 2 ? [] : computing.filter(place => this.topologyNow.ranks.filter(other => other.nodeIndex === place.nodeIndex).length > 1);
         if (candidates.length === 0) {
-            return 'No worker can be removed: every node would be left empty, or only the center would remain';
+            return 'No rank can be removed: every node would be left empty, or only the center would remain';
         }
         const gone = this.random.pick(candidates);
         this.release(this.ranks.get(gone.id)!);
@@ -592,7 +592,7 @@ export class MockRun {
         }
         this.topologyJson = undefined;
         this.frameOrder = undefined;
-        return `Removed worker ${gone.id} from ${this.topologyNow.nodes[gone.nodeIndex].host}`;
+        return `Removed rank ${gone.id} from ${this.topologyNow.nodes[gone.nodeIndex].host}`;
     }
 
     protected newRank(place: MockRankPlace): RankState {
@@ -610,7 +610,7 @@ export namespace MockRun {
     /** The faults the run carries out itself; dropping clients and sending a malformed line belong to the transport. */
     export type Fault = Exclude<MockFault, 'drop-clients' | 'malformed-line'>;
 
-    /** A worker's state at the center: exploring a subtree, idle, or reserved to receive one (semi-centralized). */
+    /** A rank's state at the center: exploring a subtree, idle, or reserved to receive one (semi-centralized). */
     export type Phase = 'running' | 'available' | 'assigned';
 }
 

@@ -4,7 +4,7 @@ import { WorldSnapshotMapper } from './world-snapshot-mapper';
 
 /**
  * Stateful front door to the mapper. It remembers the last usable topology and substitutes it into a
- * frame that arrives without one; mapping such a frame alone would orphan every worker to
+ * frame that arrives without one; mapping such a frame alone would orphan every rank to
  * "(unknown host)" and collapse the per-allocation utilization to zero. It also remembers the last
  * snapshot, which a paused line, carrying only the envelope's header, keeps as it was.
  */

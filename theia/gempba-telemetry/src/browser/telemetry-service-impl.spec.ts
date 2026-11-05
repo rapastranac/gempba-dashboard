@@ -11,7 +11,7 @@ import { RateSettings } from './rate-settings';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
 import { TelemetryServiceImpl } from './telemetry-service-impl';
 
-/** One node "h" whose worker 7 sent frame `seqNo` at `millis`, with a node frame its sentinel took at `millis`. */
+/** One node "h" whose rank 7 sent frame `seqNo` at `millis`, with a node frame its sentinel took at `millis`. */
 function snapshot(host: string, seqNo = 1, millis = 0): WorldSnapshot {
     const rank: RankSnapshot = {
         id: 7, seqNo, localMillis: millis, pid: 0, sentinel: true, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,

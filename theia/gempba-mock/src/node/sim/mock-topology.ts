@@ -31,12 +31,12 @@ export interface MockRankPlace {
 }
 
 /**
- * Where everything sits in a mocked cluster: nodes named `mock-host-01`…, their sockets and CPUs, and the workers
- * pinned to them. Worker ids are global MPI ranks; rank 0 is the center, and each node's first worker is its sentinel.
+ * Where everything sits in a mocked cluster: nodes named `mock-host-01`…, their sockets and CPUs, and the ranks
+ * pinned to them. Rank 0 is the center, and each node's first rank is its sentinel.
  */
 export interface MockTopology {
     readonly nodes: readonly MockNodePlace[];
-    /** Ascending worker id. */
+    /** Ascending rank. */
     readonly ranks: readonly MockRankPlace[];
 }
 
@@ -58,7 +58,7 @@ export namespace MockTopology {
         return { nodes, ranks };
     }
 
-    /** The topology with one more worker on the node, on its least crowded socket; the node's CPUs are sliced again. */
+    /** The topology with one more rank on the node, on its least crowded socket; the node's CPUs are sliced again. */
     export function withRank(topology: MockTopology, shape: MockShape, nodeIndex: number): MockTopology {
         const node = topology.nodes[nodeIndex];
         const onNode = topology.ranks.filter(rank => rank.nodeIndex === nodeIndex);
@@ -69,7 +69,7 @@ export namespace MockTopology {
         return replaceNode(topology, nodeIndex, placeOnNode(shape, node, seats, onNode));
     }
 
-    /** The topology without the worker; its node's CPUs are sliced again among the workers left. */
+    /** The topology without the rank; its node's CPUs are sliced again among the ranks left. */
     export function withoutRank(topology: MockTopology, shape: MockShape, id: number): MockTopology {
         const gone = topology.ranks.find(rank => rank.id === id);
         if (!gone) {
@@ -80,12 +80,12 @@ export namespace MockTopology {
         return replaceNode(topology, gone.nodeIndex, placeOnNode(shape, topology.nodes[gone.nodeIndex], seats, onNode));
     }
 
-    /** The node's first worker, which sends its node frames; `undefined` once the node has none. */
+    /** The node's first rank, which sends its node frames; `undefined` once the node has none. */
     export function sentinelOf(topology: MockTopology, nodeIndex: number): number | undefined {
         return topology.ranks.find(rank => rank.nodeIndex === nodeIndex)?.id;
     }
 
-    /** The topology as gempba sends it, with each worker's current process id. */
+    /** The topology as gempba sends it, with each rank's current process id. */
     export function toWire(topology: MockTopology, pidOf: (id: number) => number): Schema1Topology {
         return {
             nodes: topology.nodes.map(node => ({
@@ -128,8 +128,8 @@ export namespace MockTopology {
     }
 
     /**
-     * Pins the seated workers: each socket's cores are split into disjoint slices, whole cores with their siblings,
-     * the remainder going to the first workers; with more workers than CPUs, each gets one CPU in turn. A worker that
+     * Pins the seated ranks: each socket's cores are split into disjoint slices, whole cores with their siblings,
+     * the remainder going to the first ranks; with more ranks than CPUs, each gets one CPU in turn. A rank that
      * was already placed keeps its pool size.
      */
     function placeOnNode(shape: MockShape, node: MockNodePlace, seats: readonly { rank: number, socketId: number }[],

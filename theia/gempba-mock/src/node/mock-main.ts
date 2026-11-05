@@ -94,7 +94,7 @@ function bench({ shape: benchShape, scheduler, live, seed }: MockConfig): void {
         bytes += run.line(Date.now()).length;
     }
     const ms = Number(process.hrtime.bigint() - started) / 1e6 / frames;
-    console.log(`${benchShape.nodes} nodes × ${benchShape.ranksPerNode} workers, ${live.fidelity} fidelity: ${ms.toFixed(2)} ms a frame, `
+    console.log(`${benchShape.nodes} nodes × ${benchShape.ranksPerNode} ranks, ${live.fidelity} fidelity: ${ms.toFixed(2)} ms a frame, `
         + `${Math.round(bytes / frames / 1024)} KiB a line`);
 }
 

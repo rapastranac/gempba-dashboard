@@ -8,7 +8,7 @@ import { MeterBar } from '@gempba/ui/lib/browser';
 import { CardsTree, CardsTreeNode } from './cards-tree';
 
 /**
- * The node, socket and worker rows in Theia's own tree, which draws only the rows on screen. The Cards view
+ * The node, socket and rank rows in Theia's own tree, which draws only the rows on screen. The Cards view
  * feeds it snapshots and shows the picked row's details beside it.
  */
 @injectable()
@@ -51,7 +51,7 @@ export class CardsTreeWidget extends TreeWidget {
 
     protected override renderTree(model: TreeModel): React.ReactNode {
         if (CompositeTreeNode.is(model.root) && model.root.children.length === 0) {
-            return <p className='gempba-cards-empty'>No nodes yet. Listen to a gempba center to see its nodes, sockets and workers here.</p>;
+            return <p className='gempba-cards-empty'>No nodes yet. Listen to a gempba center to see its nodes, sockets and ranks here.</p>;
         }
         return super.renderTree(model);
     }

@@ -36,12 +36,12 @@ function world(...nodes: NodeSnapshot[]): WorldSnapshot {
     return { schemaVersion: 1, timestampMillis: 0, elapsedSeconds: 0, nodes, structure: StructureKey.empty() };
 }
 
-/** One worker 1 on host "h". */
+/** Rank 1 on host "h". */
 function solo(frame: Frame): WorldSnapshot {
     return world(node('h', rank(1, frame)));
 }
 
-describe('WorkerHistoryStore', () => {
+describe('RankHistoryStore', () => {
 
     it('records CPU and memory from every new frame, and rates from the second one', () => {
         const store = new RankHistoryStore();
@@ -50,7 +50,7 @@ describe('WorkerHistoryStore', () => {
         expect(store.seriesFor(1)).to.deep.equal({ cpu: [80, 90], tasksPerSecond: [100], idlePct: [25], rssBytes: [100, 120] });
     });
 
-    it('measures rates on the worker\'s own clock', () => {
+    it('measures rates on the rank\'s own clock', () => {
         const store = new RankHistoryStore();
         store.update(solo({ seqNo: 1, localMillis: 0, tasks: 0 }));
         store.update(solo({ seqNo: 2, localMillis: 2_000, tasks: 30 }));
@@ -67,7 +67,7 @@ describe('WorkerHistoryStore', () => {
         expect([series.cpu, series.tasksPerSecond]).to.deep.equal([[50, 60], [100]]);
     });
 
-    it('a restarted worker gives no rate until its next frame', () => {
+    it('a restarted rank gives no rate until its next frame', () => {
         const store = new RankHistoryStore();
         store.update(solo({ seqNo: 40, localMillis: 20_000, tasks: 4_000, idleMicros: 1_000_000, cpuPct: 90 }));
         store.update(solo({ seqNo: 41, localMillis: 20_500, tasks: 4_050, idleMicros: 1_000_000, cpuPct: 90 }));
@@ -119,7 +119,7 @@ describe('WorkerHistoryStore', () => {
         expect(store.clusterThroughput()).to.have.lengthOf(RankHistoryStore.CAPACITY);
     });
 
-    it('a node\'s throughput sums its workers\' latest rates, and the cluster\'s sums every node', () => {
+    it('a node\'s throughput sums its ranks\' latest rates, and the cluster\'s sums every node', () => {
         const store = new RankHistoryStore();
         store.update(world(node('a', rank(1, { seqNo: 1, localMillis: 0 }), rank(2, { seqNo: 1, localMillis: 0 })),
             node('b', rank(3, { seqNo: 1, localMillis: 0 }))));
@@ -128,16 +128,16 @@ describe('WorkerHistoryStore', () => {
         expect([store.throughputFor('a'), store.throughputFor('b'), store.clusterThroughput()]).to.deep.equal([[30], [5], [35]]);
     });
 
-    it('a worker that sent no new frame keeps counting at its latest rate', () => {
+    it('a rank that sent no new frame keeps counting at its latest rate', () => {
         const store = new RankHistoryStore();
         store.update(world(node('a', rank(1, { seqNo: 1, localMillis: 0 }), rank(2, { seqNo: 1, localMillis: 0 }))));
         store.update(world(node('a', rank(1, { seqNo: 2, localMillis: 1_000, tasks: 10 }), rank(2, { seqNo: 2, localMillis: 1_000, tasks: 20 }))));
         store.update(world(node('a', rank(1, { seqNo: 3, localMillis: 2_000, tasks: 50 }), rank(2, { seqNo: 2, localMillis: 1_000, tasks: 20 }))));
-        // worker 1 over its last 2 s: 50 / 2
+        // rank 1 over its last 2 s: 50 / 2
         expect(store.throughputFor('a')).to.deep.equal([30, 45]);
     });
 
-    it('a node adds no throughput sample until one of its workers has a rate, nor while none sends a new frame', () => {
+    it('a node adds no throughput sample until one of its ranks has a rate, nor while none sends a new frame', () => {
         const store = new RankHistoryStore();
         store.update(world(node('a', rank(1, { seqNo: 1, localMillis: 0 }))));
         expect(store.throughputFor('a')).to.be.empty;
@@ -146,7 +146,7 @@ describe('WorkerHistoryStore', () => {
         expect([store.throughputFor('a'), store.clusterThroughput()]).to.deep.equal([[10], [10]]);
     });
 
-    it('drops the workers and nodes that leave the frames', () => {
+    it('drops the ranks and nodes that leave the frames', () => {
         const store = new RankHistoryStore();
         store.update(world(node('a', rank(1, { seqNo: 1, localMillis: 0 })), node('b', rank(2, { seqNo: 1, localMillis: 0 }))));
         store.update(world(node('a', rank(1, { seqNo: 2, localMillis: 500 })), node('b', rank(2, { seqNo: 2, localMillis: 500 }))));
@@ -166,7 +166,7 @@ describe('WorkerHistoryStore', () => {
         expect(RankSeries.isEmpty(store.seriesFor(1))).to.be.true;
     });
 
-    it('seriesFor an unknown worker is empty', () => {
+    it('seriesFor an unknown rank is empty', () => {
         expect(new RankHistoryStore().seriesFor(7)).to.deep.equal(RankSeries.empty());
     });
 

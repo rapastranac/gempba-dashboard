@@ -63,7 +63,7 @@ describe('MockService', () => {
         const status = await service.start(config({ gempbaPort: port }));
         expect(status).to.deep.include({ running: true, ended: false, clients: 0, ranks: 4, reach: { mode: ConnectionMode.LOCAL, gempbaPort: port } });
         expect(JSON.parse(await firstLine(port)).nodes).to.have.lengthOf(1);
-        expect(lines[0].message).to.equal(`Started: Running · Local on 127.0.0.1:${port} · 1 node, 4 workers · 0 clients; `
+        expect(lines[0].message).to.equal(`Started: Running · Local on 127.0.0.1:${port} · 1 node, 4 ranks · 0 clients; `
             + 'Semi-centralized, Steady, load 85 %, As gempba today, seed 42');
         expect(statuses.at(-1)!.running).to.equal(true);
         expect((await service.lastConfig()).access.gempbaPort).to.equal(port);
@@ -113,7 +113,7 @@ describe('MockService', () => {
         const status = await service.start(config({ mode: ConnectionMode.JUMP, sshPort: await freePort(), keySource: 'generated' }));
         expect(status.reach).to.deep.include({ mode: ConnectionMode.JUMP, targetHost: 'mock-host-01', sshKey: path.join(home, '.gempba-dashboard', 'mock', 'client_ed25519') });
         expect(status.reach!.hostKeyFingerprint).to.match(/^SHA256:/);
-        expect(status.ranks, 'Jump reaches the cluster: 2 nodes of 4 workers').to.equal(8);
+        expect(status.ranks, 'Jump reaches the cluster: 2 nodes of 4 ranks').to.equal(8);
         expect(status.warnings).to.deep.equal([]);
         const system = await service.start(config({ mode: ConnectionMode.HOST, sshPort: await freePort(), keySource: 'system' }));
         expect(system.warnings[0]).to.contain('no public key in ~/.ssh');

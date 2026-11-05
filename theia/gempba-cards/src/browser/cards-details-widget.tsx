@@ -59,7 +59,7 @@ export class CardsDetailsWidget extends ReactWidget {
         const shown = this.find();
         if (!shown) {
             this.liveness.none();
-            return <p className='gempba-cards-empty'>Pick a node, socket or worker to see its details.</p>;
+            return <p className='gempba-cards-empty'>Pick a node, socket or rank to see its details.</p>;
         }
         const { panel, icon, rank } = shown;
         return <div className='gempba-cards-panel' style={{ '--gempba-motion-duration': `${this.motionMs()}ms` } as React.CSSProperties}>

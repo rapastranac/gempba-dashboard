@@ -7,7 +7,7 @@ import { CardsText } from './cards-text';
 
 /**
  * The live instrument panel of the row picked in the Cards tree: its header, headline figures, a gauge, history charts,
- * heat strips, bars and run totals, all worded and scaled here. Each figure appears once, and a worker's CPU always
+ * heat strips, bars and run totals, all worded and scaled here. Each figure appears once, and a rank's CPU always
  * reads as a share of the cores it may use. Pure, so the view only lays it out with the UI kit.
  */
 export namespace CardsPanel {
@@ -70,7 +70,7 @@ export namespace CardsPanel {
     export interface Bars {
         readonly title: string;
         readonly rows: readonly Bar[];
-        /** The worker's busiest peers, which the view can open in full. */
+        /** The rank's busiest peers, which the view can open in full. */
         readonly peers?: boolean;
     }
 
@@ -101,7 +101,7 @@ export namespace CardsPanel {
         throughput(host: string): readonly number[];
     }
 
-    /** The busiest peers a worker's panel shows; the rest open with View all…. */
+    /** The busiest peers a rank's panel shows; the rest open with View all…. */
     export const TOP_PEERS = 5;
 
     export function forNode(node: NodeSnapshot, histories: Histories): Panel {
@@ -117,7 +117,7 @@ export namespace CardsPanel {
                 label: TaskWords.STARTED, ...Rates.of(latest(throughput)), trend: Trend.of(throughput), tone: 'tasks', detail: runAverage(ranks),
                 hint: TaskWords.STARTED_HINT
             },
-            { label: 'Cores busy', value: NumberText.fixed(busy, 1), unit: `of ${allocated}`, detail: plural(ranks.length, 'worker') }
+            { label: 'Cores busy', value: NumberText.fixed(busy, 1), unit: `of ${allocated}`, detail: plural(ranks.length, 'rank') }
         ];
         if (memTotal > 0) {
             heroes.push({ label: 'Memory', ...bytesValue(memUsed), detail: `of ${Bytes.human(memTotal)}`, trend: Trend.of(series.mem), tone: 'memory' });
@@ -152,12 +152,12 @@ export namespace CardsPanel {
                 : undefined,
             heroes: [
                 { label: 'Cores busy', value: NumberText.fixed(busy, 1), unit: cores > 0 ? `of ${cores}` : undefined },
-                { label: 'Workers', value: String(socket.ranks.length) }
+                { label: 'Ranks', value: String(socket.ranks.length) }
             ],
             charts: [],
             strips: socket.cpuIds.length > 0 ? [strip(node, socket)] : [],
             bars: [{
-                title: 'Workers',
+                title: 'Ranks',
                 rows: socket.ranks.map(rank => {
                     const accessible = accessibleCores(rank, socket);
                     const fraction = rank.cpuPct / (100 * accessible);
@@ -203,7 +203,7 @@ export namespace CardsPanel {
         const peers = CardsText.peerRows(rank, world).slice(0, TOP_PEERS);
         if (peers.length > 0) {
             const busiest = Math.max(...rank.peers.map(peer => peer.count), 1);
-            const counts = new Map<string, number>(rank.peers.map(peer => [`Worker ${peer.peerRank}`, peer.count]));
+            const counts = new Map<string, number>(rank.peers.map(peer => [`Rank ${peer.peerRank}`, peer.count]));
             bars.push({
                 title: 'Busiest peers',
                 peers: true,
@@ -247,7 +247,7 @@ export namespace CardsPanel {
         };
     }
 
-    /** The cores a worker may run on in its socket, as core usage counts them; at least 1. */
+    /** The cores a rank may run on in its socket, as core usage counts them; at least 1. */
     export function accessibleCores(rank: RankSnapshot, socket: SocketSnapshot): number {
         const usage = socket.coreUsage.find(entry => entry.rank === rank.id);
         if (usage) {
@@ -256,7 +256,7 @@ export namespace CardsPanel {
         return Math.max(rank.allowedCpuIds.length || socket.logicalCores, 1);
     }
 
-    /** `2 sockets · 4 physical / 8 logical cores · sentinel: worker 3`; hardware the topology did not describe is left out. */
+    /** `2 sockets · 4 physical / 8 logical cores · sentinel: rank 3`; hardware the topology did not describe is left out. */
     export function nodeFacts(node: NodeSnapshot): string {
         const facts: string[] = [];
         if (node.socketCount > 0) {
@@ -265,7 +265,7 @@ export namespace CardsPanel {
         if (node.logicalCores > 0) {
             facts.push(cores(node.physicalCores, node.logicalCores));
         }
-        facts.push(`sentinel: worker ${node.sentinelRank}`);
+        facts.push(`sentinel: rank ${node.sentinelRank}`);
         return facts.join(' · ');
     }
 

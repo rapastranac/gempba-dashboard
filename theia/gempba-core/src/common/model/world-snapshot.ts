@@ -26,7 +26,7 @@ export interface WorldSnapshot {
 
 export namespace WorldSnapshot {
 
-    /** Worker ids are ranks; telemetry schema 1's two schedulers always put their coordinator on rank 0. */
+    /** Telemetry schema 1's two schedulers always put their coordinator on rank 0. */
     export const SCHEMA_1_COORDINATOR_ID = 0;
 
     /** The first telemetry schema whose ranks declare their scheduler role. */
@@ -45,7 +45,7 @@ export namespace WorldSnapshot {
     }
 
     /**
-     * Whether the worker is the scheduler's coordinator, which hands out work and runs no tasks, as its declared role
+     * Whether the rank is the scheduler's coordinator, which hands out work and runs no tasks, as its declared role
      * says. Telemetry schema 1 declares no roles; its two schedulers always put the coordinator on rank 0, once the run
      * has other processes. A schema-2 run without roles has none.
      */

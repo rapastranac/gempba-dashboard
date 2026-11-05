@@ -36,11 +36,11 @@ export namespace CardsTreeNode {
 }
 
 /**
- * The Node → Socket → Worker hierarchy, for navigation only: what a row holds is shown beside the tree. It is
+ * The Node → Socket → Rank hierarchy, for navigation only: what a row holds is shown beside the tree. It is
  * built lazily from the latest snapshot, as Theia asks for the children of the root and of expanded rows only,
  * so collapsed parts of a large cluster cost nothing. Rows keep their ids from one snapshot to the next, so
  * expansion and selection survive every refresh. Like the Java cards, the first node starts expanded, and so
- * does each node's socket that holds its sentinel worker.
+ * does each node's socket that holds its sentinel rank.
  */
 @injectable()
 export class CardsTree extends TreeImpl {

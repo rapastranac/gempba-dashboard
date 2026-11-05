@@ -74,7 +74,7 @@ function twoSocketEnvelope(): BroadcastEnvelope {
     return envelope({ nodes: [n0], identities }, ranks, [nodeFrame(10, 'n0', 2, 8, 64 * GiB, 24 * GiB)], 1_700_000_000_000, 42);
 }
 
-/** One host whose topology node owns exactly the given identities' workers. */
+/** One host whose topology node owns exactly the given identities' ranks. */
 function singleHost(host: string, ranks: RankFrame[], identities: RankIdentity[]): BroadcastEnvelope {
     const sentinel = identities.length === 0 ? -1 : identities[0].rank;
     const topology = { nodes: [topologyNode(host, sentinel, 0, 0, 0, identities.map(i => i.rank), [])], identities };
@@ -138,7 +138,7 @@ describe('WorldSnapshotMapper', () => {
         expect(node.memTotalBytes).to.equal(8 * GiB);
     });
 
-    it('groups workers into sockets in numeric order', () => {
+    it('groups ranks into sockets in numeric order', () => {
         const node = firstNode(twoSocketEnvelope());
         expect(node.sockets.map(s => s.socketId)).to.deep.equal([0, 1]);
         const [s0, s1] = node.sockets;
@@ -152,14 +152,14 @@ describe('WorldSnapshotMapper', () => {
 
     it('core usage intersects allowed cpus with the socket cpus', () => {
         const node = firstNode(twoSocketEnvelope());
-        // worker 10: {0,1} ∩ {0,1,2,3} = 2; worker 12: empty list → all 4.
+        // rank 10: {0,1} ∩ {0,1,2,3} = 2; rank 12: empty list → all 4.
         expect(node.sockets[0].coreUsage.map(u => [u.rank, u.accessibleCores, u.socketCores]))
             .to.have.deep.members([[10, 2, 4], [12, 4, 4]]);
-        // worker 11: no allowed list → all 4.
+        // rank 11: no allowed list → all 4.
         expect(node.sockets[1].coreUsage.map(u => [u.rank, u.accessibleCores])).to.deep.equal([[11, 4]]);
     });
 
-    it('maps worker counters and peers', () => {
+    it('maps rank counters and peers', () => {
         const node = firstNode(twoSocketEnvelope());
         const w10 = node.sockets[0].ranks[0];
         expect(w10.id).to.equal(10);
@@ -179,26 +179,26 @@ describe('WorldSnapshotMapper', () => {
         expect(w11.peers).to.be.empty;
     });
 
-    it('keeps each worker\'s clock and the CPUs it may run on', () => {
+    it('keeps each rank\'s clock and the CPUs it may run on', () => {
         const base = twoSocketEnvelope();
         const ranks = base.ranks!.map(w => ({ ...w, rank_local_ms: 9_000 + w.rank }));
         const [s0, s1] = firstNode({ ...base, ranks }).sockets;
         expect(s0.ranks.map(w => [w.id, w.localMillis, w.allowedCpuIds])).to.deep.equal([[10, 9_010, [0, 1]], [12, 9_012, []]]);
-        // worker 11 has no allowed list: unrestricted.
+        // rank 11 has no allowed list: unrestricted.
         expect(s1.ranks.map(w => [w.id, w.localMillis, w.allowedCpuIds])).to.deep.equal([[11, 9_011, []]]);
     });
 
-    it('a worker without identity may run anywhere', () => {
+    it('a rank without identity may run anywhere', () => {
         const rank = WorldSnapshotMapper.toWorldSnapshot(envelope(undefined, [frame(99, 1, 10, 1000)], undefined)).nodes[0].sockets[0].ranks[0];
         expect([rank.pid, rank.allowedCpuIds]).to.deep.equal([0, []]);
     });
 
-    it('builds one structure key per worker', () => {
+    it('builds one structure key per rank', () => {
         expect(WorldSnapshotMapper.toWorldSnapshot(twoSocketEnvelope()).structure.keys)
             .to.have.members(['n0|0|10', 'n0|0|12', 'n0|1|11']);
     });
 
-    it('a worker without identity or topology falls into the unknown host', () => {
+    it('a rank without identity or topology falls into the unknown host', () => {
         const model = WorldSnapshotMapper.toWorldSnapshot(envelope(undefined, [frame(99, 1, 10, 1000)], undefined));
         expect(WorldSnapshot.totalNodes(model)).to.equal(1);
         const node = model.nodes[0];
@@ -255,7 +255,7 @@ describe('WorldSnapshotMapper', () => {
         expect(utilOf(singleHost('h', [cpuFrame(0, 500)], [id(0, 'h', cores(4))]), 'h')).to.equal(100);
     });
 
-    it('a worker without identity contributes no allocation, so utilization is zero', () => {
+    it('a rank without identity contributes no allocation, so utilization is zero', () => {
         const topology = { nodes: [topologyNode('h', 0, 0, 0, 0, [0], [])], identities: [] };
         expect(utilOf(envelope(topology, [cpuFrame(0, 400)], []), 'h')).to.equal(0);
     });
@@ -269,7 +269,7 @@ describe('WorldSnapshotMapper', () => {
         expect(utilOf(env, 'h')).to.be.closeTo(100, 1e-9);
     });
 
-    it('utilization excludes workers on other hosts', () => {
+    it('utilization excludes ranks on other hosts', () => {
         const topology = {
             nodes: [topologyNode('a', 0, 0, 0, 0, [0], []), topologyNode('b', 1, 0, 0, 0, [1], [])],
             identities: [id(0, 'a', cores(4)), id(1, 'b', cores(4))]

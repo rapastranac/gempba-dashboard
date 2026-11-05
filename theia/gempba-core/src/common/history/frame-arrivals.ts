@@ -1,6 +1,6 @@
 /**
  * When each group's senders last sent a new frame, on this machine's clock. A group's time moves only when one of its
- * senders sends a frame it had not sent before, so a node whose workers stalled keeps its time while the stream goes on
+ * senders sends a frame it had not sent before, so a node whose ranks stalled keeps its time while the stream goes on
  * repeating their latest frames.
  */
 export class FrameArrivals {

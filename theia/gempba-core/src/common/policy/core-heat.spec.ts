@@ -31,7 +31,7 @@ function loads(n: NodeSnapshot, s: SocketSnapshot): number[] {
 
 describe('CoreHeat', () => {
 
-    it('spreads a pinned worker\'s load evenly over its CPUs', () => {
+    it('spreads a pinned rank\'s load evenly over its CPUs', () => {
         const s0 = socket(0, [0, 1, 2, 3], rank(1, 150, [1, 2]));
         expect(CoreHeat.forSocket(node(s0), s0)).to.deep.equal([
             { cpuId: 0, loadPct: 0, oversubscribed: false },
@@ -41,26 +41,26 @@ describe('CoreHeat', () => {
         ]);
     });
 
-    it('spreads an unrestricted worker over its own socket\'s CPUs', () => {
+    it('spreads an unrestricted rank over its own socket\'s CPUs', () => {
         const s0 = socket(0, [0, 1, 2, 3], rank(1, 200));
         const s1 = socket(1, [4, 5, 6, 7]);
         const n = node(s0, s1);
         expect([loads(n, s0), loads(n, s1)]).to.deep.equal([[50, 50, 50, 50], [0, 0, 0, 0]]);
     });
 
-    it('a worker allowed on two sockets heats both', () => {
+    it('a rank allowed on two sockets heats both', () => {
         const s0 = socket(0, [0, 1, 2, 3], rank(1, 400, [2, 3, 4, 5]));
         const s1 = socket(1, [4, 5, 6, 7]);
         const n = node(s0, s1);
         expect([loads(n, s0), loads(n, s1)]).to.deep.equal([[0, 0, 100, 100], [100, 100, 0, 0]]);
     });
 
-    it('workers sharing CPUs add up, and more than one CPU of work oversubscribes them', () => {
+    it('ranks sharing CPUs add up, and more than one CPU of work oversubscribes them', () => {
         const s0 = socket(0, [0, 1], rank(1, 150, [0, 1]), rank(2, 150, [0, 1]));
         expect(CoreHeat.forSocket(node(s0), s0).map(cell => [cell.loadPct, cell.oversubscribed])).to.deep.equal([[150, true], [150, true]]);
     });
 
-    it('a worker using all of its own CPUs is not oversubscribed, even a little over through sampling noise', () => {
+    it('a rank using all of its own CPUs is not oversubscribed, even a little over through sampling noise', () => {
         const s0 = socket(0, [0, 1, 2, 3], rank(1, 410, [0, 1, 2, 3]));
         expect(CoreHeat.forSocket(node(s0), s0).every(cell => !cell.oversubscribed && cell.loadPct === 102.5)).to.be.true;
     });
@@ -70,7 +70,7 @@ describe('CoreHeat', () => {
         expect(CoreHeat.forSocket(node(s0), s0).map(cell => [cell.cpuId, cell.loadPct])).to.deep.equal([[6, 0], [2, 30], [4, 0]]);
     });
 
-    it('a socket without topology has no cells, and its unrestricted workers heat nothing', () => {
+    it('a socket without topology has no cells, and its unrestricted ranks heat nothing', () => {
         const s0 = socket(0, [], rank(1, 100));
         expect(CoreHeat.forSocket(node(s0), s0)).to.be.empty;
         expect(CoreHeat.loadByCpu(node(s0)).size).to.equal(0);

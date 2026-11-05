@@ -49,7 +49,7 @@ describe('MockRun', () => {
         expect(a.line(TS)).not.to.equal(c.line(TS));
     });
 
-    it('sends lines gempba\'s way, which the dashboard parses and maps into its nodes, sockets and workers', () => {
+    it('sends lines gempba\'s way, which the dashboard parses and maps into its nodes, sockets and ranks', () => {
         const mock = run();
         const first = envelope(mock);
         expect(first).to.include({ version: 1, ts: TS, elapsed_seconds: 0 });
@@ -126,7 +126,7 @@ describe('MockRun', () => {
                     expect(rank.sent - was.sent, 'one in flight').to.be.at.most(1);
                     expect(rank.recv - was.recv, 'one subtree at a time').to.be.at.most(1);
                     if (rank.recv > was.recv) {
-                        expect(was.phase, `worker ${rank.id} received while running`).not.to.equal('running');
+                        expect(was.phase, `rank ${rank.id} received while running`).not.to.equal('running');
                         transfers++;
                     }
                 }
@@ -251,11 +251,11 @@ describe('MockRun', () => {
             expect(stalled.every(id => after.get(id)! > start.get(id)!)).to.equal(true);
         });
 
-        it('restarts a worker as a new process with its counters from zero, freeing what was reserved for it', () => {
+        it('restarts a rank as a new process with its counters from zero, freeing what was reserved for it', () => {
             const mock = run();
             mock.advanceTo(20_000);
-            const message = mock.fault('restart-worker');
-            const id = Number(/worker (\d+)/.exec(message)![1]);
+            const message = mock.fault('restart-rank');
+            const id = Number(/rank (\d+)/.exec(message)![1]);
             const frame = rankFrame(mock, id);
             expect(frame).to.include({ seq_no: 1, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0 });
             const pid = envelope(mock).topology!.identities!.find(identity => identity.rank === id)!.pid;
@@ -264,13 +264,13 @@ describe('MockRun', () => {
             expect(mock.rankViews().some(rank => rank.next === id)).to.equal(false);
         });
 
-        it('adds and removes workers, keeping every node and the center', () => {
+        it('adds and removes ranks, keeping every node and the center', () => {
             const mock = run({}, { shape: { nodes: 1, ranksPerNode: 2 } });
-            expect(mock.fault('add-worker')).to.equal('Added worker 2 on mock-host-01');
+            expect(mock.fault('add-rank')).to.equal('Added rank 2 on mock-host-01');
             expect(envelope(mock).ranks!.map(frame => frame.rank)).to.deep.equal([0, 1, 2]);
             mock.advanceTo(1000);
-            expect(mock.fault('remove-worker')).to.match(/^Removed worker [12] from mock-host-01$/);
-            expect(mock.fault('remove-worker')).to.match(/^No worker can be removed/);
+            expect(mock.fault('remove-rank')).to.match(/^Removed rank [12] from mock-host-01$/);
+            expect(mock.fault('remove-rank')).to.match(/^No rank can be removed/);
             expect(envelope(mock).topology!.nodes![0].ranks).to.have.lengthOf(2);
         });
 

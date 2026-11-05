@@ -34,14 +34,14 @@ function world(...nodes: NodeSnapshot[]): WorldSnapshot {
 
 describe('WorldSnapshot', () => {
 
-    it('empty has no nodes, no workers and an empty structure', () => {
+    it('empty has no nodes, no ranks and an empty structure', () => {
         const empty = WorldSnapshot.empty();
         expect(WorldSnapshot.totalNodes(empty)).to.equal(0);
         expect(WorldSnapshot.totalRanks(empty)).to.equal(0);
         expect(empty.structure.keys).to.be.empty;
     });
 
-    it('totals count nodes and workers across every socket', () => {
+    it('totals count nodes and ranks across every socket', () => {
         const snapshot = world(node('a', socket(0, 1, 2), socket(1, 3)), node('b', socket(0, 4)));
         expect(WorldSnapshot.totalNodes(snapshot)).to.equal(2);
         expect(WorldSnapshot.totalRanks(snapshot)).to.equal(4);
@@ -73,7 +73,7 @@ describe('WorldSnapshot', () => {
         expect([0, 1].map(id => WorldSnapshot.isCoordinator(cluster, id))).to.deep.equal([false, false]);
     });
 
-    it('finds a worker by id, or nothing', () => {
+    it('finds a rank by id, or nothing', () => {
         const cluster = world(node('alpha', socket(0, 0, 1)), node('beta', socket(0, 2)));
         expect(WorldSnapshot.rankOf(cluster, 2)?.id).to.equal(2);
         expect(WorldSnapshot.rankOf(cluster, 9)).to.equal(undefined);

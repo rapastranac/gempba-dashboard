@@ -46,15 +46,15 @@ describe('NodeUtilization', () => {
         expect(NodeUtilization.pct(-5, 4)).to.equal(0);
     });
 
-    it('allocates the cores the workers may run on, each counted once', () => {
+    it('allocates the cores the ranks may run on, each counted once', () => {
         expect(NodeUtilization.allocatedCores(node([rank(), rank({ id: 4, allowedCpuIds: [2, 3, 4, 5] })]))).to.equal(6);
     });
 
-    it('allocates every core when no worker is restricted', () => {
+    it('allocates every core when no rank is restricted', () => {
         expect(NodeUtilization.allocatedCores(node([rank({ allowedCpuIds: [] })]))).to.equal(8);
     });
 
-    it('counts the cores the workers keep busy together', () => {
+    it('counts the cores the ranks keep busy together', () => {
         expect(NodeUtilization.coresBusy([rank(), rank({ cpuPct: 50 })])).to.equal(3.5);
         expect(NodeUtilization.coresBusy([])).to.equal(0);
     });
