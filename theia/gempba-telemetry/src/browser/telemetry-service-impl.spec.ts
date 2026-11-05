@@ -76,7 +76,8 @@ describe('TelemetryServiceImpl', () => {
     });
 
     it('starts disconnected with no snapshot, at the default rates', () => {
-        expect([service.state, service.snapshot, service.lastFrameAt, service.status]).to.deep.equal([ConnectionState.DISCONNECTED, undefined, undefined, '']);
+        expect([service.state, service.snapshot, service.lastFrameAt, service.lastLineAt, service.status])
+            .to.deep.equal([ConnectionState.DISCONNECTED, undefined, undefined, undefined, '']);
         expect([service.rates, service.observedRates]).to.deep.equal([RefreshRates.defaults(), { workerIntervalMs: undefined, nodeIntervalMs: undefined }]);
     });
 
@@ -137,6 +138,41 @@ describe('TelemetryServiceImpl', () => {
         }
     });
 
+    it('keeps the histories, observed rates and frame times through a paused line, which carries the header alone', () => {
+        const realNow = Date.now;
+        try {
+            Date.now = () => 1000;
+            receiver.onSnapshot(snapshot('h', 1, 0));
+            Date.now = () => 1500;
+            receiver.onSnapshot(snapshot('h', 2, 500));
+            const announced: WorldSnapshot[] = [];
+            service.onSnapshot(world => announced.push(world));
+            Date.now = () => 9000;
+            receiver.onSnapshot({ ...snapshot('h', 2, 500), paused: true, headerOnly: true });
+            expect([nodeHistory.seriesFor('h').cpu.length, rankHistory.seriesFor(7).cpu.length]).to.deep.equal([2, 2]);
+            expect(service.observedRates).to.deep.equal({ workerIntervalMs: 500, nodeIntervalMs: 500 });
+            expect([service.lastFrameAt, service.nodeFrameAt('h'), service.lastLineAt]).to.deep.equal([1500, 1500, 9000]);
+            expect(announced.map(world => world.paused), 'the views still hear of it').to.deep.equal([true]);
+            Date.now = () => 9500;
+            receiver.onSnapshot({ ...snapshot('h', 3, 9000), paused: true });
+            expect([service.lastFrameAt, nodeHistory.seriesFor('h').cpu.length], 'a snapshot sent while paused is data').to.deep.equal([9500, 3]);
+        } finally {
+            Date.now = realNow;
+        }
+    });
+
+    it('clears the histories, observed rates and frame times for another run, before its first snapshot', () => {
+        receiver.onSnapshot({ ...snapshot('h', 1, 0), runId: 'a' });
+        receiver.onSnapshot({ ...snapshot('h', 2, 500), runId: 'a' });
+        receiver.onSnapshot({ ...snapshot('h', 3, 1000) });
+        expect(rankHistory.seriesFor(7).cpu.length, 'a line without a run id is the same run').to.equal(3);
+        const seen: number[] = [];
+        service.onSnapshot(() => seen.push(rankHistory.seriesFor(7).cpu.length));
+        receiver.onSnapshot({ ...snapshot('h', 1, 0), runId: 'b' });
+        expect(seen).to.deep.equal([1]);
+        expect([nodeHistory.seriesFor('h').cpu.length, service.observedRates.workerIntervalMs]).to.deep.equal([1, undefined]);
+    });
+
     it('a new target clears the snapshot, the histories, the observed rates and the frame times', async () => {
         receiver.onSnapshot(snapshot('h', 1, 0));
         receiver.onSnapshot(snapshot('h', 2, 500));
@@ -144,7 +180,7 @@ describe('TelemetryServiceImpl', () => {
         expect(service.snapshot).to.equal(undefined);
         expect([nodeHistory.hosts(), rankHistory.ranks()]).to.deep.equal([[], []]);
         expect(service.observedRates).to.deep.equal({ workerIntervalMs: undefined, nodeIntervalMs: undefined });
-        expect([service.lastFrameAt, service.nodeFrameAt('h')]).to.deep.equal([undefined, undefined]);
+        expect([service.lastFrameAt, service.lastLineAt, service.nodeFrameAt('h')]).to.deep.equal([undefined, undefined, undefined]);
     });
 
     it('forwards the other controls to the backend', async () => {
