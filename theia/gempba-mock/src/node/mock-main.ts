@@ -16,7 +16,7 @@ const USAGE = `Usage: npm run mock -- [options]
   --key system|generated   which public keys the SSH server accepts (system)
   --mfa CODE               ask for this passcode after the key
   --nodes N                nodes behind the login node, in jump mode (2); local and host run one
-  --sockets N --cores N --smt --workers N --pool N --mem GiB --cgroup GiB
+  --sockets N --cores N --smt --ranks N --pool N --mem GiB --cgroup GiB
   --scenario steady|slow|ramp|imbalanced|bursty
   --scheduler semi-centralized|centralized
   --load PCT --fidelity gempba|full --seed N
@@ -25,7 +25,7 @@ const USAGE = `Usage: npm run mock -- [options]
 const { values } = parseArgs({
     options: {
         mode: { type: 'string' }, port: { type: 'string' }, 'ssh-port': { type: 'string' }, key: { type: 'string' }, mfa: { type: 'string' },
-        nodes: { type: 'string' }, sockets: { type: 'string' }, cores: { type: 'string' }, smt: { type: 'boolean' }, workers: { type: 'string' },
+        nodes: { type: 'string' }, sockets: { type: 'string' }, cores: { type: 'string' }, smt: { type: 'boolean' }, ranks: { type: 'string' },
         pool: { type: 'string' }, mem: { type: 'string' }, cgroup: { type: 'string' }, scenario: { type: 'string' },
         scheduler: { type: 'string' }, load: { type: 'string' }, fidelity: { type: 'string' }, seed: { type: 'string' }, bench: { type: 'boolean' },
         help: { type: 'boolean' }
@@ -44,7 +44,7 @@ const shape: MockShape = {
     socketsPerNode: number(values.sockets, defaults.shape.socketsPerNode),
     coresPerSocket: number(values.cores, defaults.shape.coresPerSocket),
     smt: values.smt ?? defaults.shape.smt,
-    workersPerNode: number(values.workers, defaults.shape.workersPerNode),
+    ranksPerNode: number(values.ranks, defaults.shape.ranksPerNode),
     poolThreads: number(values.pool, defaults.shape.poolThreads),
     memPerNodeGiB: number(values.mem, defaults.shape.memPerNodeGiB),
     cgroupGiB: number(values.cgroup, defaults.shape.cgroupGiB)
@@ -94,7 +94,7 @@ function bench({ shape: benchShape, scheduler, live, seed }: MockConfig): void {
         bytes += run.line(Date.now()).length;
     }
     const ms = Number(process.hrtime.bigint() - started) / 1e6 / frames;
-    console.log(`${benchShape.nodes} nodes × ${benchShape.workersPerNode} workers, ${live.fidelity} fidelity: ${ms.toFixed(2)} ms a frame, `
+    console.log(`${benchShape.nodes} nodes × ${benchShape.ranksPerNode} workers, ${live.fidelity} fidelity: ${ms.toFixed(2)} ms a frame, `
         + `${Math.round(bytes / frames / 1024)} KiB a line`);
 }
 

@@ -34,7 +34,7 @@ export interface MockShape {
     readonly coresPerSocket: number;
     /** Two hardware threads per core, so twice as many logical CPUs. */
     readonly smt: boolean;
-    readonly workersPerNode: number;
+    readonly ranksPerNode: number;
     /** Each worker's pool threads; 0 gives one per CPU the worker may use. */
     readonly poolThreads: number;
     readonly memPerNodeGiB: number;
@@ -68,14 +68,14 @@ export namespace MockConfig {
     export const FIDELITIES: readonly MockFidelity[] = ['gempba', 'full'];
     export const KEY_SOURCES: readonly MockKeySource[] = ['system', 'generated'];
 
-    export const MAX_WORKERS = 4096;
+    export const MAX_RANKS = 4096;
 
     /** Each counted shape field's whole-number bounds. */
     export const SHAPE_BOUNDS: { readonly [K in MockShape.Count]: readonly [number, number] } = {
         nodes: [1, 64],
         socketsPerNode: [1, 8],
         coresPerSocket: [1, 128],
-        workersPerNode: [1, 256],
+        ranksPerNode: [1, 256],
         poolThreads: [0, 256],
         memPerNodeGiB: [1, 4096],
         cgroupGiB: [0, 4096]
@@ -85,7 +85,7 @@ export namespace MockConfig {
         return {
             access: { mode: ConnectionMode.LOCAL, gempbaPort: 9000, sshPort: 2222, keySource: 'system', mfa: false, mfaCode: '123456' },
             shape: {
-                nodes: 2, socketsPerNode: 2, coresPerSocket: 8, smt: false, workersPerNode: 4, poolThreads: 0, memPerNodeGiB: 64, cgroupGiB: 0
+                nodes: 2, socketsPerNode: 2, coresPerSocket: 8, smt: false, ranksPerNode: 4, poolThreads: 0, memPerNodeGiB: 64, cgroupGiB: 0
             },
             scheduler: 'semi-centralized',
             live: { scenario: 'steady', loadPct: 85, fidelity: 'gempba' },
@@ -114,7 +114,8 @@ export namespace MockConfig {
                 socketsPerNode: numberOr(shape.socketsPerNode, fallback.shape.socketsPerNode),
                 coresPerSocket: numberOr(shape.coresPerSocket, fallback.shape.coresPerSocket),
                 smt: typeof shape.smt === 'boolean' ? shape.smt : fallback.shape.smt,
-                workersPerNode: numberOr(shape.workersPerNode, fallback.shape.workersPerNode),
+                // a run saved before the rename to ranksPerNode holds workersPerNode
+                ranksPerNode: numberOr(shape.ranksPerNode ?? shape.workersPerNode, fallback.shape.ranksPerNode),
                 poolThreads: numberOr(shape.poolThreads, fallback.shape.poolThreads),
                 memPerNodeGiB: numberOr(shape.memPerNodeGiB, fallback.shape.memPerNodeGiB),
                 cgroupGiB: numberOr(shape.cgroupGiB, fallback.shape.cgroupGiB)
@@ -158,9 +159,9 @@ export namespace MockConfig {
                 found.push(`${SHAPE_LABELS[key]} must be a whole number from ${min} to ${max}.`);
             }
         }
-        const workers = MockShape.totalWorkers(shape);
-        if (workers < 2 || workers > MAX_WORKERS) {
-            found.push(`The cluster needs from 2 to ${MAX_WORKERS} workers in all: the center and at least one worker; it has ${workers}.`);
+        const ranks = MockShape.totalRanks(shape);
+        if (ranks < 2 || ranks > MAX_RANKS) {
+            found.push(`The cluster needs from 2 to ${MAX_RANKS} workers in all: the center and at least one worker; it has ${ranks}.`);
         }
         if (shape.cgroupGiB > shape.memPerNodeGiB) {
             found.push('The cgroup limit cannot exceed the memory per node.');
@@ -178,7 +179,7 @@ export namespace MockConfig {
         nodes: 'Nodes',
         socketsPerNode: 'Sockets per node',
         coresPerSocket: 'Cores per socket',
-        workersPerNode: 'Workers per node',
+        ranksPerNode: 'Workers per node',
         poolThreads: 'Pool threads',
         memPerNodeGiB: 'Memory per node',
         cgroupGiB: 'The cgroup limit'
@@ -196,8 +197,8 @@ export namespace MockShape {
     /** The shape fields that count something, each a whole number within its bounds. */
     export type Count = Exclude<keyof MockShape, 'smt'>;
 
-    export function totalWorkers(shape: MockShape): number {
-        return shape.nodes * shape.workersPerNode;
+    export function totalRanks(shape: MockShape): number {
+        return shape.nodes * shape.ranksPerNode;
     }
 
     /** Logical CPUs per socket. */

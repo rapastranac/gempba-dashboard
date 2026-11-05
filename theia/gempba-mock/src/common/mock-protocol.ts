@@ -44,7 +44,7 @@ export interface MockStatus {
     readonly clients: number;
     readonly workerIntervalMs?: number;
     readonly nodeIntervalMs?: number;
-    readonly workers?: number;
+    readonly ranks?: number;
     /** What the Connection view needs to reach the running mock. */
     readonly reach?: MockReach;
     /** Things that will stop the dashboard from connecting, such as no accepted SSH key. */
@@ -80,11 +80,11 @@ export namespace MockStatus {
         const shape = MockConfig.shapeOf(status.config);
         const where = access.mode === ConnectionMode.LOCAL ? `Local on 127.0.0.1:${access.gempbaPort}`
             : `${access.mode === ConnectionMode.HOST ? 'Host' : 'Jump'}, SSH on 127.0.0.1:${access.sshPort}`;
-        return `Running · ${where} · ${cluster(shape, status.workers)} · ${status.clients} client${status.clients === 1 ? '' : 's'}`;
+        return `Running · ${where} · ${cluster(shape, status.ranks)} · ${status.clients} client${status.clients === 1 ? '' : 's'}`;
     }
 
-    function cluster(shape: MockShape, workers: number | undefined): string {
-        const total = workers ?? MockShape.totalWorkers(shape);
+    function cluster(shape: MockShape, ranks: number | undefined): string {
+        const total = ranks ?? MockShape.totalRanks(shape);
         return `${shape.nodes} node${shape.nodes === 1 ? '' : 's'}, ${total} workers`;
     }
 }

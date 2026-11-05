@@ -4,7 +4,7 @@ import { BroadcastEnvelope, RankFrame } from '@gempba/telemetry/lib/node/protoco
 import { WorldSnapshotMapper } from '@gempba/telemetry/lib/node/telemetry/world-snapshot-mapper';
 import { MockConfig, MockLive, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
-import { MockRun, MockWorkerView } from './mock-run';
+import { MockRun, MockRankView } from './mock-run';
 import { MockScenarioModel } from './mock-scenario';
 
 describe('MockRun', () => {
@@ -28,16 +28,16 @@ describe('MockRun', () => {
         return BroadcastEnvelope.parse(mock.line(TS));
     }
 
-    function workerFrame(mock: MockRun, workerId: number): RankFrame {
-        return envelope(mock).ranks!.find(frame => frame.rank === workerId)!;
+    function rankFrame(mock: MockRun, id: number): RankFrame {
+        return envelope(mock).ranks!.find(frame => frame.rank === id)!;
     }
 
-    function view(mock: MockRun, workerId: number): MockWorkerView {
-        return mock.workerViews().find(worker => worker.workerId === workerId)!;
+    function view(mock: MockRun, id: number): MockRankView {
+        return mock.rankViews().find(rank => rank.id === id)!;
     }
 
-    function computing(mock: MockRun): MockWorkerView[] {
-        return mock.workerViews().filter(worker => worker.workerId !== 0);
+    function computing(mock: MockRun): MockRankView[] {
+        return mock.rankViews().filter(rank => rank.id !== 0);
     }
 
     it('replays the same frames from the same seed, and others from another', () => {
@@ -62,13 +62,13 @@ describe('MockRun', () => {
         expect(world.nodes.map(node => node.sockets.map(socket => socket.ranks.length))).to.deep.equal([[2, 2], [2, 2]]);
         expect(world.nodes[1].sentinelRank).to.equal(4);
         expect(world.nodes[0].hasLiveMemory).to.equal(true);
-        expect(workerFrame(mock, 3).process_threads).to.equal(5);
+        expect(rankFrame(mock, 3).process_threads).to.equal(5);
     });
 
     it('keeps its counters consistent over 10,000 steps: rising, summing over edges, and within the pool and the CPUs', () => {
         const mock = run();
         const last = new Map<number, RankFrame>();
-        const allowed = new Map(mock.topology.workers.map(worker => [worker.workerId, worker.allowedCpuIds.length]));
+        const allowed = new Map(mock.topology.ranks.map(rank => [rank.id, rank.allowedCpuIds.length]));
         for (let step = 1; step <= 1000; step++) {
             mock.advanceTo(step * 10 * MockRun.STEP_MS);
             const sent = envelope(mock);
@@ -90,14 +90,14 @@ describe('MockRun', () => {
                 expect(node.mem_avail_bytes).to.be.within(0, node.mem_total_bytes);
             }
         }
-        const views = mock.workerViews();
-        for (const worker of views) {
-            const outgoing = [...worker.edges.values()].reduce((sum, edge) => sum + edge.count, 0);
-            const incoming = views.reduce((sum, other) => sum + (other.edges.get(worker.workerId)?.count ?? 0), 0);
-            expect(worker.sent).to.equal(outgoing);
-            expect(worker.recv).to.equal(incoming);
+        const views = mock.rankViews();
+        for (const rank of views) {
+            const outgoing = [...rank.edges.values()].reduce((sum, edge) => sum + edge.count, 0);
+            const incoming = views.reduce((sum, other) => sum + (other.edges.get(rank.id)?.count ?? 0), 0);
+            expect(rank.sent).to.equal(outgoing);
+            expect(rank.recv).to.equal(incoming);
         }
-        expect(views.reduce((sum, worker) => sum + worker.tasksLocal, 0)).to.be.above(1_000_000);
+        expect(views.reduce((sum, rank) => sum + rank.tasksLocal, 0)).to.be.above(1_000_000);
     });
 
     describe('semi-centralized, as gempba schedules it', () => {
@@ -105,35 +105,35 @@ describe('MockRun', () => {
         it('has the center seed the root and nothing more, and run no tasks while it polls', () => {
             const mock = run();
             mock.advanceTo(60_000);
-            const center = workerFrame(mock, 0);
+            const center = rankFrame(mock, 0);
             expect(center).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0, scheduler_pending_count: 0 });
             expect(center.process_cpu_pct).to.be.within(90, 100);
         });
 
         it('sends one task at a time to an idle rank the center reserved, so no worker ever queues one', () => {
             const mock = run();
-            let before = new Map(mock.workerViews().map(worker => [worker.workerId, worker]));
+            let before = new Map(mock.rankViews().map(rank => [rank.id, rank]));
             let transfers = 0;
             for (let step = 1; step <= 1200; step++) {
                 mock.advanceTo(step * MockRun.STEP_MS);
-                const now = mock.workerViews();
-                for (const worker of now) {
-                    const was = before.get(worker.workerId)!;
-                    expect(worker.pending).to.equal(0);
-                    if (worker.workerId === 0) {
+                const now = mock.rankViews();
+                for (const rank of now) {
+                    const was = before.get(rank.id)!;
+                    expect(rank.pending).to.equal(0);
+                    if (rank.id === 0) {
                         continue;
                     }
-                    expect(worker.sent - was.sent, 'one in flight').to.be.at.most(1);
-                    expect(worker.recv - was.recv, 'one subtree at a time').to.be.at.most(1);
-                    if (worker.recv > was.recv) {
-                        expect(was.phase, `worker ${worker.workerId} received while running`).not.to.equal('running');
+                    expect(rank.sent - was.sent, 'one in flight').to.be.at.most(1);
+                    expect(rank.recv - was.recv, 'one subtree at a time').to.be.at.most(1);
+                    if (rank.recv > was.recv) {
+                        expect(was.phase, `worker ${rank.id} received while running`).not.to.equal('running');
                         transfers++;
                     }
                 }
-                for (const reserved of now.filter(worker => worker.phase === 'assigned')) {
-                    expect(now.filter(worker => worker.next === reserved.workerId && worker.phase === 'running')).to.have.lengthOf(1);
+                for (const reserved of now.filter(rank => rank.phase === 'assigned')) {
+                    expect(now.filter(rank => rank.next === reserved.id && rank.phase === 'running')).to.have.lengthOf(1);
                 }
-                before = new Map(now.map(worker => [worker.workerId, worker]));
+                before = new Map(now.map(rank => [rank.id, rank]));
             }
             expect(transfers).to.be.above(10);
         });
@@ -147,14 +147,14 @@ describe('MockRun', () => {
             const center = view(mock, 0);
             expect(center.pending).to.equal(center.recv - (center.sent - 1));
             expect(center.pending).to.be.above(0);
-            expect(computing(mock).every(worker => worker.pending === 0)).to.equal(true);
+            expect(computing(mock).every(rank => rank.pending === 0)).to.equal(true);
             // the frame was sampled up to a worker interval ago
-            expect(workerFrame(mock, 0).scheduler_pending_count).to.be.within(1, center.pending);
+            expect(rankFrame(mock, 0).scheduler_pending_count).to.be.within(1, center.pending);
             expect(envelope(mock).ranks!.filter(frame => frame.rank !== 0).every(frame => frame.scheduler_pending_count === 0)).to.equal(true);
         });
 
         it('fills its queue to gempba\'s limit, then takes no more while it is full', () => {
-            const mock = run({}, { scheduler: 'centralized', shape: { nodes: 1, workersPerNode: 3 } });
+            const mock = run({}, { scheduler: 'centralized', shape: { nodes: 1, ranksPerNode: 3 } });
             const limit = MockRun.CENTER_TASKS_PER_PROCESS * 3;
             let filled = false;
             let highest = 0;
@@ -182,17 +182,17 @@ describe('MockRun', () => {
     it('finishes slow tasks one every few seconds on each busy worker', () => {
         const mock = run({ scenario: 'slow' });
         mock.advanceTo(300_000);
-        const before = new Map(mock.workerViews().map(worker => [worker.workerId, worker.tasksLocal]));
+        const before = new Map(mock.rankViews().map(rank => [rank.id, rank.tasksLocal]));
         mock.advanceTo(420_000);
-        const perWorker = computing(mock).map(worker => (worker.tasksLocal - before.get(worker.workerId)!) / 120);
-        const mean = perWorker.reduce((sum, rate) => sum + rate, 0) / perWorker.length;
+        const perRank = computing(mock).map(rank => (rank.tasksLocal - before.get(rank.id)!) / 120);
+        const mean = perRank.reduce((sum, rate) => sum + rate, 0) / perRank.length;
         expect(1 / mean).to.be.within(1.5, 10);
     });
 
     it('ramps up, drains its finite tree and ends, after which it stands still', () => {
         const mock = run({ scenario: 'ramp' });
         mock.advanceTo(30_000);
-        expect(computing(mock).every(worker => worker.phase === 'running')).to.equal(true);
+        expect(computing(mock).every(rank => rank.phase === 'running')).to.equal(true);
         mock.advanceTo(600_000);
         expect(mock.ended).to.equal(true);
         const endedAt = mock.timeMs;
@@ -204,30 +204,30 @@ describe('MockRun', () => {
     it('leaves most of the work with the worker holding the root when imbalanced, while the others wait', () => {
         const mock = run({ scenario: 'imbalanced' });
         mock.advanceTo(120_000);
-        const others = computing(mock).filter(worker => !MockScenarioModel.isRich(worker.workerId));
-        const average = others.reduce((sum, worker) => sum + worker.tasksLocal, 0) / others.length;
+        const others = computing(mock).filter(rank => !MockScenarioModel.isRich(rank.id));
+        const average = others.reduce((sum, rank) => sum + rank.tasksLocal, 0) / others.length;
         expect(view(mock, 1).tasksLocal).to.be.above(10 * average);
     });
 
     it('rests between bursts', () => {
         const mock = run({ scenario: 'bursty' });
         mock.advanceTo(MockScenarioModel.BURST_PERIOD_MS * 3 + MockScenarioModel.BURST_BUSY_MS + 5000);
-        expect(computing(mock).reduce((sum, worker) => sum + worker.running, 0)).to.be.at.most(4);
+        expect(computing(mock).reduce((sum, rank) => sum + rank.running, 0)).to.be.at.most(4);
     });
 
     it('leaves the pools idle at no load', () => {
         const mock = run({ loadPct: 0 });
         mock.advanceTo(5000);
-        expect(mock.workerViews().every(worker => worker.running === 0)).to.equal(true);
+        expect(mock.rankViews().every(rank => rank.running === 0)).to.equal(true);
     });
 
     it('applies new intervals at once', () => {
         const mock = run({}, { rates: { workerIntervalMs: 600_000, nodeIntervalMs: 600_000 } });
         mock.advanceTo(1000);
-        const seq = workerFrame(mock, 5).seq_no;
+        const seq = rankFrame(mock, 5).seq_no;
         mock.setIntervals(100, 1000);
         mock.advanceTo(2000);
-        expect(workerFrame(mock, 5).seq_no - seq).to.be.within(9, 11);
+        expect(rankFrame(mock, 5).seq_no - seq).to.be.within(9, 11);
     });
 
     describe('faults', () => {
@@ -238,34 +238,34 @@ describe('MockRun', () => {
             const message = mock.fault('stall-node');
             expect(message).to.match(/^Stalled mock-host-0\d: its frames stop for 10 s$/);
             const nodeIndex = mock.topology.nodes.findIndex(node => message.includes(node.host));
-            const stalled = mock.topology.workers.filter(worker => worker.nodeIndex === nodeIndex).map(worker => worker.workerId);
-            const others = mock.topology.workers.filter(worker => worker.nodeIndex !== nodeIndex).map(worker => worker.workerId);
+            const stalled = mock.topology.ranks.filter(rank => rank.nodeIndex === nodeIndex).map(rank => rank.id);
+            const others = mock.topology.ranks.filter(rank => rank.nodeIndex !== nodeIndex).map(rank => rank.id);
             const seqs = () => new Map(envelope(mock).ranks!.map(frame => [frame.rank, frame.seq_no]));
             const start = seqs();
             mock.advanceTo(5000 + MockFault.STALL_MS - 100);
             const during = seqs();
-            expect(stalled.every(workerId => during.get(workerId) === start.get(workerId))).to.equal(true);
-            expect(others.every(workerId => during.get(workerId)! > start.get(workerId)!)).to.equal(true);
+            expect(stalled.every(id => during.get(id) === start.get(id))).to.equal(true);
+            expect(others.every(id => during.get(id)! > start.get(id)!)).to.equal(true);
             mock.advanceTo(5000 + MockFault.STALL_MS + 1000);
             const after = seqs();
-            expect(stalled.every(workerId => after.get(workerId)! > start.get(workerId)!)).to.equal(true);
+            expect(stalled.every(id => after.get(id)! > start.get(id)!)).to.equal(true);
         });
 
         it('restarts a worker as a new process with its counters from zero, freeing what was reserved for it', () => {
             const mock = run();
             mock.advanceTo(20_000);
             const message = mock.fault('restart-worker');
-            const workerId = Number(/worker (\d+)/.exec(message)![1]);
-            const frame = workerFrame(mock, workerId);
+            const id = Number(/worker (\d+)/.exec(message)![1]);
+            const frame = rankFrame(mock, id);
             expect(frame).to.include({ seq_no: 1, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0 });
-            const pid = envelope(mock).topology!.identities!.find(identity => identity.rank === workerId)!.pid;
+            const pid = envelope(mock).topology!.identities!.find(identity => identity.rank === id)!.pid;
             expect(message).to.contain(`PID ${pid}`);
-            expect(view(mock, workerId).phase).to.equal('available');
-            expect(mock.workerViews().some(worker => worker.next === workerId)).to.equal(false);
+            expect(view(mock, id).phase).to.equal('available');
+            expect(mock.rankViews().some(rank => rank.next === id)).to.equal(false);
         });
 
         it('adds and removes workers, keeping every node and the center', () => {
-            const mock = run({}, { shape: { nodes: 1, workersPerNode: 2 } });
+            const mock = run({}, { shape: { nodes: 1, ranksPerNode: 2 } });
             expect(mock.fault('add-worker')).to.equal('Added worker 2 on mock-host-01');
             expect(envelope(mock).ranks!.map(frame => frame.rank)).to.deep.equal([0, 1, 2]);
             mock.advanceTo(1000);

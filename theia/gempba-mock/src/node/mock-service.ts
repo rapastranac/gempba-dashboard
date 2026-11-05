@@ -48,7 +48,7 @@ export class MockService implements MockServer {
         }
         return {
             running: true, ended: false, config: this.config, clients: this.center.clients, workerIntervalMs: run.workerIntervalMs,
-            nodeIntervalMs: run.nodeIntervalMs, workers: run.topology.workers.length, reach: this.reach, warnings: this.warnings
+            nodeIntervalMs: run.nodeIntervalMs, ranks: run.topology.ranks.length, reach: this.reach, warnings: this.warnings
         };
     }
 
