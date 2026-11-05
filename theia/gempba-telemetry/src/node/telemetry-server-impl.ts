@@ -20,7 +20,7 @@ import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
 @injectable()
 export class TelemetryServerImpl implements TelemetryServer {
 
-    /** gempba's center TCP server binds loopback only; a tunnel's local end is loopback too. */
+    /** gempba's telemetry server, on rank 0, binds loopback only; a tunnel's local end is loopback too. */
     static readonly LOOPBACK = '127.0.0.1';
 
     @inject(ContributionProvider) @named(TunnelProvider)

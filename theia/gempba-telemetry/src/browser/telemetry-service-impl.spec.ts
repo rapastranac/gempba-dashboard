@@ -14,7 +14,7 @@ import { TelemetryServiceImpl } from './telemetry-service-impl';
 /** One node "h" whose worker 7 sent frame `seqNo` at `millis`, with a node frame its sentinel took at `millis`. */
 function snapshot(host: string, seqNo = 1, millis = 0): WorldSnapshot {
     const worker: WorkerSnapshot = {
-        workerId: 7, seqNo, localMillis: millis, pid: 0, sentinel: true, allowedCpuIds: [], tasksLocalTotal: 0, tasksRunning: 0,
+        workerId: 7, seqNo, localMillis: millis, pid: 0, sentinel: true, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
         tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerWorker: 0, cpuPct: 90, rssBytes: 0, threads: 1,
         elapsedSeconds: 0, peers: []
     };

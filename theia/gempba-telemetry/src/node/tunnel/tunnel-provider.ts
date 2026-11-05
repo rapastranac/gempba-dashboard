@@ -2,7 +2,7 @@ import { Event } from '@theia/core/lib/common/event';
 import { ConnectionMode, SessionSpec, TargetSpec } from '@gempba/core';
 
 /**
- * Contribution point for reaching a gempba center in one {@link ConnectionMode}. Telemetry provides LOCAL;
+ * Contribution point for reaching a gempba run's telemetry in one {@link ConnectionMode}. Telemetry provides LOCAL;
  * another extension contributes HOST and JUMP. Telemetry only ever dials the local port a forward hands it.
  * Bind providers in a ConnectionContainerModule: they are per window, so they can prompt that window's user.
  */
@@ -25,7 +25,7 @@ export interface Tunnel {
     close(): void;
 }
 
-/** A loopback port that reaches the target's gempba center. */
+/** A loopback port that reaches the target's gempba telemetry. */
 export interface Forward {
     readonly port: number;
     close(): void;

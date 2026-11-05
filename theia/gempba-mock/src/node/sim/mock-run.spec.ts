@@ -76,7 +76,7 @@ describe('MockRun', () => {
                 const before = last.get(frame.worker_id);
                 if (before) {
                     expect(frame.seq_no).to.be.at.least(before.seq_no);
-                    expect(frame.tasks_local_total).to.be.at.least(before.tasks_local_total);
+                    expect(frame.tasks_started_total).to.be.at.least(before.tasks_started_total);
                     expect(frame.tasks_sent_total).to.be.at.least(before.tasks_sent_total);
                     expect(frame.tasks_recv_total).to.be.at.least(before.tasks_recv_total);
                     expect(frame.idle_microseconds_per_worker).to.be.at.least(before.idle_microseconds_per_worker);
@@ -106,7 +106,7 @@ describe('MockRun', () => {
             const mock = run();
             mock.advanceTo(60_000);
             const center = workerFrame(mock, 0);
-            expect(center).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_local_total: 0, tasks_running: 0, scheduler_pending_count: 0 });
+            expect(center).to.include({ tasks_sent_total: 1, tasks_recv_total: 0, tasks_started_total: 0, tasks_running: 0, scheduler_pending_count: 0 });
             expect(center.process_cpu_pct).to.be.within(90, 100);
         });
 
@@ -257,7 +257,7 @@ describe('MockRun', () => {
             const message = mock.fault('restart-worker');
             const workerId = Number(/worker (\d+)/.exec(message)![1]);
             const frame = workerFrame(mock, workerId);
-            expect(frame).to.include({ seq_no: 1, tasks_local_total: 0, tasks_sent_total: 0, tasks_recv_total: 0 });
+            expect(frame).to.include({ seq_no: 1, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0 });
             const pid = envelope(mock).topology!.identities!.find(identity => identity.worker_id === workerId)!.pid;
             expect(message).to.contain(`PID ${pid}`);
             expect(view(mock, workerId).phase).to.equal('available');

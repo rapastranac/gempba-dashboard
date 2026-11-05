@@ -32,7 +32,7 @@ The builds are not yet code-signed, so the OS will warn the first time:
 
 ### Requirements
 
-- A reachable GemPBA center to connect to (direct TCP, or tunnelled over SSH).
+- A GemPBA run's telemetry to connect to (direct TCP, or tunnelled over SSH).
 - For the SSH-tunnel option, an `ssh` client on `PATH`, built in on macOS, Linux, and Windows 10+.
 
 ## Build from source

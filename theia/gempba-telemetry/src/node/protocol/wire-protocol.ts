@@ -1,17 +1,29 @@
 /**
  * The gempba telemetry wire contract: one {@link BroadcastEnvelope} per newline-terminated JSON line,
- * and {@link ControlLine}s written back on the same socket. Field names stay snake_case as on the wire;
- * only the WorldSnapshotMapper translates them into the camelCase read-model. Parsing mirrors the
+ * and {@link ControlLine}s written back on the same socket. Schemas 1 (gempba up to v4.2.0) and 2 (v4.3.0) read alike;
+ * gempba documents both in its `docs/telemetry/wire-format.md`. Schema 2 adds the run's id, setup, pause and end, each
+ * rank's role and the time accounting, and renames keys: a process is a rank (`ranks`, `rank`, `sentinel_rank`,
+ * `rank_local_ms`), idle time is per thread, `tasks_local_total` is `tasks_started_total`, and the role and counters
+ * once called center are the coordinator's. Each key is read by its v4.3.0 name first, then by its older one, which
+ * schema 1 and builds from before the rename send; fields that schema 1 already had keep its names. Field names stay
+ * snake_case as on the wire; only the WorldSnapshotMapper translates them into the camelCase read-model. Parsing mirrors the
  * Java/Jackson contract: unknown fields are ignored, missing numbers read as 0, and missing objects or
  * lists stay undefined (a missing topology node `sockets` means something different from an empty one).
  */
 
 export interface BroadcastEnvelope {
     readonly version: number;
+    /** A UUID v4 drawn once per run; schema 2. */
+    readonly run_id?: string;
     /** Epoch millis. */
     readonly ts: number;
     readonly elapsed_seconds: number;
+    /** Whether telemetry is paused. A paused line carries only this header; a full line sent while paused says so too. Schema 2. */
+    readonly paused?: boolean;
+    /** True only on the line rank 0, the aggregator, sends at shutdown, with the run's totals, before it closes; schema 2. */
+    readonly final?: boolean;
     readonly topology?: Topology;
+    /** Every rank's frame, whatever its role: `ranks`, or `workers` before the rename. */
     readonly workers?: readonly WorkerFrame[];
     readonly nodes?: readonly NodeFrame[];
 }
@@ -19,6 +31,26 @@ export interface BroadcastEnvelope {
 export interface Topology {
     readonly nodes?: readonly TopologyNode[];
     readonly identities?: readonly WorkerIdentity[];
+    /** The run's setup; schema 2. */
+    readonly run?: TopologyRun;
+}
+
+export interface TopologyRun {
+    readonly scheduler?: string;
+    readonly load_balancer?: string;
+    readonly runtime_mode?: string;
+    readonly world_size: number;
+    readonly threads_per_process: number;
+    readonly gempba_version?: string;
+    /** In the order their keys were first set. */
+    readonly annotations?: ReadonlyArray<readonly [string, string]>;
+    readonly markers?: readonly RunMarkerFrame[];
+}
+
+export interface RunMarkerFrame {
+    readonly elapsed_ms: number;
+    readonly label?: string;
+    readonly source?: string;
 }
 
 export interface TopologyNode {
@@ -48,6 +80,8 @@ export interface WorkerIdentity {
     readonly hostname?: string;
     readonly pid: number;
     readonly primary_socket: number;
+    /** The scheduler's declared role, `coordinator` or `worker` (`center` before the rename); schema 2. */
+    readonly role?: string;
     /** Plain CPU indices (not a bitmask, so not capped at 64); missing or empty means unrestricted. */
     readonly allowed_cpu_ids?: readonly number[];
 }
@@ -57,14 +91,39 @@ export interface WorkerFrame {
     readonly worker_id: number;
     readonly seq_no: number;
     readonly worker_local_ms: number;
-    readonly tasks_local_total: number;
+    /** Subtrees handed to a pool thread, received ones included, counted at hand-off; schema 1 calls it `tasks_local_total`. */
+    readonly tasks_started_total: number;
     readonly tasks_sent_total: number;
     readonly tasks_recv_total: number;
+    // the counters below are schema 2's, and read 0 from a schema-1 line
+    readonly bytes_sent_total?: number;
+    readonly bytes_recv_total?: number;
+    readonly send_microseconds_total?: number;
+    readonly recv_microseconds_total?: number;
+    readonly spawn_rejected_pool_full?: number;
+    readonly spawn_remote_rejected?: number;
+    readonly idle_microseconds_starved?: number;
+    readonly idle_microseconds_imbalanced?: number;
+    readonly sched_running_microseconds?: number;
+    readonly sched_waiting_microseconds?: number;
+    readonly first_task_ms?: number;
+    readonly last_task_ms?: number;
+    readonly assign_latency_microseconds_total?: number;
+    readonly assign_count?: number;
+    readonly assign_latency_microseconds_max?: number;
+    readonly available_microseconds_queue_empty?: number;
+    readonly coordinator_state_msgs_total?: number;
+    readonly coordinator_score_proposals_total?: number;
+    readonly coordinator_score_broadcasts_total?: number;
+    readonly score_proposals_sent?: number;
+    readonly last_score_improvement_ms?: number;
+    readonly coordinator_full_microseconds?: number;
+    readonly telemetry_microseconds_total?: number;
     /** Tasks executing in the local pool right now (bounded by pool size). */
     readonly tasks_running: number;
     /** IPC scheduler queue depth; a different layer from tasks_running. */
     readonly scheduler_pending_count: number;
-    /** Cumulative idle time, already averaged across the pool's threads. */
+    /** Cumulative idle time, already averaged across the pool's threads: `idle_microseconds_per_thread` since the rename. */
     readonly idle_microseconds_per_worker: number;
     /** Percent of one core: 400 means four cores pegged. */
     readonly process_cpu_pct: number;
@@ -94,7 +153,9 @@ export interface NodeFrame {
     /** Job memory-cgroup limit; 0 when unlimited. */
     readonly cgroup_mem_limit_bytes: number;
     readonly sockets?: readonly SocketStats[];
+    /** Schema 1 only, and always zero. */
     readonly net_aggregate?: NetStats;
+    /** Schema 1 only, and always zero. */
     readonly disk_aggregate?: DiskStats;
 }
 
@@ -135,6 +196,10 @@ function str(value: unknown): string | undefined {
     return typeof value === 'string' ? value : undefined;
 }
 
+function bool(value: unknown): boolean | undefined {
+    return typeof value === 'boolean' ? value : undefined;
+}
+
 function nested<T>(value: unknown, read: (value: unknown) => T): T | undefined {
     return isObject(value) ? read(value) : undefined;
 }
@@ -158,10 +223,13 @@ export namespace BroadcastEnvelope {
         const json = objectOf(value);
         return {
             version: num(json.version),
+            run_id: str(json.run_id),
             ts: num(json.ts),
             elapsed_seconds: num(json.elapsed_seconds),
+            paused: bool(json.paused),
+            final: bool(json.final),
             topology: nested(json.topology, Topology.fromJson),
-            workers: list(json.workers, WorkerFrame.fromJson),
+            workers: list(json.ranks ?? json.workers, WorkerFrame.fromJson),
             nodes: list(json.nodes, NodeFrame.fromJson)
         };
     }
@@ -170,7 +238,37 @@ export namespace BroadcastEnvelope {
 export namespace Topology {
     export function fromJson(value: unknown): Topology {
         const json = objectOf(value);
-        return { nodes: list(json.nodes, TopologyNode.fromJson), identities: list(json.identities, WorkerIdentity.fromJson) };
+        return {
+            nodes: list(json.nodes, TopologyNode.fromJson),
+            identities: list(json.identities, WorkerIdentity.fromJson),
+            run: nested(json.run, TopologyRun.fromJson)
+        };
+    }
+}
+
+export namespace TopologyRun {
+    export function fromJson(value: unknown): TopologyRun {
+        const json = objectOf(value);
+        const annotations = isObject(json.annotations)
+            ? Object.entries(json.annotations).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+            : undefined;
+        return {
+            scheduler: str(json.scheduler),
+            load_balancer: str(json.load_balancer),
+            runtime_mode: str(json.runtime_mode),
+            world_size: num(json.world_size),
+            threads_per_process: num(json.threads_per_process),
+            gempba_version: str(json.gempba_version),
+            annotations,
+            markers: list(json.markers, RunMarkerFrame.fromJson)
+        };
+    }
+}
+
+export namespace RunMarkerFrame {
+    export function fromJson(value: unknown): RunMarkerFrame {
+        const json = objectOf(value);
+        return { elapsed_ms: num(json.elapsed_ms), label: str(json.label), source: str(json.source) };
     }
 }
 
@@ -179,11 +277,11 @@ export namespace TopologyNode {
         const json = objectOf(value);
         return {
             hostname: str(json.hostname),
-            sentinel_worker_id: num(json.sentinel_worker_id),
+            sentinel_worker_id: num(json.sentinel_rank ?? json.sentinel_worker_id),
             total_physical_cores: num(json.total_physical_cores),
             total_logical_cores: num(json.total_logical_cores),
             mem_total_bytes: num(json.mem_total_bytes),
-            worker_ids: list(json.worker_ids, num),
+            worker_ids: list(json.ranks ?? json.worker_ids, num),
             sockets: list(json.sockets, TopologySocket.fromJson)
         };
     }
@@ -206,10 +304,11 @@ export namespace WorkerIdentity {
     export function fromJson(value: unknown): WorkerIdentity {
         const json = objectOf(value);
         return {
-            worker_id: num(json.worker_id),
+            worker_id: num(json.rank ?? json.worker_id),
             hostname: str(json.hostname),
             pid: num(json.pid),
             primary_socket: num(json.primary_socket),
+            role: str(json.role),
             allowed_cpu_ids: list(json.allowed_cpu_ids, num)
         };
     }
@@ -219,15 +318,38 @@ export namespace WorkerFrame {
     export function fromJson(value: unknown): WorkerFrame {
         const json = objectOf(value);
         return {
-            worker_id: num(json.worker_id),
+            worker_id: num(json.rank ?? json.worker_id),
             seq_no: num(json.seq_no),
-            worker_local_ms: num(json.worker_local_ms),
-            tasks_local_total: num(json.tasks_local_total),
+            worker_local_ms: num(json.rank_local_ms ?? json.worker_local_ms),
+            tasks_started_total: num(json.tasks_started_total ?? json.tasks_local_total),
             tasks_sent_total: num(json.tasks_sent_total),
             tasks_recv_total: num(json.tasks_recv_total),
+            bytes_sent_total: num(json.bytes_sent_total),
+            bytes_recv_total: num(json.bytes_recv_total),
+            send_microseconds_total: num(json.send_microseconds_total),
+            recv_microseconds_total: num(json.recv_microseconds_total),
+            spawn_rejected_pool_full: num(json.spawn_rejected_pool_full),
+            spawn_remote_rejected: num(json.spawn_remote_rejected),
+            idle_microseconds_starved: num(json.idle_microseconds_starved),
+            idle_microseconds_imbalanced: num(json.idle_microseconds_imbalanced),
+            sched_running_microseconds: num(json.sched_running_microseconds),
+            sched_waiting_microseconds: num(json.sched_waiting_microseconds),
+            first_task_ms: num(json.first_task_ms),
+            last_task_ms: num(json.last_task_ms),
+            assign_latency_microseconds_total: num(json.assign_latency_microseconds_total),
+            assign_count: num(json.assign_count),
+            assign_latency_microseconds_max: num(json.assign_latency_microseconds_max),
+            available_microseconds_queue_empty: num(json.available_microseconds_queue_empty),
+            coordinator_state_msgs_total: num(json.coordinator_state_msgs_total ?? json.center_state_msgs_total),
+            coordinator_score_proposals_total: num(json.coordinator_score_proposals_total ?? json.center_score_proposals_total),
+            coordinator_score_broadcasts_total: num(json.coordinator_score_broadcasts_total ?? json.center_score_broadcasts_total),
+            score_proposals_sent: num(json.score_proposals_sent),
+            last_score_improvement_ms: num(json.last_score_improvement_ms),
+            coordinator_full_microseconds: num(json.coordinator_full_microseconds ?? json.center_full_microseconds),
+            telemetry_microseconds_total: num(json.telemetry_microseconds_total),
             tasks_running: num(json.tasks_running),
             scheduler_pending_count: num(json.scheduler_pending_count),
-            idle_microseconds_per_worker: num(json.idle_microseconds_per_worker),
+            idle_microseconds_per_worker: num(json.idle_microseconds_per_thread ?? json.idle_microseconds_per_worker),
             process_cpu_pct: num(json.process_cpu_pct),
             process_rss_bytes: num(json.process_rss_bytes),
             process_threads: num(json.process_threads),
@@ -247,7 +369,7 @@ export namespace NodeFrame {
     export function fromJson(value: unknown): NodeFrame {
         const json = objectOf(value);
         return {
-            sentinel_worker_id: num(json.sentinel_worker_id),
+            sentinel_worker_id: num(json.sentinel_rank ?? json.sentinel_worker_id),
             sentinel_local_ms: num(json.sentinel_local_ms),
             hostname: str(json.hostname),
             socket_count: num(json.socket_count),

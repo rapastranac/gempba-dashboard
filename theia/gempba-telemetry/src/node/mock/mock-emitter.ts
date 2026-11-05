@@ -13,7 +13,7 @@ export interface MockEmitterOptions {
 }
 
 /**
- * A stand-in gempba center for tests: replays a recording to every client, one frame per
+ * A stand-in for a gempba run's telemetry stream, for tests: replays a recording to every client, one frame per
  * worker interval, looping at the end. Like gempba it stamps the current time, keeps node frames only on
  * node ticks, and applies control lines clamped to the server's bounds.
  */

@@ -9,7 +9,7 @@ const GiB = 1024 ** 3;
 function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
     return {
         workerId: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
-        tasksLocalTotal: 12_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 0,
+        tasksStartedTotal: 12_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 0,
         cpuPct: 300, rssBytes: 256 * 1024 ** 2, threads: 5, elapsedSeconds: 100, peers: [], ...overrides
     };
 }
@@ -166,11 +166,11 @@ describe('CardsPanel', () => {
             expect(pool).to.deep.equal({ title: 'Thread pool', rows: [{ label: 'Running', fraction: 0.75, valueText: '3 of 4 threads', tone: 'tasks' }] });
         });
 
-        it('shows a queue only where gempba reports one: at the centralized center', () => {
+        it('shows a queue only where gempba reports one: at the centralized coordinator', () => {
             expect(CardsPanel.forWorker(undefined, socket(), worker({ schedulerPendingCount: 0 }), histories()).heroes.map(hero => hero.label))
                 .to.not.include('Queued');
-            const center = CardsPanel.forWorker(undefined, socket(), worker({ workerId: 0, schedulerPendingCount: 1200 }), histories());
-            expect(center.heroes[3]).to.deep.equal({ label: 'Queued', value: '1,200', unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
+            const coordinator = CardsPanel.forWorker(undefined, socket(), worker({ workerId: 0, schedulerPendingCount: 1200 }), histories());
+            expect(coordinator.heroes[3]).to.deep.equal({ label: 'Queued', value: '1,200', unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
         });
 
         it('totals what no figure shows: tasks started, sent and received with their run averages, and the pool\'s idle time', () => {
@@ -183,21 +183,21 @@ describe('CardsPanel', () => {
             ]);
         });
 
-        it('shows the center as the center: no tasks started, idle time or pool; its CPU, memory, and the tasks it sent and received', () => {
-            const center = worker({ workerId: 0, tasksLocalTotal: 0, tasksSentTotal: 1, schedulerPendingCount: 0 });
-            const shared = socket({ workers: [center, worker()] });
-            const panel = CardsPanel.forWorker(world(node({ sockets: [shared] })), shared, center, histories());
-            expect([panel.title, panel.subtitle]).to.deep.equal(['Worker 0 · center', 'schedules the run, runs no tasks · PID 4100 · frame #17 · on alpha']);
+        it('shows the coordinator as the coordinator: no tasks started, idle time or pool; its CPU, memory, and the tasks it sent and received', () => {
+            const coordinator = worker({ workerId: 0, tasksStartedTotal: 0, tasksSentTotal: 1, schedulerPendingCount: 0 });
+            const shared = socket({ workers: [coordinator, worker()] });
+            const panel = CardsPanel.forWorker(world(node({ sockets: [shared] })), shared, coordinator, histories());
+            expect([panel.title, panel.subtitle]).to.deep.equal(['Worker 0 · coordinator', 'schedules the run, runs no tasks · PID 4100 · frame #17 · on alpha']);
             expect(panel.heroes.map(hero => hero.label)).to.deep.equal(['Memory']);
             expect(panel.charts.map(chart => chart.title)).to.deep.equal(['CPU']);
             expect(panel.bars).to.deep.equal([]);
             expect(panel.totals.map(total => [total.label, total.value])).to.deep.equal([['Tasks sent', '1 · 0.60 tasks/min on average'], ['Tasks received', '0']]);
         });
 
-        it('marks the center among the workers of a socket', () => {
+        it('marks the coordinator among the workers of a socket', () => {
             const shared = socket({ workers: [worker({ workerId: 0 }), worker()] });
             const labels = CardsPanel.forSocket(world(node({ sockets: [shared] })), node({ sockets: [shared] }), shared).bars[0].rows.map(row => row.label);
-            expect(labels).to.deep.equal(['Worker 0 · center', 'Worker 3']);
+            expect(labels).to.deep.equal(['Worker 0 · coordinator', 'Worker 3']);
         });
 
         it('never meters more tasks running than threads', () => {

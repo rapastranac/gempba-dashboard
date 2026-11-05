@@ -7,7 +7,7 @@ const GiB = 1024 ** 3;
 function worker(overrides: Partial<WorkerSnapshot> = {}): WorkerSnapshot {
     return {
         workerId: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
-        tasksLocalTotal: 12450, tasksRunning: 1, tasksSentTotal: 619, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 238,
+        tasksStartedTotal: 12450, tasksRunning: 1, tasksSentTotal: 619, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerWorker: 238,
         cpuPct: 87.3, rssBytes: 256 * 1024 ** 2, threads: 12, elapsedSeconds: 100,
         peers: [{ peerWorkerId: 1, bytes: 4096, count: 3 }], ...overrides
     };
@@ -36,7 +36,7 @@ describe('CardsText', () => {
         expect(CardsText.socketCaption(socket({ workers: [worker()] }))).to.equal('1 worker');
         expect(CardsText.workerTitle(worker())).to.equal('Worker 3');
         expect(CardsText.workerTitle(worker({ workerId: 0, sentinel: true }))).to.equal('Worker 0 · sentinel');
-        expect(CardsText.workerTitle(worker({ workerId: 0, sentinel: true }), true)).to.equal('Worker 0 · center · sentinel');
+        expect(CardsText.workerTitle(worker({ workerId: 0, sentinel: true }), true)).to.equal('Worker 0 · coordinator · sentinel');
         expect(CardsText.workerCaption(worker(), 4)).to.equal('22% CPU · 256.0 MB');
     });
 

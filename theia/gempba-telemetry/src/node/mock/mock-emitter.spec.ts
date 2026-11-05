@@ -8,7 +8,7 @@ function frame(seq: number): BroadcastEnvelope {
     return {
         version: 1, ts: 0, elapsed_seconds: seq,
         workers: [{
-            worker_id: 0, seq_no: seq, worker_local_ms: 0, tasks_local_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
+            worker_id: 0, seq_no: seq, worker_local_ms: 0, tasks_started_total: 0, tasks_sent_total: 0, tasks_recv_total: 0,
             tasks_running: 0, scheduler_pending_count: 0, idle_microseconds_per_worker: 0, process_cpu_pct: 0,
             process_rss_bytes: 0, process_threads: 1, edges_out: []
         }],

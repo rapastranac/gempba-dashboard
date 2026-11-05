@@ -152,15 +152,15 @@ export namespace GridTiles {
         };
     }
 
-    /** How much of their pools' time the workers wait for work now, on average, the center left out; a dash before any reading. */
+    /** How much of their pools' time the workers wait for work now, on average, the coordinator left out; a dash before any reading. */
     function idleFigure(snapshot: WorldSnapshot, workerIds: readonly number[], sources: Sources): GridFigure {
-        const readings = workerIds.filter(id => !WorldSnapshot.isCenter(snapshot, id)).map(id => latest(sources.worker(id).idlePct))
+        const readings = workerIds.filter(id => !WorldSnapshot.isCoordinator(snapshot, id)).map(id => latest(sources.worker(id).idlePct))
             .filter((reading): reading is number => reading !== undefined);
         const mean = readings.length > 0 ? readings.reduce((sum, reading) => sum + reading, 0) / readings.length : undefined;
         return {
             label: 'Idle', value: mean === undefined ? '—' : NumberText.fixed(mean, 0), unit: mean === undefined ? undefined : '%', detail: 'of pool time',
             tone: 'idle',
-            hint: 'How much of the time in their pools the workers spend waiting for work, on average, now; the center, which runs no tasks, is left out. '
+            hint: 'How much of the time in their pools the workers spend waiting for work, on average, now; the coordinator, which runs no tasks, is left out. '
                 + 'Waiting on other processes, or on the network, shows here.'
         };
     }

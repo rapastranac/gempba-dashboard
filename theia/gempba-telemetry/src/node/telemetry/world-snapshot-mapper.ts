@@ -1,5 +1,7 @@
-import { CoreUsageSnapshot, NodeSnapshot, NodeUtilization, SocketSnapshot, StructureKey, WorkerSnapshot, WorldSnapshot } from '@gempba/core';
-import { BroadcastEnvelope, NodeFrame, TopologyNode, TopologySocket, WorkerFrame, WorkerIdentity } from '../protocol/wire-protocol';
+import {
+    CoreUsageSnapshot, NodeSnapshot, NodeUtilization, RunSetup, SocketSnapshot, StructureKey, WorkerAccounting, WorkerRole, WorkerSnapshot, WorldSnapshot
+} from '@gempba/core';
+import { BroadcastEnvelope, NodeFrame, TopologyNode, TopologyRun, TopologySocket, WorkerFrame, WorkerIdentity } from '../protocol/wire-protocol';
 
 /**
  * The one place wire types meet the read-model: a pure BroadcastEnvelope → WorldSnapshot mapping.
@@ -9,6 +11,9 @@ export namespace WorldSnapshotMapper {
 
     /** Host bucket for workers with no identity or topology mapping. */
     export const UNKNOWN_HOST = '(unknown host)';
+
+    /** The first schema with the run's id and setup, each rank's role and the time accounting. */
+    export const SCHEMA_WITH_ACCOUNTING = 2;
 
     export function toWorldSnapshot(envelope: BroadcastEnvelope | undefined): WorldSnapshot {
         if (!envelope) {
@@ -40,7 +45,7 @@ export namespace WorldSnapshotMapper {
             }
 
             getOrCreate(getOrCreate(workersByHostBySocket, host, () => new Map()), socketId, () => [])
-                .push(toWorkerSnapshot(frame, sentinel, identity, envelope.elapsed_seconds));
+                .push(toWorkerSnapshot(frame, sentinel, identity, envelope.elapsed_seconds, envelope.version >= SCHEMA_WITH_ACCOUNTING));
             getOrCreate(getOrCreate(framesByHostBySocket, host, () => new Map()), socketId, () => new Map())
                 .set(workerId, frame);
             if (identity) {
@@ -68,7 +73,60 @@ export namespace WorldSnapshotMapper {
             timestampMillis: envelope.ts,
             elapsedSeconds: envelope.elapsed_seconds,
             nodes,
-            structure: StructureKey.of(structure)
+            structure: StructureKey.of(structure),
+            runId: envelope.run_id,
+            run: envelope.topology?.run && toRunSetup(envelope.topology.run),
+            paused: envelope.paused === true,
+            final: envelope.final === true
+        };
+    }
+
+    function toRunSetup(run: TopologyRun): RunSetup {
+        return {
+            scheduler: run.scheduler,
+            loadBalancer: run.load_balancer,
+            runtimeMode: run.runtime_mode,
+            worldSize: run.world_size,
+            threadsPerProcess: run.threads_per_process,
+            gempbaVersion: run.gempba_version,
+            annotations: run.annotations ?? [],
+            markers: (run.markers ?? []).map(marker => ({ elapsedMs: marker.elapsed_ms, label: marker.label ?? '', source: marker.source ?? '' }))
+        };
+    }
+
+    /** Builds from before gempba's v4.3.0 renames call the coordinator `center`. */
+    function toRole(role: string | undefined): WorkerRole | undefined {
+        if (role === 'coordinator' || role === 'center') {
+            return 'coordinator';
+        }
+        return role === 'worker' ? role : undefined;
+    }
+
+    function toAccounting(frame: WorkerFrame): WorkerAccounting {
+        return {
+            bytesSentTotal: frame.bytes_sent_total ?? 0,
+            bytesRecvTotal: frame.bytes_recv_total ?? 0,
+            sendMicrosTotal: frame.send_microseconds_total ?? 0,
+            recvMicrosTotal: frame.recv_microseconds_total ?? 0,
+            spawnRejectedPoolFull: frame.spawn_rejected_pool_full ?? 0,
+            spawnRemoteRejected: frame.spawn_remote_rejected ?? 0,
+            idleMicrosStarved: frame.idle_microseconds_starved ?? 0,
+            idleMicrosImbalanced: frame.idle_microseconds_imbalanced ?? 0,
+            schedRunningMicros: frame.sched_running_microseconds ?? 0,
+            schedWaitingMicros: frame.sched_waiting_microseconds ?? 0,
+            firstTaskMs: frame.first_task_ms ?? 0,
+            lastTaskMs: frame.last_task_ms ?? 0,
+            assignLatencyMicrosTotal: frame.assign_latency_microseconds_total ?? 0,
+            assignCount: frame.assign_count ?? 0,
+            assignLatencyMicrosMax: frame.assign_latency_microseconds_max ?? 0,
+            availableMicrosQueueEmpty: frame.available_microseconds_queue_empty ?? 0,
+            coordinatorStateMsgsTotal: frame.coordinator_state_msgs_total ?? 0,
+            coordinatorScoreProposalsTotal: frame.coordinator_score_proposals_total ?? 0,
+            coordinatorScoreBroadcastsTotal: frame.coordinator_score_broadcasts_total ?? 0,
+            coordinatorFullMicros: frame.coordinator_full_microseconds ?? 0,
+            scoreProposalsSent: frame.score_proposals_sent ?? 0,
+            lastScoreImprovementMs: frame.last_score_improvement_ms ?? 0,
+            telemetryMicrosTotal: frame.telemetry_microseconds_total ?? 0
         };
     }
 
@@ -109,15 +167,18 @@ export namespace WorldSnapshotMapper {
         return { socketByWorkerId, identityByWorkerId };
     }
 
-    function toWorkerSnapshot(frame: WorkerFrame, sentinel: boolean, identity: WorkerIdentity | undefined, elapsedSeconds: number): WorkerSnapshot {
+    function toWorkerSnapshot(
+        frame: WorkerFrame, sentinel: boolean, identity: WorkerIdentity | undefined, elapsedSeconds: number, accounted: boolean
+    ): WorkerSnapshot {
         return {
             workerId: frame.worker_id,
             seqNo: frame.seq_no,
             localMillis: frame.worker_local_ms,
             pid: identity?.pid ?? 0,
             sentinel,
+            role: toRole(identity?.role),
             allowedCpuIds: identity?.allowed_cpu_ids ?? [],
-            tasksLocalTotal: frame.tasks_local_total,
+            tasksStartedTotal: frame.tasks_started_total,
             tasksRunning: frame.tasks_running,
             tasksSentTotal: frame.tasks_sent_total,
             tasksRecvTotal: frame.tasks_recv_total,
@@ -127,7 +188,8 @@ export namespace WorldSnapshotMapper {
             rssBytes: frame.process_rss_bytes,
             threads: frame.process_threads,
             elapsedSeconds,
-            peers: (frame.edges_out ?? []).map(edge => ({ peerWorkerId: edge.to, bytes: edge.bytes, count: edge.count }))
+            peers: (frame.edges_out ?? []).map(edge => ({ peerWorkerId: edge.to, bytes: edge.bytes, count: edge.count })),
+            accounting: accounted ? toAccounting(frame) : undefined
         };
     }
 

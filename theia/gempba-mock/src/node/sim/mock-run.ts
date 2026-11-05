@@ -470,7 +470,7 @@ export class MockRun {
             worker_id: worker.place.workerId,
             seq_no: worker.seqNo,
             worker_local_ms: this.nodes[worker.place.nodeIndex].clockBaseMs + this.time,
-            tasks_local_total: worker.tasksLocal,
+            tasks_started_total: worker.tasksLocal,
             tasks_sent_total: worker.sent,
             tasks_recv_total: worker.recv,
             tasks_running: worker.running,
