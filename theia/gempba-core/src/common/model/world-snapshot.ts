@@ -34,6 +34,9 @@ export namespace WorldSnapshot {
     /** Telemetry schema 1's two schedulers always put their coordinator on rank 0. */
     export const SCHEMA_1_COORDINATOR_ID = 0;
 
+    /** Telemetry's aggregator, which collects every rank's frames and serves the stream, in every run and whatever the scheduler. */
+    export const AGGREGATOR_RANK = 0;
+
     /** The first telemetry schema whose ranks declare their scheduler role. */
     export const SCHEMA_WITH_ROLES = 2;
 

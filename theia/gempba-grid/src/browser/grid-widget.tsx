@@ -105,7 +105,12 @@ export class GridWidget extends ReactWidget {
     protected renderOverview(overview: GridOverview): React.ReactNode {
         return <section className='gempba-grid-overview' aria-label='Cluster'>
             <header className='gempba-grid-overview-header'>
-                <span className='gempba-grid-overview-summary'>{overview.summary}</span>
+                <div className='gempba-grid-overview-heading'>
+                    <span className='gempba-grid-overview-summary'>{overview.summary}</span>
+                    {overview.setup && <span className='gempba-grid-overview-setup' title={overview.setup.details.join('\n') || undefined}>
+                        {overview.setup.text}
+                    </span>}
+                </div>
                 <LiveIndicator liveness={overview.liveness} />
             </header>
             <div className='gempba-grid-overview-body'>

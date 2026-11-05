@@ -1,6 +1,6 @@
 import {
-    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, SocketSnapshot, TaskWords, RankHistoryStore,
-    RankSeries, RankSnapshot, WorldSnapshot
+    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, RankAccounting, RankHistoryStore, RankSeries,
+    RankSnapshot, RankWork, Rates, SocketSnapshot, TaskWords, WorldSnapshot
 } from '@gempba/core';
 import { Trend } from '@gempba/ui/lib/common/trend';
 import { CardsText } from './cards-text';
@@ -162,7 +162,7 @@ export namespace CardsPanel {
                     const accessible = accessibleCores(rank, socket);
                     const fraction = rank.cpuPct / (100 * accessible);
                     return {
-                        label: CardsText.rankTitle(rank, WorldSnapshot.isCoordinator(world, rank.id)), fraction, tone: 'cpu',
+                        label: CardsText.rankTitle(rank, world), fraction, tone: 'cpu',
                         valueText: `${NumberText.fixed(fraction * 100, 0)}% of ${plural(accessible, 'core')}`
                     };
                 })
@@ -176,30 +176,32 @@ export namespace CardsPanel {
         const accessible = accessibleCores(rank, socket);
         const idle = latest(series.idlePct);
         const host = world?.nodes.find(node => node.sockets.some(each => each.ranks.some(other => other.id === rank.id)))?.host;
-        const coordinator = WorldSnapshot.isCoordinator(world, rank.id);
+        // a rank shows what it does, told by its own numbers: tasks where it runs them, the queue and assignments where it coordinates
+        const work = RankWork.of(world, rank);
         // gempba's process has one thread beyond its pool, which runs the tasks; a source that counts differently never shows more running than threads
         const pool = Math.max(rank.threads - 1, rank.tasksRunning, 1);
         const memory: Hero = { label: 'Memory', ...bytesValue(rank.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' };
-        // the coordinator schedules the run and runs no tasks, so it has no task rate, idle time or pool to show
-        const heroes: Hero[] = coordinator ? [memory] : [
-            {
-                label: TaskWords.STARTED, ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks',
-                detail: runAverage([rank]), hint: TaskWords.STARTED_HINT
-            },
-            {
-                label: 'Idle', value: idle === undefined ? '—' : NumberText.fixed(idle, 0), unit: idle === undefined ? undefined : '%',
-                trend: Trend.of(series.idlePct), tone: 'idle'
-            },
+        const heroes: Hero[] = [
+            ...(work.runsTasks ? [
+                {
+                    label: TaskWords.STARTED, ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks' as const,
+                    detail: runAverage([rank]), hint: TaskWords.STARTED_HINT
+                },
+                {
+                    label: 'Idle', value: idle === undefined ? '—' : NumberText.fixed(idle, 0), unit: idle === undefined ? undefined : '%',
+                    trend: Trend.of(series.idlePct), tone: 'idle' as const
+                }
+            ] : []),
             memory
         ];
         // only gempba's centralized coordinator queues tasks, for the workers that run out
         if (rank.schedulerPendingCount > 0) {
             heroes.push({ label: 'Queued', value: NumberText.grouped(rank.schedulerPendingCount), unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
         }
-        const bars: Bars[] = coordinator ? [] : [{
+        const bars: Bars[] = work.runsTasks ? [{
             title: 'Thread pool',
             rows: [{ label: 'Running', fraction: rank.tasksRunning / pool, valueText: `${rank.tasksRunning} of ${plural(pool, 'thread')}`, tone: 'tasks' }]
-        }];
+        }] : [];
         const peers = CardsText.peerRows(rank, world).slice(0, TOP_PEERS);
         if (peers.length > 0) {
             const busiest = Math.max(...rank.peers.map(peer => peer.count), 1);
@@ -217,32 +219,31 @@ export namespace CardsPanel {
             title: 'CPU', latest: `${NumberText.fixed(rank.cpuPct / accessible, 0)}% of ${plural(accessible, 'core')}`, values: series.cpu.map(pct => pct / accessible),
             max: 100, capacity: RankHistoryStore.CAPACITY, tone: 'cpu'
         };
-        const moved: Total[] = [
-            { label: TaskWords.SENT, value: Rates.countWithRate(rank.tasksSentTotal, rank.elapsedSeconds), hint: TaskWords.SENT_HINT },
-            { label: TaskWords.RECEIVED, value: Rates.countWithRate(rank.tasksRecvTotal, rank.elapsedSeconds), hint: TaskWords.RECEIVED_HINT }
-        ];
         return {
-            title: CardsText.rankTitle(rank, coordinator),
-            subtitle: [...(coordinator ? ['schedules the run, runs no tasks'] : []), CardsText.rankSubtitle(host ?? '—', rank)].join(' · '),
+            title: CardsText.rankTitle(rank, world),
+            subtitle: [...(work.coordinates && !work.runsTasks ? ['schedules the run, runs no tasks'] : []), CardsText.rankSubtitle(host ?? '—', rank)].join(' · '),
             gauge: {
                 label: `CPU on ${plural(accessible, 'core')}`, fraction: rank.cpuPct / (100 * accessible), tone: 'cpu',
                 valueText: `${NumberText.fixed(rank.cpuPct / accessible, 0)}%`
             },
             heroes,
-            charts: coordinator ? [cpu] : [
+            charts: work.runsTasks ? [
                 rateChart(series.tasksPerSecond),
                 {
                     title: 'Idle', latest: idle === undefined ? '—' : `${NumberText.fixed(idle, 0)}%`, values: series.idlePct, max: 100,
                     capacity: RankHistoryStore.CAPACITY, tone: 'idle'
                 },
                 cpu
-            ],
+            ] : [cpu],
             strips: [],
             bars,
-            totals: coordinator ? moved : [
-                { label: TaskWords.STARTED, value: Rates.countWithRate(rank.tasksStartedTotal, rank.elapsedSeconds), hint: TaskWords.STARTED_HINT },
-                ...moved,
-                { label: 'Pool idle', value: `${Durations.format(rank.idleMicrosPerThread)} per thread` }
+            totals: [
+                ...(work.runsTasks ? [{ label: TaskWords.STARTED, value: Rates.countWithRate(rank.tasksStartedTotal, rank.elapsedSeconds), hint: TaskWords.STARTED_HINT }] : []),
+                { label: TaskWords.SENT, value: Rates.countWithRate(rank.tasksSentTotal, rank.elapsedSeconds), hint: TaskWords.SENT_HINT },
+                { label: TaskWords.RECEIVED, value: Rates.countWithRate(rank.tasksRecvTotal, rank.elapsedSeconds), hint: TaskWords.RECEIVED_HINT },
+                ...movingTotals(rank.accounting),
+                ...(work.runsTasks ? taskTotals(rank) : []),
+                ...(work.coordinates ? coordinatorTotals(rank.accounting) : [])
             ]
         };
     }
@@ -280,6 +281,66 @@ export namespace CardsPanel {
             facts.push(range);
         }
         return facts.join(' · ');
+    }
+
+    /** The bytes of the tasks a rank moved and its time in the MPI calls that moved them, which schema 2 counts on every rank. */
+    function movingTotals(accounting: RankAccounting | undefined): Total[] {
+        if (!accounting) {
+            return [];
+        }
+        return [
+            {
+                label: 'Bytes sent', value: `${Bytes.human(accounting.bytesSentTotal)} in ${Durations.format(accounting.sendMicrosTotal)}`,
+                hint: 'The bytes of the tasks this process sent to others, and its time in the MPI calls that sent them: how long it stalled, not '
+                    + 'the network\'s latency.'
+            },
+            {
+                label: 'Bytes received', value: `${Bytes.human(accounting.bytesRecvTotal)} in ${Durations.format(accounting.recvMicrosTotal)}`,
+                hint: 'The bytes of the tasks this process received from others, and its time in the MPI calls that received them.'
+            }
+        ];
+    }
+
+    /** Where the idle time of a rank that runs tasks goes, and how long it waited for work: a scheduler counter, shown once filled. */
+    function taskTotals(rank: RankSnapshot): Total[] {
+        const accounting = rank.accounting;
+        const idle = `${Durations.format(rank.idleMicrosPerThread)} per thread`;
+        if (!accounting) {
+            return [{ label: 'Pool idle', value: idle }];
+        }
+        const totals: Total[] = [{
+            label: 'Pool idle',
+            value: `${idle}: ${Durations.format(accounting.idleMicrosStarved)} starved, ${Durations.format(accounting.idleMicrosImbalanced)} imbalanced`,
+            hint: 'Time each pool thread spent idle, on average: starved while no task ran anywhere in the pool, imbalanced while other threads of '
+                + 'the pool ran tasks.'
+        }];
+        if (accounting.schedWaitingMicros > 0) {
+            totals.push({
+                label: 'Waiting for work', value: Durations.format(accounting.schedWaitingMicros),
+                hint: 'Time this rank waited for a task from its scheduler since the run started.'
+            });
+        }
+        return totals;
+    }
+
+    /** What a coordinator counted: its assignments and the reports it handled, each a scheduler counter, shown once filled. */
+    function coordinatorTotals(accounting: RankAccounting | undefined): Total[] {
+        const totals: Total[] = [];
+        if (accounting && accounting.assignCount > 0) {
+            const mean = Math.round(accounting.assignLatencyMicrosTotal / accounting.assignCount);
+            totals.push({
+                label: 'Assignments',
+                value: `${NumberText.grouped(accounting.assignCount)} · ${Durations.format(mean)} mean, ${Durations.format(accounting.assignLatencyMicrosMax)} max`,
+                hint: 'Ranks this coordinator handed work to, and how long each took to report running.'
+            });
+        }
+        if (accounting && accounting.coordinatorStateMsgsTotal > 0) {
+            totals.push({
+                label: 'Reports handled', value: NumberText.grouped(accounting.coordinatorStateMsgsTotal),
+                hint: 'Running and available reports this coordinator handled from the ranks.'
+            });
+        }
+        return totals;
     }
 
     /** Tasks started per second or per minute, one unit for the whole history: per second once any sample reaches one a second. */

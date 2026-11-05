@@ -1,5 +1,6 @@
 import {
-    Bytes, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, Rates, TaskMoves, TaskWords, RankSeries, WorldSnapshot
+    Bytes, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, RankSeries, RankSnapshot, RankWork, Rates, RunSetupText, TaskMoves, TaskWords,
+    WorldSnapshot
 } from '@gempba/core';
 import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { Trend } from '@gempba/ui/lib/common/trend';
@@ -41,6 +42,8 @@ export interface GridOverview {
     readonly liveness: Liveness;
     /** `4 nodes · 32 ranks`. */
     readonly summary: string;
+    /** How the run is set up, in one line, and its annotations and markers for a tooltip; absent before telemetry schema 2. */
+    readonly setup?: { readonly text: string, readonly details: readonly string[] };
     /** Memory, with a meter, only once a node reports it. */
     readonly figures: readonly GridFigure[];
     /** Tasks completed by every rank, oldest first, in {@link throughputUnit} for the whole history. */
@@ -124,7 +127,7 @@ export namespace GridTiles {
             }
         ];
         if (ranks.length > 1) {
-            figures.push(movedFigure(moves), idleFigure(snapshot, ranks.map(rank => rank.id), sources));
+            figures.push(movedFigure(moves), idleFigure(snapshot, ranks, sources));
         }
         if (memTotal > 0) {
             figures.push(memoryFigure(memUsed, memTotal));
@@ -132,6 +135,7 @@ export namespace GridTiles {
         return {
             liveness: Liveness.of({ ...clock, ...runState(snapshot, sources), lastFrameAt: sources.lastFrameAt() }),
             summary: `${plural(nodes.length, 'node')} · ${plural(ranks.length, 'rank')}`,
+            ...(snapshot.run ? { setup: { text: RunSetupText.line(snapshot.run), details: RunSetupText.details(snapshot.run) } } : {}),
             figures,
             throughput: throughput.map(rate => Rates.inUnit(rate, unit)),
             throughputUnit: unit,
@@ -153,15 +157,15 @@ export namespace GridTiles {
         };
     }
 
-    /** How much of their pools' time the workers wait for work now, on average, the coordinator left out; a dash before any reading. */
-    function idleFigure(snapshot: WorldSnapshot, ids: readonly number[], sources: Sources): GridFigure {
-        const readings = ids.filter(id => !WorldSnapshot.isCoordinator(snapshot, id)).map(id => latest(sources.rank(id).idlePct))
+    /** How much of their pools' time the ranks that run tasks wait for work now, on average; a dash before any reading. */
+    function idleFigure(snapshot: WorldSnapshot, ranks: readonly RankSnapshot[], sources: Sources): GridFigure {
+        const readings = ranks.filter(rank => RankWork.of(snapshot, rank).runsTasks).map(rank => latest(sources.rank(rank.id).idlePct))
             .filter((reading): reading is number => reading !== undefined);
         const mean = readings.length > 0 ? readings.reduce((sum, reading) => sum + reading, 0) / readings.length : undefined;
         return {
             label: 'Idle', value: mean === undefined ? '—' : NumberText.fixed(mean, 0), unit: mean === undefined ? undefined : '%', detail: 'of pool time',
             tone: 'idle',
-            hint: 'How much of the time in their pools the workers spend waiting for work, on average, now; the coordinator, which runs no tasks, is left out. '
+            hint: 'How much of the time in their pools the ranks that run tasks spend waiting for work, on average, now; a coordinator that runs none is left out. '
                 + 'Waiting on other processes, or on the network, shows here.'
         };
     }

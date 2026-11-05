@@ -25,9 +25,19 @@ export namespace CardsText {
         return plural(socket.ranks.length, 'rank');
     }
 
-    /** `Rank 3`, `Rank 3 · sentinel`, or `Rank 0 · coordinator · sentinel`; the view marks the sentinel with a star icon. */
-    export function rankTitle(rank: RankSnapshot, coordinator = false): string {
-        return [`Rank ${rank.id}`, ...(coordinator ? ['coordinator'] : []), ...(rank.sentinel ? ['sentinel'] : [])].join(' · ');
+    /**
+     * `Rank 3`, `Rank 3 · sentinel`, or `Rank 0 · coordinator · aggregator · sentinel`: the coordinator as the scheduler
+     * declares it, the aggregator on rank 0 from telemetry schema 2 on, and the sentinel, which the view marks with a star
+     * icon too. A worker carries no tag, as almost every rank is one.
+     */
+    export function rankTitle(rank: RankSnapshot, world: WorldSnapshot | undefined): string {
+        const aggregator = rank.id === WorldSnapshot.AGGREGATOR_RANK && (world?.schemaVersion ?? 0) >= WorldSnapshot.SCHEMA_WITH_ROLES;
+        return [
+            `Rank ${rank.id}`,
+            ...(WorldSnapshot.isCoordinator(world, rank.id) ? ['coordinator'] : []),
+            ...(aggregator ? ['aggregator'] : []),
+            ...(rank.sentinel ? ['sentinel'] : [])
+        ].join(' · ');
     }
 
     /** The short caption of a rank's tree row, its CPU as a share of the cores it may use, as its meter shows: `22% CPU · 256.0 MB`. */

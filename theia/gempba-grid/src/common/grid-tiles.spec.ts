@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { NodeHistoryStore, NodeSeries, NodeSnapshot, PeerSnapshot, TaskWords, RankSeries, RankSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeHistoryStore, NodeSeries, NodeSnapshot, PeerSnapshot, RankAccounting, RankSeries, RankSnapshot, RunSetup, TaskWords, WorldSnapshot } from '@gempba/core';
 import { GridTiles } from './grid-tiles';
 
 const GiB = 1024 ** 3;
@@ -176,6 +176,29 @@ describe('GridTiles', () => {
             expect(idle).to.include({ value: '20', unit: '%', tone: 'idle' });
             const fresh = GridTiles.overview(SHARED, sources(), CLOCK)!.figures.find(figure => figure.label === 'Idle');
             expect([fresh?.value, fresh?.unit]).to.deep.equal(['—', undefined]);
+        });
+
+        it('averages the ranks that run tasks, by what they count: rank 0 too when the coordinator is another rank', () => {
+            const counted = (id: number, started: number, extra: Partial<RankAccounting>) =>
+                rank({ id, tasksStartedTotal: started, accounting: { ...RankAccounting.none(), ...extra } });
+            const run: WorldSnapshot = {
+                ...world(node('alpha', {}, [counted(0, 900, { schedWaitingMicros: 10 }), counted(1, 800, {}), counted(2, 0, { coordinatorStateMsgsTotal: 40 })])),
+                schemaVersion: 2
+            };
+            const idlePct = new Map([[0, [10]], [1, [30]], [2, [0]]]);
+            const series = (id: number): RankSeries => ({ ...RankSeries.empty(), idlePct: idlePct.get(id) ?? [] });
+            expect(GridTiles.overview(run, sources({ rank: series }), CLOCK)!.figures.find(figure => figure.label === 'Idle')?.value).to.equal('20');
+        });
+
+        it('says how the run is set up, with its annotations and markers for a tooltip, and nothing of it in schema 1', () => {
+            const run: RunSetup = {
+                scheduler: 'centralized', loadBalancer: 'quasi_horizontal', worldSize: 3, threadsPerProcess: 4, gempbaVersion: '4.3.0',
+                annotations: [['instance', 'tsp-100']], markers: []
+            };
+            expect(GridTiles.overview({ ...SHARED, schemaVersion: 2, run }, sources(), CLOCK)!.setup).to.deep.equal({
+                text: 'Centralized · quasi-horizontal · 3 ranks · 4 threads · gempba 4.3.0', details: ['instance: tsp-100']
+            });
+            expect(GridTiles.overview(SHARED, sources(), CLOCK)!.setup).to.equal(undefined);
         });
 
         it('shows nothing about moving work in a run of one process', () => {

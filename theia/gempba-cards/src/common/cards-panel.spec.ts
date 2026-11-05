@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import {
-    NodeHistoryStore, NodeSeries, NodeSnapshot, SocketSnapshot, StructureKey, TaskWords, RankHistoryStore, RankSeries, RankSnapshot, WorldSnapshot
+    NodeHistoryStore, NodeSeries, NodeSnapshot, RankAccounting, RankHistoryStore, RankSeries, RankSnapshot, SchedulerRole, SocketSnapshot, StructureKey, TaskWords,
+    WorldSnapshot
 } from '@gempba/core';
 import { CardsPanel } from './cards-panel';
 
@@ -198,6 +199,64 @@ describe('CardsPanel', () => {
             const shared = socket({ ranks: [rank({ id: 0 }), rank()] });
             const labels = CardsPanel.forSocket(world(node({ sockets: [shared] })), node({ sockets: [shared] }), shared).bars[0].rows.map(row => row.label);
             expect(labels).to.deep.equal(['Rank 0 · coordinator', 'Rank 3']);
+        });
+
+        describe('in schema 2, by what it counts', () => {
+
+            /** A schema-2 rank: its declared role and the counters it filled, the rest at 0. */
+            function counted(role: SchedulerRole, overrides: Partial<RankSnapshot>, accounting: Partial<RankAccounting>): RankSnapshot {
+                return rank({ role, accounting: { ...RankAccounting.none(), bytesSentTotal: 2048, sendMicrosTotal: 1500, ...accounting }, ...overrides });
+            }
+
+            const coordinator = counted('coordinator', { id: 2, tasksStartedTotal: 0, schedulerPendingCount: 5 },
+                { assignCount: 4, assignLatencyMicrosTotal: 2000, assignLatencyMicrosMax: 900, coordinatorStateMsgsTotal: 30 });
+            const worker = counted('worker', { idleMicrosPerThread: 4_500_000, schedulerPendingCount: 0 },
+                { idleMicrosStarved: 3_000_000, idleMicrosImbalanced: 1_500_000, schedRunningMicros: 8_000_000, schedWaitingMicros: 2_000_000 });
+            const panelOf = (subject: RankSnapshot) => {
+                const shared = socket({ ranks: [subject] });
+                return CardsPanel.forRank({ ...world(node({ sockets: [shared] })), schemaVersion: 2 }, shared, subject, histories());
+            };
+            const labels = (items: readonly { label: string }[]) => items.map(item => item.label);
+
+            it('shows a coordinator on any rank its queue, assignments and reports, and no task figures', () => {
+                const panel = panelOf(coordinator);
+                expect(panel.title).to.equal('Rank 2 · coordinator');
+                expect(panel.subtitle).to.match(/^schedules the run, runs no tasks · /);
+                expect([labels(panel.heroes), labels(panel.charts.map(chart => ({ label: chart.title }))), panel.bars]).to.deep.equal([['Memory', 'Queued'], ['CPU'], []]);
+                expect(panel.totals.map(total => [total.label, total.value])).to.deep.equal([
+                    ['Tasks sent', '0'], ['Tasks received', '0'], ['Bytes sent', '2.0 KB in 1.5 ms'], ['Bytes received', '0 B in 0 µs'],
+                    ['Assignments', '4 · 500 µs mean, 900 µs max'], ['Reports handled', '30']
+                ]);
+            });
+
+            it('shows a worker its task figures, where its pool\'s idle time goes and how long it waited for work, and no coordinator counters', () => {
+                const panel = panelOf(worker);
+                expect([panel.title, labels(panel.heroes)]).to.deep.equal(['Rank 3', ['Tasks started', 'Idle', 'Memory']]);
+                expect(labels(panel.totals)).to.deep.equal(['Tasks started', 'Tasks sent', 'Tasks received', 'Bytes sent', 'Bytes received', 'Pool idle', 'Waiting for work']);
+                expect(panel.totals.slice(-2).map(total => total.value)).to.deep.equal(['4.5 s per thread: 3.0 s starved, 1.5 s imbalanced', '2.0 s']);
+            });
+
+            it('shows both on a rank that coordinates and runs tasks', () => {
+                const both = counted('worker', { schedulerPendingCount: 3 }, { schedWaitingMicros: 1000, assignCount: 2, assignLatencyMicrosTotal: 40 });
+                const panel = panelOf(both);
+                expect(labels(panel.heroes)).to.deep.equal(['Tasks started', 'Idle', 'Memory', 'Queued']);
+                expect(labels(panel.totals)).to.include.members(['Pool idle', 'Waiting for work', 'Assignments']);
+                expect(panel.subtitle).to.not.match(/schedules the run/);
+            });
+
+            it('hides a scheduler counter while it is 0', () => {
+                const fresh = counted('worker', {}, { schedRunningMicros: 1, schedWaitingMicros: 0 });
+                expect(labels(panelOf(fresh).totals)).to.not.include('Waiting for work');
+                const unassigned = counted('coordinator', { tasksStartedTotal: 0 }, { coordinatorStateMsgsTotal: 1 });
+                expect(labels(panelOf(unassigned).totals).slice(-1)).to.deep.equal(['Reports handled']);
+            });
+
+            it('shows a rank that has done nothing yet its memory and CPU alone', () => {
+                const panel = panelOf(counted('worker', { tasksStartedTotal: 0, schedulerPendingCount: 0 }, {}));
+                expect([labels(panel.heroes), panel.charts.map(chart => chart.title), panel.bars]).to.deep.equal([['Memory'], ['CPU'], []]);
+                expect(labels(panel.totals)).to.deep.equal(['Tasks sent', 'Tasks received', 'Bytes sent', 'Bytes received']);
+                expect(panel.subtitle).to.not.match(/schedules the run/);
+            });
         });
 
         it('never meters more tasks running than threads', () => {
