@@ -74,17 +74,14 @@ export namespace RememberedSettings {
     }
 
     /**
-     * The rates this view kept before the hub owned them as settings: those changed from their defaults, to move over to
-     * the hub. Once moved, the file holds the defaults again (see {@link withoutRates}), so nothing moves twice; it keeps
-     * the fields, which the Java app also reads.
+     * The rate this view kept before the hub owned it as a setting, to move over to the hub as its refresh rate: the
+     * worker rate, when changed from its default. The node rate has no place now that one rate drives every frame. Once
+     * moved, the file holds the defaults again (see {@link withoutRates}), so nothing moves twice; it keeps the fields,
+     * which the Java app also reads.
      */
-    export function ratesToMove(settings: DashboardSettings): Partial<RefreshRates> {
-        const defaults = RefreshRates.defaults();
-        const rates = RefreshRates.of(settings);
-        return {
-            ...rates.workerIntervalMs !== defaults.workerIntervalMs ? { workerIntervalMs: rates.workerIntervalMs } : {},
-            ...rates.nodeIntervalMs !== defaults.nodeIntervalMs ? { nodeIntervalMs: rates.nodeIntervalMs } : {}
-        };
+    export function rateToMove(settings: DashboardSettings): number | undefined {
+        const rate = RefreshRates.of(settings).workerIntervalMs;
+        return rate !== RefreshRates.defaults().workerIntervalMs ? rate : undefined;
     }
 
     /** The settings with the rates back at their defaults, once moved to the hub. */

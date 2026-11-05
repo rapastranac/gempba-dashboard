@@ -5,12 +5,12 @@ import { Emitter } from '@theia/core/lib/common/event';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import { RefreshInterval } from '@gempba/core';
-import { TelemetryService } from '../common/telemetry-service';
+import { ObservedIntervals, TelemetryService } from '../common/telemetry-service';
 import { LiveTelemetryView } from './live-telemetry-view';
 import { TelemetryMenus } from './telemetry-command-contribution';
 
 /**
- * The refresh rate chip on the tab of every live view: a pulse, the worker rate as set and a chevron. On hover it tells
+ * The refresh rate chip on the tab of every live view: a pulse, the refresh rate as set and a chevron. On hover it tells
  * how often frames arrive, and a click opens the live controls. Views only mark themselves (see LiveTelemetryView).
  */
 @injectable()
@@ -27,7 +27,7 @@ export class RateChipContribution implements TabBarToolbarContribution {
 
     @postConstruct()
     protected init(): void {
-        this.telemetry.onRatesChange(() => this.onDidChangeEmitter.fire());
+        this.telemetry.onIntervalChange(() => this.onDidChangeEmitter.fire());
         this.telemetry.onStateChange(() => this.onDidChangeEmitter.fire());
         this.telemetry.onSnapshot(() => {
             if (this.tooltip() !== this.shownTooltip) {
@@ -59,16 +59,15 @@ export class RateChipContribution implements TabBarToolbarContribution {
                     }
                 }}>
                 <span className={codicon('pulse')} />
-                <span>{RefreshInterval.label(this.telemetry.rates.workerIntervalMs)}</span>
+                <span>{RefreshInterval.label(this.telemetry.intervalMs)}</span>
                 <span className={codicon('chevron-down')} />
             </div>
         </div>;
     }
 
     protected tooltip(): string {
-        const observed = this.telemetry.observedRates.workerIntervalMs;
-        const arriving = observed === undefined ? '' : `, arriving every ${RefreshInterval.label(observed)}`;
-        return `Worker frames every ${RefreshInterval.label(this.telemetry.rates.workerIntervalMs)}${arriving}. Click for the refresh rates.`;
+        const arriving = ObservedIntervals.text(this.telemetry.observedIntervals);
+        return `Refresh rate ${RefreshInterval.label(this.telemetry.intervalMs)}${arriving ? `; ${arriving}` : ''}. Click for the live controls.`;
     }
 
     protected open(x: number, y: number, chip: HTMLElement, widget?: Widget): void {

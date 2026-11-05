@@ -161,14 +161,15 @@ describe('TelemetryServerImpl', () => {
         expect(client.statuses.some(text => text.startsWith('connected to 127.0.0.1:'))).to.equal(true);
     });
 
-    it('sends the saved rates on connect and new rates while streaming', async () => {
-        await server.pushRates(200, 2000);
+    it('sends the saved rate on connect and a new one while streaming, for rank and node frames alike', async () => {
+        await server.pushInterval(200);
+        expect(client.statuses.at(-1)).to.equal('refresh rate saved (200 ms); it is sent on the next connect');
         const mock = await listenToMock();
-        await eventually(() => mock.workerIntervalMs === 200 && mock.nodeIntervalMs === 2000);
+        await eventually(() => mock.workerIntervalMs === 200 && mock.nodeIntervalMs === 200);
 
-        await server.pushRates(300, 3000);
-        await eventually(() => mock.workerIntervalMs === 300 && mock.nodeIntervalMs === 3000);
-        expect(client.statuses.at(-1)).to.equal('rates pushed (worker=300 ms, node=3000 ms)');
+        await server.pushInterval(300);
+        await eventually(() => mock.workerIntervalMs === 300 && mock.nodeIntervalMs === 300);
+        expect(client.statuses.at(-1)).to.equal('refresh rate pushed (300 ms)');
     });
 
     it('stopping a local stream ends it and disconnects', async () => {

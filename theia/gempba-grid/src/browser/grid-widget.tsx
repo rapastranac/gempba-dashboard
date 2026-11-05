@@ -140,11 +140,11 @@ export class GridWidget extends ReactWidget {
     }
 
     protected clock(): GridTiles.Clock {
-        return { streaming: this.telemetry.state === ConnectionState.LISTENING, now: Date.now(), intervalMs: this.telemetry.rates.workerIntervalMs };
+        return { streaming: this.telemetry.state === ConnectionState.LISTENING, now: Date.now(), intervalMs: this.telemetry.intervalMs };
     }
 
     protected motionMs(): number {
-        return MotionTiming.durationMs(this.telemetry.rates.workerIntervalMs, window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        return MotionTiming.durationMs(this.telemetry.intervalMs, window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     }
 
     /** Opens the node in whichever view registered for node links; with none, the hub's fallback opens nothing. */
