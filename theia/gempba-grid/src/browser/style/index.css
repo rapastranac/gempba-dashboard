@@ -20,8 +20,20 @@
     gap: calc(var(--theia-ui-padding) * 2);
 }
 
+.gempba-grid-overview-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 calc(var(--theia-ui-padding) * 2);
+    min-width: 0;
+}
+
 .gempba-grid-overview-summary {
     font-weight: 600;
+}
+
+.gempba-grid-overview-setup {
+    color: var(--theia-descriptionForeground);
 }
 
 .gempba-grid-overview-body {

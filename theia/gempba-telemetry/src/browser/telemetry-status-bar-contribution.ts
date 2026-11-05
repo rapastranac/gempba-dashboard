@@ -2,7 +2,7 @@ import { ContextMenuRenderer } from '@theia/core/lib/browser/context-menu-render
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser/status-bar/status-bar-types';
 import { inject, injectable } from '@theia/core/shared/inversify';
-import { ConnectionState, Rates, RefreshInterval, TaskWords } from '@gempba/core';
+import { ConnectionState, Rates, RefreshInterval, RunSetupText, TaskWords } from '@gempba/core';
 import { TelemetryService, RankHistoryService } from '../common/telemetry-service';
 import { TelemetryMenus } from './telemetry-command-contribution';
 
@@ -39,6 +39,10 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
             ? `$(pulse) GemPBA: ${nodes} ${nodes === 1 ? 'node' : 'nodes'} · ${rate}`
             : `$(plug) GemPBA: ${state.toLowerCase()}`;
         const lines = [this.telemetry.status || state.toLowerCase()];
+        const run = this.telemetry.snapshot?.run;
+        if (listening && run) {
+            lines.push(RunSetupText.line(run));
+        }
         const throughput = this.rankHistory.clusterThroughput();
         if (listening && throughput.length > 0) {
             lines.push(`${TaskWords.STARTED}: ${Rates.text(throughput[throughput.length - 1])}`);
