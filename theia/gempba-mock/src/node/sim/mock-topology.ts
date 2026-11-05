@@ -1,4 +1,6 @@
+import { SchedulerRole } from '@gempba/core';
 import { Schema1Topology } from './schema1-lines';
+import { Schema2Topology } from './schema2-lines';
 import { MockShape } from '../../common/mock-config';
 
 const GiB = 1024 ** 3;
@@ -83,8 +85,8 @@ export namespace MockTopology {
         return topology.ranks.find(rank => rank.nodeIndex === nodeIndex)?.id;
     }
 
-    /** The topology as gempba sends it, with each rank's current process id. */
-    export function toWire(topology: MockTopology, pidOf: (id: number) => number): Schema1Topology {
+    /** The topology as gempba v4.2.0 and earlier send it, with each rank's current process id. */
+    export function toSchema1(topology: MockTopology, pidOf: (id: number) => number): Schema1Topology {
         return {
             nodes: topology.nodes.map(node => ({
                 hostname: node.host,
@@ -103,6 +105,32 @@ export namespace MockTopology {
                 hostname: topology.nodes[rank.nodeIndex].host,
                 pid: pidOf(rank.id),
                 primary_socket: rank.socketId,
+                allowed_cpu_ids: rank.allowedCpuIds
+            }))
+        };
+    }
+
+    /** The topology's nodes and identities as gempba v4.3.0 sends them, each rank with its process id and declared role. */
+    export function toSchema2(topology: MockTopology, pidOf: (id: number) => number, roleOf: (id: number) => SchedulerRole): Omit<Schema2Topology, 'run'> {
+        return {
+            nodes: topology.nodes.map(node => ({
+                hostname: node.host,
+                sentinel_rank: sentinelOf(topology, node.index) ?? 0,
+                total_physical_cores: node.physicalCores,
+                total_logical_cores: node.logicalCores,
+                mem_total_bytes: node.memTotalBytes,
+                ranks: topology.ranks.filter(rank => rank.nodeIndex === node.index).map(rank => rank.id),
+                sockets: node.sockets.map(socket => ({
+                    socket_id: socket.socketId, name: socket.name, physical_cores: socket.physicalCores, logical_cores: socket.logicalCores,
+                    cpu_ids: socket.cpuIds
+                }))
+            })),
+            identities: topology.ranks.map(rank => ({
+                rank: rank.id,
+                hostname: topology.nodes[rank.nodeIndex].host,
+                pid: pidOf(rank.id),
+                primary_socket: rank.socketId,
+                role: roleOf(rank.id),
                 allowed_cpu_ids: rank.allowedCpuIds
             }))
         };

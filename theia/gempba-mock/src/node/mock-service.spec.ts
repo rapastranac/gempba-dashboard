@@ -64,7 +64,7 @@ describe('MockService', () => {
         expect(status).to.deep.include({ running: true, ended: false, clients: 0, ranks: 4, reach: { mode: ConnectionMode.LOCAL, gempbaPort: port } });
         expect(JSON.parse(await firstLine(port)).nodes).to.have.lengthOf(1);
         expect(lines[0].message).to.equal(`Started: Running · Local on 127.0.0.1:${port} · 1 node, 4 ranks · 0 clients; `
-            + 'Semi-centralized, Steady, load 85 %, As gempba today, seed 42');
+            + 'Semi-centralized, Steady, load 85 %, gempba 4.3, seed 42');
         expect(statuses.at(-1)!.running).to.equal(true);
         expect((await service.lastConfig()).access.gempbaPort).to.equal(port);
         await service.stop();

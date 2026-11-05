@@ -220,7 +220,7 @@ export class MockService implements MockServer {
     }
 }
 
-/** `Steady, load 85 %, As gempba today`: what the run does, in the panel's words. */
+/** `Steady, load 85 %, gempba 4.3`: what the run does, in the panel's words. */
 function describe(live: MockLive): string[] {
     return [
         MockLabels.of(MockLabels.SCENARIOS, live.scenario).label,

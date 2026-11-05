@@ -66,14 +66,24 @@ export interface MockRoles {
     readonly coordinatorRank: number;
 }
 
-/** `gempba` sends what gempba sends today, zeros and its fixed broadcast included; `full` fills every field. */
-export type MockFidelity = 'gempba' | 'full';
+/**
+ * What the mocker sends: `gempba-4.3` telemetry schema 2 as gempba v4.3.0 sends it, `gempba-4.2` schema 1 as gempba v4.2.0
+ * and earlier send it, zeros and the fixed 500 ms broadcast included, and `full` schema 2 with every field filled in.
+ */
+export type MockFidelity = 'gempba-4.3' | 'gempba-4.2' | 'full';
+
+export namespace MockFidelity {
+    /** The telemetry schema the fidelity sends. */
+    export function schema(fidelity: MockFidelity): 1 | 2 {
+        return fidelity === 'gempba-4.2' ? 1 : 2;
+    }
+}
 
 export namespace MockConfig {
 
     export const SCENARIOS: readonly MockScenario[] = ['steady', 'slow', 'ramp', 'imbalanced', 'bursty'];
     export const SCHEDULERS: readonly MockScheduler[] = ['semi-centralized', 'centralized'];
-    export const FIDELITIES: readonly MockFidelity[] = ['gempba', 'full'];
+    export const FIDELITIES: readonly MockFidelity[] = ['gempba-4.3', 'gempba-4.2', 'full'];
     export const KEY_SOURCES: readonly MockKeySource[] = ['system', 'generated'];
 
     export const MAX_RANKS = 4096;
@@ -97,7 +107,7 @@ export namespace MockConfig {
             },
             scheduler: 'semi-centralized',
             roles: { coordinatorRank: 0 },
-            live: { scenario: 'steady', loadPct: 85, fidelity: 'gempba' },
+            live: { scenario: 'steady', loadPct: 85, fidelity: 'gempba-4.3' },
             seed: 42
         };
     }
@@ -135,7 +145,8 @@ export namespace MockConfig {
             live: {
                 scenario: oneOf(live.scenario, SCENARIOS, fallback.live.scenario),
                 loadPct: numberOr(live.loadPct, fallback.live.loadPct),
-                fidelity: oneOf(live.fidelity, FIDELITIES, fallback.live.fidelity)
+                // a run saved before schema 2 says gempba for what is now gempba-4.2
+                fidelity: oneOf(live.fidelity === 'gempba' ? 'gempba-4.2' : live.fidelity, FIDELITIES, fallback.live.fidelity)
             },
             seed: numberOr(json.seed, fallback.seed)
         };

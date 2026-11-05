@@ -33,6 +33,11 @@ describe('MockConfig', () => {
         expect(MockConfig.of({ shape: { ranksPerNode: 3, workersPerNode: 6 } }).shape.ranksPerNode).to.equal(3);
     });
 
+    it('reads a run saved as gempba, before schema 2, as gempba 4.2', () => {
+        expect(MockConfig.of({ live: { fidelity: 'gempba' } }).live.fidelity).to.equal('gempba-4.2');
+        expect(MockConfig.defaults().live.fidelity).to.equal('gempba-4.3');
+    });
+
     it('checks the ports, and the SSH ones only when SSH is used', () => {
         expect(MockConfig.problems({ ...defaults, access: { ...defaults.access, gempbaPort: 70000 } }))
             .to.deep.equal(['The gempba port must be a whole number from 1 to 65535.']);

@@ -20,7 +20,7 @@ const USAGE = `Usage: npm run mock -- [options]
   --scenario steady|slow|ramp|imbalanced|bursty
   --scheduler semi-centralized|centralized
   --coordinator N          the rank the scheduler's coordinator runs on (0)
-  --load PCT --fidelity gempba|full --seed N
+  --load PCT --fidelity gempba-4.3|gempba-4.2|full --seed N
   --bench                  time building and serializing frames, then exit`;
 
 const { values } = parseArgs({
