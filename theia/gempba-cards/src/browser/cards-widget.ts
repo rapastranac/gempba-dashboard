@@ -1,12 +1,16 @@
 import { CompositeTreeNode } from '@theia/core/lib/browser/tree/tree';
 import { ExpandableTreeNode } from '@theia/core/lib/browser/tree/tree-expansion';
 import { SplitWidget } from '@theia/core/lib/browser/widgets/split-widget';
-import { codicon, Message, Widget } from '@theia/core/lib/browser/widgets/widget';
+import { codicon, Message, PanelLayout, Widget } from '@theia/core/lib/browser/widgets/widget';
+import { CommandRegistry } from '@theia/core/lib/common/command';
+import { Disposable } from '@theia/core/lib/common/disposable';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
-import { WorldSnapshot } from '@gempba/core';
+import { MessageLoop } from '@theia/core/shared/@lumino/messaging';
+import { StreamCondition, WorldSnapshot } from '@gempba/core';
 import { LiveTelemetryView } from '@gempba/telemetry/lib/browser';
 import { NodeSelection, TelemetryService } from '@gempba/telemetry/lib/common';
-import { VisibleRefresh } from '@gempba/ui/lib/browser';
+import { StreamBar, VisibleRefresh } from '@gempba/ui/lib/browser';
+import { CardsBannerWidget } from './cards-banner-widget';
 import { CardsDetailsWidget } from './cards-details-widget';
 import { CardsTree, CardsTreeNode } from './cards-tree';
 import { CardsTreeWidget } from './cards-tree-widget';
@@ -16,7 +20,8 @@ import { CardsTreeWidget } from './cards-tree-widget';
  * details on the right. It follows the node picked in any view and publishes the node of the row picked here.
  * When nothing is picked yet it picks the first node's sentinel rank, as the Java cards opened it. Hidden (a
  * background tab, or a minimized window) it does no work, and only expanded rows are ever built. A node opened
- * from another view (see {@link revealNode}) is picked and expanded.
+ * from another view (see {@link revealNode}) is picked and expanded. A banner above both panes shows the empty state, in
+ * their place, while the hub holds no nodes, and the stream bar while the data isn't live; frozen data is dimmed.
  */
 export class CardsWidget extends SplitWidget {
 
@@ -34,6 +39,7 @@ export class CardsWidget extends SplitWidget {
     /** Whether a row was ever picked, by the user, by another view, or by default. */
     protected picked = false;
     protected readonly refreshes: VisibleRefresh;
+    protected readonly banner: CardsBannerWidget;
     /**
      * The pane sizes to apply once the view has a width: the split scales sizes to its width on its first layout, so
      * sizes set while the view is hidden, as at startup behind another tab, are lost and the panes split evenly.
@@ -45,7 +51,8 @@ export class CardsWidget extends SplitWidget {
         protected readonly cardsTree: CardsTree,
         protected readonly details: CardsDetailsWidget,
         protected readonly telemetry: TelemetryService,
-        protected readonly selection: SelectionService
+        protected readonly selection: SelectionService,
+        protected readonly commands: CommandRegistry
     ) {
         super({ orientation: 'horizontal' });
         this.id = CardsWidget.ID;
@@ -57,11 +64,21 @@ export class CardsWidget extends SplitWidget {
         LiveTelemetryView.mark(this);
         this.addPane(tree);
         this.addPane(details);
+        this.banner = new CardsBannerWidget(telemetry, commands);
+        (this.layout as PanelLayout).insertWidget(0, this.banner);
+        // The split lays its panes out in pixels on a resize message, which the banner growing or shrinking above it never sends.
+        const resizes = new ResizeObserver(() => MessageLoop.sendMessage(this.splitPanel, Widget.ResizeMessage.UnknownSize));
+        resizes.observe(this.splitPanel.node);
+        this.toDispose.push(Disposable.create(() => resizes.disconnect()));
 
         const refresh = this.refreshes = new VisibleRefresh(this, () => this.refresh());
         this.toDispose.push(refresh);
         this.toDispose.push(telemetry.onSnapshot(() => refresh.request()));
         this.toDispose.push(telemetry.onStateChange(() => refresh.request()));
+        this.toDispose.push(telemetry.onLinkChange(() => refresh.request()));
+        this.toDispose.push(telemetry.onClear(() => refresh.request()));
+        // The hub's commands learn the installed modes from the same call, answered first, so Connect shows once they are known.
+        telemetry.availableModes().then(() => refresh.request(), () => undefined);
         this.toDispose.push(selection.onSelectionChanged(current => {
             if (NodeSelection.is(current) && current.host !== this.pickedRow()?.host) {
                 this.followHost = current.host;
@@ -113,6 +130,11 @@ export class CardsWidget extends SplitWidget {
     /** Reads the latest snapshot only now, so a hidden view never touches one. */
     protected async refresh(): Promise<void> {
         this.snapshot = this.telemetry.snapshot;
+        const hasNodes = this.banner.hasNodes;
+        this.banner.toggleClass(CardsBannerWidget.EMPTY_CLASS, !hasNodes);
+        this.banner.update();
+        this.splitPanel.setHidden(!hasNodes);
+        this.splitPanel.toggleClass(StreamBar.FROZEN_CLASS, StreamCondition.isFrozen(this.telemetry.condition));
         this.cardsTree.setSnapshot(this.snapshot);
         await this.tree.model.refresh();
         this.pickRow();
@@ -191,6 +213,10 @@ export class CardsWidget extends SplitWidget {
     }
 
     protected override onActivateRequest(message: Message): void {
-        this.tree.activate();
+        if (this.splitPanel.isHidden) {
+            this.banner.node.focus();
+        } else {
+            this.tree.activate();
+        }
     }
 }

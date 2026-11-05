@@ -1,14 +1,16 @@
 import { open, OpenerService } from '@theia/core/lib/browser/opener-service';
 import { codicon } from '@theia/core/lib/browser/widgets/widget';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
-import { CommandService } from '@theia/core/lib/common/command';
+import { CommandRegistry } from '@theia/core/lib/common/command';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
-import { ConnectionState, RankHistoryStore } from '@gempba/core';
-import { LiveTelemetryView, TelemetryCommands } from '@gempba/telemetry/lib/browser';
+import { ConnectionState, RankHistoryStore, StreamCondition, StreamText } from '@gempba/core';
+import { LiveTelemetryView, TelemetryViewActions } from '@gempba/telemetry/lib/browser';
 import { NodeHistoryService, NodeLink, NodeSelection, TelemetryService, RankHistoryService } from '@gempba/telemetry/lib/common';
-import { EmptyState, HeroStat, LiveIndicator, LivenessWatch, MeterBar, Sparkline, Tile, TileGrid, VisibleRefresh } from '@gempba/ui/lib/browser';
+import {
+    EmptyState, HeroStat, LiveIndicator, LivenessWatch, MeterBar, Sparkline, StreamBar, Tile, TileGrid, VisibleRefresh
+} from '@gempba/ui/lib/browser';
 import { MotionTiming } from '@gempba/ui/lib/common/motion-timing';
 import { GridFigure, GridOverview, GridTile, GridTiles } from '../common/grid-tiles';
 
@@ -28,7 +30,8 @@ const CPU_TOOLTIP = 'CPU utilization of this node\'s gempba allocation (0–100%
  * The cluster at a glance: an overview of the whole run above one Task Manager style tile per node, each with its
  * CPU and history, its tasks started, its memory, the tasks it moved, and whether its own ranks still send frames. Picking a tile
  * publishes a NodeSelection, and a node selected elsewhere is highlighted here. Opening a tile opens its node's
- * NodeLink, in whichever view registered to open nodes.
+ * NodeLink, in whichever view registered to open nodes. While the data isn't live, a bar across the top says why and since
+ * when, and the data under it stays as it was, dimmed once frozen.
  */
 @injectable()
 export class GridWidget extends ReactWidget {
@@ -41,7 +44,7 @@ export class GridWidget extends ReactWidget {
     @inject(RankHistoryService) protected readonly rankHistory: RankHistoryService;
     @inject(SelectionService) protected readonly selection: SelectionService;
     @inject(OpenerService) protected readonly openers: OpenerService;
-    @inject(CommandService) protected readonly commands: CommandService;
+    @inject(CommandRegistry) protected readonly commands: CommandRegistry;
 
     protected readonly sources: GridTiles.Sources = {
         node: host => this.nodeHistory.seriesFor(host),
@@ -56,7 +59,7 @@ export class GridWidget extends ReactWidget {
     protected readonly liveness = new LivenessWatch(this, () => {
         const clock = this.clock();
         return GridWidget.livenessOf(GridTiles.overview(this.telemetry.snapshot, this.sources, clock),
-            GridTiles.of(this.telemetry.snapshot, this.sources, clock));
+            GridTiles.of(this.telemetry.snapshot, this.sources, clock), this.bar(clock.now));
     }, () => this.update());
 
     @postConstruct()
@@ -75,7 +78,11 @@ export class GridWidget extends ReactWidget {
         this.toDispose.push(this.liveness);
         this.toDispose.push(this.telemetry.onSnapshot(() => refresh.request()));
         this.toDispose.push(this.telemetry.onStateChange(() => refresh.request()));
+        this.toDispose.push(this.telemetry.onLinkChange(() => refresh.request()));
+        this.toDispose.push(this.telemetry.onClear(() => refresh.request()));
         this.toDispose.push(this.selection.onSelectionChanged(() => refresh.request()));
+        // The hub's commands learn the installed modes from the same call, answered first, so Connect shows once they are known.
+        this.telemetry.availableModes().then(() => refresh.request(), () => undefined);
         this.update();
     }
 
@@ -85,21 +92,27 @@ export class GridWidget extends ReactWidget {
         if (!overview) {
             this.liveness.none();
             return <EmptyState icon='dashboard' title='No nodes yet'
-                message='Listen to a gempba run on this machine, or connect to a cluster, to see one tile per node here.' actions={[
-                    { label: TelemetryCommands.LISTEN.label!, run: () => this.commands.executeCommand(TelemetryCommands.LISTEN.id), primary: true },
-                    { label: TelemetryCommands.CONNECT.label!, run: () => this.commands.executeCommand(TelemetryCommands.CONNECT.id) }
-                ]} />;
+                message='Listen to a gempba run on this machine, or connect to a cluster, to see one tile per node here.'
+                actions={TelemetryViewActions.start(this.commands)} />;
         }
         const tiles = GridTiles.of(this.telemetry.snapshot, this.sources, clock);
-        this.liveness.drawn(GridWidget.livenessOf(overview, tiles));
+        const bar = this.bar(clock.now);
+        this.liveness.drawn(GridWidget.livenessOf(overview, tiles, bar));
         const current = this.selection.selection;
         const selectedHost = NodeSelection.is(current) ? current.host : undefined;
         return <div className='gempba-grid-view' style={{ '--gempba-motion-duration': `${this.motionMs()}ms` } as React.CSSProperties}>
-            {this.renderOverview(overview)}
-            <TileGrid>
-                {tiles.map(tile => this.renderTile(tile, tile.host === selectedHost))}
-            </TileGrid>
+            {bar && <StreamBar tone={bar.tone} text={bar.text} actions={TelemetryViewActions.bar(this.commands, bar.actions)} />}
+            <div className={StreamCondition.isFrozen(this.telemetry.condition) ? StreamBar.FROZEN_CLASS : undefined}>
+                {this.renderOverview(overview)}
+                <TileGrid>
+                    {tiles.map(tile => this.renderTile(tile, tile.host === selectedHost))}
+                </TileGrid>
+            </div>
         </div>;
+    }
+
+    protected bar(now: number): StreamText.Bar | undefined {
+        return StreamText.bar(this.telemetry.condition, this.telemetry.lastFrameAt, now);
     }
 
     protected renderOverview(overview: GridOverview): React.ReactNode {
@@ -152,8 +165,8 @@ export class GridWidget extends ReactWidget {
         open(this.openers, NodeLink.of(host));
     }
 
-    /** What the view's liveness shows, the stream's and every tile's, as one key to tell when it changed. */
-    protected static livenessOf(overview: GridOverview | undefined, tiles: readonly GridTile[]): string {
-        return [overview?.liveness, ...tiles.map(tile => tile.liveness)].join(' ');
+    /** What the view's liveness shows, the stream's, every tile's and the bar's words with their ticking age, as one key to tell when it changed. */
+    protected static livenessOf(overview: GridOverview | undefined, tiles: readonly GridTile[], bar: StreamText.Bar | undefined): string {
+        return [overview?.liveness, ...tiles.map(tile => tile.liveness), bar?.text].join(' ');
     }
 }
