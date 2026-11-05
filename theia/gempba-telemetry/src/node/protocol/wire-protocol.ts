@@ -416,20 +416,52 @@ export namespace DiskStats {
     }
 }
 
-/** The control messages the dashboard writes back on the telemetry socket; gempba clamps the value itself. */
+/** The control lines a client writes back on the telemetry socket; gempba clamps an interval itself. */
 export enum ControlKind {
+    /** Schema 2's one interval for every frame, from gempba v4.3.0. */
+    SetIntervalMs = 'set_interval_ms',
+    /** Schema 1's rank-frame interval; gempba v4.3.0 takes it as `set_interval_ms`, until v5.0.0 drops it. */
     SetWorkerIntervalMs = 'set_worker_interval_ms',
-    SetNodeIntervalMs = 'set_node_interval_ms'
+    /** Schema 1's node-frame interval; gempba v4.3.0 accepts it and does nothing. */
+    SetNodeIntervalMs = 'set_node_interval_ms',
+    /** From gempba v4.3.0: the ranks stop sending frames while their counters keep counting, and the stream sends header-only lines. */
+    Pause = 'pause',
+    Resume = 'resume',
+    /** From gempba v4.3.0: one full line now, paused or not. */
+    Snapshot = 'snapshot',
+    /** From gempba v4.3.0: a labelled moment, listed in the run's markers. */
+    Mark = 'mark'
 }
 
-/** One `{"kind":…,"value":…}` control line; the value is an unsigned integer in milliseconds. */
-export interface ControlLine {
-    readonly kind: ControlKind;
-    readonly value: number;
-}
+/** One control line: an interval in whole milliseconds, a marker's label, or the kind alone. */
+export type ControlLine = ControlLine.Interval | ControlLine.Mark | ControlLine.Plain;
 
 export namespace ControlLine {
-    export function format(kind: ControlKind, value: number): string {
+
+    export type IntervalKind = ControlKind.SetIntervalMs | ControlKind.SetWorkerIntervalMs | ControlKind.SetNodeIntervalMs;
+
+    export interface Interval {
+        readonly kind: IntervalKind;
+        readonly value: number;
+    }
+
+    export interface Mark {
+        readonly kind: ControlKind.Mark;
+        readonly label: string;
+    }
+
+    export interface Plain {
+        readonly kind: ControlKind.Pause | ControlKind.Resume | ControlKind.Snapshot;
+    }
+
+    /** gempba keeps a marker's label from 1 to 64 bytes. */
+    export const MAX_LABEL_BYTES = 64;
+
+    export function isInterval(line: ControlLine): line is Interval {
+        return line.kind === ControlKind.SetIntervalMs || line.kind === ControlKind.SetWorkerIntervalMs || line.kind === ControlKind.SetNodeIntervalMs;
+    }
+
+    export function format(kind: IntervalKind, value: number): string {
         return JSON.stringify({ kind, value: Math.round(value) }) + '\n';
     }
 
@@ -443,10 +475,22 @@ export namespace ControlLine {
         }
         const json = objectOf(value);
         const kind = Object.values(ControlKind).find(candidate => candidate === str(json.kind)?.trim());
-        const ms = json.value;
-        if (!kind || typeof ms !== 'number' || !Number.isInteger(ms) || ms < 0) {
-            return undefined;
+        switch (kind) {
+            case undefined:
+                return undefined;
+            case ControlKind.SetIntervalMs:
+            case ControlKind.SetWorkerIntervalMs:
+            case ControlKind.SetNodeIntervalMs: {
+                const ms = json.value;
+                return typeof ms === 'number' && Number.isInteger(ms) && ms >= 0 ? { kind, value: ms } : undefined;
+            }
+            case ControlKind.Mark: {
+                const label = str(json.label);
+                const bytes = label === undefined ? 0 : new TextEncoder().encode(label).length;
+                return label !== undefined && bytes >= 1 && bytes <= MAX_LABEL_BYTES ? { kind, label } : undefined;
+            }
+            default:
+                return { kind };
         }
-        return { kind, value: ms };
     }
 }

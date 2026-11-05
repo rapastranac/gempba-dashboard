@@ -416,6 +416,60 @@ describe('MockRun', () => {
         });
     });
 
+    describe('controls, as gempba 4.3 answers them', () => {
+
+        it('pauses: the run goes on, its ranks send no frames, and the lines carry the header alone, as gempba\'s do', () => {
+            const recorded = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../../gempba-telemetry/fixtures/schema2-run.ndjson'), 'utf8').split('\n')[1]);
+            const mock = run();
+            mock.advanceTo(10_000);
+            const was = rankFrame(mock, 1);
+            mock.pause();
+            mock.advanceTo(20_000);
+            const paused = JSON.parse(mock.line(TS));
+            expect(Object.keys(paused)).to.deep.equal(Object.keys(recorded));
+            expect(paused).to.include({ version: 2, run_id: mock.runId, elapsed_seconds: 20, paused: true, final: false });
+            expect(JSON.parse(mock.line(TS, { full: true })).ranks[1].seq_no, 'no frame while paused').to.equal(was.seq_no);
+            mock.resume();
+            mock.advanceTo(21_000);
+            const now = rankFrame(mock, 1);
+            expect(envelope(mock).paused).to.equal(false);
+            const perSecond = was.tasks_started_total / 10;
+            expect(now.tasks_started_total - was.tasks_started_total, 'the counters kept counting').to.be.above(5 * perSecond);
+        });
+
+        it('answers a snapshot with every frame taken now, paused or not', () => {
+            const mock = run();
+            mock.advanceTo(10_000);
+            mock.pause();
+            mock.advanceTo(15_000);
+            const frozen = JSON.parse(mock.line(TS, { full: true }));
+            mock.snapshot();
+            const snapshot = JSON.parse(mock.line(TS, { full: true }));
+            expect(snapshot.paused).to.equal(true);
+            expect(snapshot.ranks.map((frame: RankFrame) => frame.seq_no)).to.deep.equal(frozen.ranks.map((frame: RankFrame) => frame.seq_no + 1));
+            expect(snapshot.nodes[0].sentinel_local_ms).to.be.above(frozen.nodes[0].sentinel_local_ms);
+        });
+
+        it('lists a marker a dashboard sent in the run\'s setup, up to gempba\'s 32', () => {
+            const mock = run();
+            mock.advanceTo(4_000);
+            expect(mock.mark('phase 2')).to.equal(true);
+            expect(envelope(mock).topology!.run!.markers).to.deep.equal([{ elapsed_ms: 4_000, label: 'phase 2', source: 'dashboard' }]);
+            for (let i = 1; i < MockRun.MAX_MARKERS; i++) {
+                mock.mark(`marker ${i}`);
+            }
+            expect(mock.mark('one too many')).to.equal(false);
+            expect(envelope(mock).topology!.run!.markers).to.have.lengthOf(MockRun.MAX_MARKERS);
+        });
+
+        it('has no pause in schema 1, as gempba 4.2 has none', () => {
+            const mock = run();
+            mock.pause();
+            mock.setLive({ ...mock.live, fidelity: 'gempba-4.2' });
+            expect(mock.paused).to.equal(false);
+        });
+    });
+
     describe('fidelity', () => {
 
         it('sends schema 1 as gempba 4.2 does: zeros for socket CPU and use, network and disk, every 500 ms', () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { RefreshInterval, RefreshRates, SchedulerRole } from '@gempba/core';
 import { Schema1Frame, Schema1NodeFrame } from './schema1-lines';
+import { RunMarkerFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { Schema2Frame, Schema2NodeFrame, Schema2Topology } from './schema2-lines';
 import { MockFidelity, MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
@@ -183,6 +184,8 @@ export class MockRun {
     static readonly SPAWN_TRIES_PER_TASK = 4;
     /** The share of finished tasks that reach a leaf whose score a worker proposes. */
     static readonly PROPOSALS_PER_TASK = 1e-4;
+    /** gempba keeps at most this many markers; it ignores the rest. */
+    static readonly MAX_MARKERS = 32;
 
     protected readonly random: MockRandom;
     /** The counters' own noise, apart from the run's, so the same seed steps the same run whatever schema 2 counts. */
@@ -205,6 +208,8 @@ export class MockRun {
     protected topologySchema?: number;
     protected frameOrder?: number[];
     protected readonly runSeed: number;
+    protected pausedNow = false;
+    protected readonly markers: RunMarkerFrame[] = [];
     /** Drawn at each Start, so the dashboard tells this run from the one before, whatever the seed. */
     readonly runId = randomUUID();
 
@@ -259,6 +264,11 @@ export class MockRun {
         return this.schema === 1 ? MockRun.GEMPBA_BROADCAST_MS : this.workerInterval;
     }
 
+    /** Whether its ranks stopped sending frames; their counters keep counting. */
+    get paused(): boolean {
+        return this.pausedNow;
+    }
+
     /** The telemetry schema the fidelity sends; it can change while the mocker runs. */
     get schema(): 1 | 2 {
         return MockFidelity.schema(this.liveNow.fidelity);
@@ -273,8 +283,44 @@ export class MockRun {
         const schema = this.schema;
         this.liveNow = live;
         if (this.schema !== schema) {
+            // gempba v4.2.0 has no pause
+            this.pausedNow = this.pausedNow && this.schema === 2;
             this.rearm();
         }
+    }
+
+    /** Its ranks stop sending frames while the run goes on, as gempba v4.3.0's do on a pause control. */
+    pause(): void {
+        this.pausedNow = true;
+    }
+
+    resume(): void {
+        this.pausedNow = false;
+        this.rearm();
+    }
+
+    /** Every rank and node not stalled sends a frame now, paused or not, for a snapshot control. */
+    snapshot(): void {
+        for (const rank of this.ranks.values()) {
+            if (this.nodes[rank.place.nodeIndex].stalledUntilMs <= this.time) {
+                this.sampleRank(rank);
+            }
+        }
+        this.nodes.forEach((node, index) => {
+            if (node.stalledUntilMs <= this.time) {
+                this.sampleNode(index);
+            }
+        });
+    }
+
+    /** Records a marker a dashboard sent; false once the run holds as many as gempba keeps. */
+    mark(label: string): boolean {
+        if (this.markers.length >= MockRun.MAX_MARKERS) {
+            return false;
+        }
+        this.markers.push({ elapsed_ms: this.time, label, source: 'dashboard' });
+        this.topologyJson = undefined;
+        return true;
     }
 
     /** Applies the intervals at once: a sample due sooner under the new interval is brought forward. */
@@ -304,9 +350,17 @@ export class MockRun {
         }
     }
 
-    /** One broadcast line, without its newline: the latest frame of every rank and node, as gempba's aggregator sends it. */
-    line(nowEpochMs: number): string {
+    /**
+     * One broadcast line, without its newline: the latest frame of every rank and node, as gempba's aggregator sends it.
+     * While paused it is the header alone, unless it is a snapshot or the run's final line, which carry the frames.
+     */
+    line(nowEpochMs: number, kind: { readonly full?: boolean, readonly final?: boolean } = {}): string {
         const schema = this.schema;
+        const clock = `"ts":${nowEpochMs},"elapsed_seconds":${Math.floor(this.time / 1000)}`;
+        const final = kind.final === true;
+        if (schema === 2 && this.pausedNow && !kind.full && !final) {
+            return `{"version":2,"run_id":"${this.runId}",${clock},"paused":true,"final":false}`;
+        }
         if (this.topologySchema !== schema) {
             this.topologyJson = undefined;
             this.topologySchema = schema;
@@ -317,11 +371,10 @@ export class MockRun {
         this.frameOrder ??= [...this.topologyNow.ranks].sort((a, b) => a.nodeIndex - b.nodeIndex || a.id - b.id).map(place => place.id);
         const ranks = this.frameOrder.map(id => this.ranks.get(id)).map(rank => rank && this.rankJson(rank, schema)).filter(frame => frame !== undefined);
         const nodes = this.nodes.map(node => this.nodeJson(node, schema)).filter(frame => frame !== undefined);
-        const clock = `"ts":${nowEpochMs},"elapsed_seconds":${Math.floor(this.time / 1000)}`;
         if (schema === 1) {
             return `{"version":1,${clock},"topology":${this.topologyJson},"workers":[${ranks.join(',')}],"nodes":[${nodes.join(',')}]}`;
         }
-        return `{"version":2,"run_id":"${this.runId}",${clock},"paused":false,"final":false,`
+        return `{"version":2,"run_id":"${this.runId}",${clock},"paused":${this.pausedNow},"final":${final},`
             + `"topology":${this.topologyJson},"ranks":[${ranks.join(',')}],"nodes":[${nodes.join(',')}]}`;
     }
 
@@ -672,7 +725,7 @@ export class MockRun {
                 threads_per_process: Math.max(...this.topologyNow.ranks.map(place => place.poolThreads)),
                 gempba_version: MockRun.GEMPBA_VERSION,
                 annotations: { mock: `seed ${this.runSeed}` },
-                markers: []
+                markers: [...this.markers]
             }
         };
     }
@@ -713,6 +766,9 @@ export class MockRun {
     }
 
     protected sample(): void {
+        if (this.pausedNow) {
+            return;
+        }
         for (const rank of this.ranks.values()) {
             if (rank.nextSampleMs <= this.time && this.nodes[rank.place.nodeIndex].stalledUntilMs <= this.time) {
                 this.sampleRank(rank);

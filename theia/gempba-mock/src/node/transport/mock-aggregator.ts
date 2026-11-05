@@ -140,23 +140,55 @@ export class MockAggregator {
         stream.write(line + '\n');
     }
 
+    /**
+     * Answers a control line as the gempba the fidelity imitates: v4.2.0 knows its two intervals alone; v4.3.0 takes the
+     * one interval under either name, ignores the node interval, and pauses, resumes, snapshots and marks.
+     */
     protected control(line: string, who: string): void {
         const message = ControlLine.parse(line);
         if (!message) {
             this.log(`Ignored a malformed control line from ${who}`);
             return;
         }
-        const applied = RefreshInterval.clamp(message.value);
-        const clamped = applied === message.value ? '' : ` (clamped from ${message.value})`;
-        if (message.kind === ControlKind.SetWorkerIntervalMs) {
-            this.mock.setIntervals(applied, this.mock.nodeIntervalMs);
-        } else {
-            this.mock.setIntervals(this.mock.workerIntervalMs, applied);
+        const schema = this.mock.schema;
+        if (schema === 1 && message.kind !== ControlKind.SetWorkerIntervalMs && message.kind !== ControlKind.SetNodeIntervalMs) {
+            this.log(`Ignored ${message.kind} from ${who}: gempba 4.2 doesn't know it`);
+            return;
         }
-        this.log(`${message.kind} → ${applied} ms${clamped}, from ${who}`);
-        // the broadcast may follow the worker rate; a shorter one starts now rather than after the old wait
-        if (this.running) {
-            this.schedule();
+        if (ControlLine.isInterval(message)) {
+            if (schema === 2 && message.kind === ControlKind.SetNodeIntervalMs) {
+                this.log(`Ignored ${message.kind} from ${who}: gempba 4.3 drives node frames at the one interval`);
+                return;
+            }
+            const applied = RefreshInterval.clamp(message.value);
+            const clamped = applied === message.value ? '' : ` (clamped from ${message.value})`;
+            if (message.kind === ControlKind.SetNodeIntervalMs) {
+                this.mock.setIntervals(this.mock.workerIntervalMs, applied);
+            } else {
+                this.mock.setIntervals(applied, this.mock.nodeIntervalMs);
+            }
+            this.log(`${message.kind} → ${applied} ms${clamped}, from ${who}`);
+            // the broadcast may follow the worker rate; a shorter one starts now rather than after the old wait
+            if (this.running) {
+                this.schedule();
+            }
+        } else if (message.kind === ControlKind.Mark) {
+            this.log(this.mock.mark(message.label)
+                ? `Marked "${message.label}", from ${who}`
+                : `Ignored a marker from ${who}: the run holds ${MockRun.MAX_MARKERS} already`);
+        } else if (message.kind === ControlKind.Snapshot) {
+            this.mock.snapshot();
+            const full = this.mock.line(Date.now(), { full: true });
+            for (const stream of this.clientsNow.keys()) {
+                this.send(stream, full);
+            }
+            this.log(`Sent a snapshot, for ${who}`);
+        } else if (message.kind === ControlKind.Pause) {
+            this.mock.pause();
+            this.log(`Paused, for ${who}: the ranks stop sending frames and the lines carry the header alone`);
+        } else {
+            this.mock.resume();
+            this.log(`Resumed, for ${who}`);
         }
         this.options.onChange?.();
     }

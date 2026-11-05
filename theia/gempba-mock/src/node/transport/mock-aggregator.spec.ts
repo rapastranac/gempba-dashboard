@@ -99,7 +99,39 @@ describe('MockAggregator', () => {
         await new Promise(resolve => setTimeout(resolve, 600));
         expect(frames.length - counted).to.be.at.least(5);
         telemetry.sendControl(ControlKind.SetNodeIntervalMs, 2000);
+        await until(() => logged.some(message => message.startsWith('Ignored set_node_interval_ms')));
+        expect(aggregator.run.nodeIntervalMs, 'gempba 4.3 ignores the node interval').to.equal(1000);
+    });
+
+    it('pauses, marks, snapshots and resumes when a client asks, as gempba 4.3 does', async () => {
+        await serve();
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        const write = (control: object) => client.socket.write(JSON.stringify(control) + '\n');
+        const parsed = () => client.lines.map(line => BroadcastEnvelope.parse(line));
+        write({ kind: 'set_interval_ms', value: 100 });
+        await until(() => aggregator.run.workerIntervalMs === 100);
+        write({ kind: 'pause' });
+        await until(() => parsed().some(line => line.paused && line.ranks === undefined));
+        write({ kind: 'mark', label: 'phase 2' });
+        await until(() => logged.some(message => message.startsWith('Marked "phase 2"')));
+        write({ kind: 'snapshot' });
+        await until(() => parsed().some(line => line.paused && line.ranks !== undefined));
+        expect(parsed().find(line => line.paused && line.ranks !== undefined)!.topology!.run!.markers![0].label).to.equal('phase 2');
+        write({ kind: 'resume' });
+        const seen = client.lines.length;
+        await until(() => parsed().slice(seen).some(line => line.paused === false && line.ranks !== undefined));
+    });
+
+    it('answers as gempba 4.2 in schema 1: its two intervals, and nothing else', async () => {
+        await serve({ fidelity: 'gempba-4.2' });
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        client.socket.write('{"kind":"set_interval_ms","value":100}\n{"kind":"pause"}\n{"kind":"set_node_interval_ms","value":2000}\n');
         await until(() => aggregator.run.nodeIntervalMs === 2000);
+        expect(logged.filter(message => message.startsWith('Ignored')).map(message => message.split(' from ')[0]))
+            .to.deep.equal(['Ignored set_interval_ms', 'Ignored pause']);
+        expect([aggregator.run.workerIntervalMs, aggregator.run.paused]).to.deep.equal([500, false]);
     });
 
     it('drops a client that falls behind, and keeps serving the others', async function (): Promise<void> {

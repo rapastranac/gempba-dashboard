@@ -99,7 +99,8 @@ export class MockEmitter {
 
     protected control(line: string): void {
         const message = ControlLine.parse(line);
-        if (!message) {
+        // the recordings it replays are schema 1's, whose only controls are the two intervals
+        if (!message || !ControlLine.isInterval(message)) {
             return;
         }
         const applied = clamp(message.value);
