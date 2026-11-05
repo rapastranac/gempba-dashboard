@@ -145,7 +145,7 @@ export class CardsDetailsWidget extends ReactWidget {
             return undefined;
         }
         if (row.kind === 'socket') {
-            return { panel: CardsPanel.forSocket(this.snapshot, node, socket), icon: codicon('circuit-board') };
+            return { panel: CardsPanel.forSocket(node, socket), icon: codicon('circuit-board') };
         }
         const rank = socket.ranks.find(candidate => candidate.id === row.rank);
         return rank && { panel: CardsPanel.forRank(this.snapshot, socket, rank, this.histories), icon: codicon(rank.sentinel ? 'star-full' : 'gear'), rank };

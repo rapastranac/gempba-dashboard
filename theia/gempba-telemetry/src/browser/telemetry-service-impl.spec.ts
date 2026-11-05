@@ -3,7 +3,7 @@ import { expect } from 'chai';
 import { Emitter } from '@theia/core/lib/common/event';
 import { Container } from '@theia/core/shared/inversify';
 import {
-    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RefreshInterval, SessionSpec, TargetSpec, RankHistoryStore, RankSnapshot, WorldSnapshot
+    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RankAccounting, RefreshInterval, SessionSpec, TargetSpec, RankHistoryStore, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { ObservedIntervals, TelemetryService } from '../common/telemetry-service';
@@ -14,6 +14,7 @@ import { TelemetryServiceImpl } from './telemetry-service-impl';
 /** One node "h" whose rank 7 sent frame `seqNo` at `millis`, with a node frame its sentinel took at `millis`. */
 function snapshot(host: string, seqNo = 1, millis = 0): WorldSnapshot {
     const rank: RankSnapshot = {
+        role: 'worker', accounting: RankAccounting.none(),
         id: 7, seqNo, localMillis: millis, pid: 0, sentinel: true, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
         tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0, cpuPct: 90, rssBytes: 0, threads: 1,
         elapsedSeconds: 0, peers: []

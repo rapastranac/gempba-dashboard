@@ -3,10 +3,12 @@ import { NodeSnapshot } from './node-snapshot';
 import { SocketSnapshot } from './socket-snapshot';
 import { StructureKey } from './structure-key';
 import { RankSnapshot } from './rank-snapshot';
+import { RankAccounting } from './run-setup';
 import { WorldSnapshot } from './world-snapshot';
 
 function rank(id: number): RankSnapshot {
     return {
+        role: 'worker', accounting: RankAccounting.none(),
         id, seqNo: 1, localMillis: 0, pid: 100 + id, sentinel: false, allowedCpuIds: [], tasksStartedTotal: 0, tasksRunning: 0,
         tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0,
         cpuPct: 0, rssBytes: 0, threads: 1, elapsedSeconds: 0, peers: []
@@ -29,7 +31,7 @@ function node(host: string, ...sockets: SocketSnapshot[]): NodeSnapshot {
 
 function world(...nodes: NodeSnapshot[]): WorldSnapshot {
     const keys = nodes.flatMap(n => n.sockets.flatMap(s => s.ranks.map(w => StructureKey.keyOf(n.host, s.socketId, w.id))));
-    return { schemaVersion: 3, timestampMillis: 1_700_000_000_000, elapsedSeconds: 42, nodes, structure: StructureKey.of(keys) };
+    return { runId: '', paused: false, final: false, timestampMillis: 1_700_000_000_000, elapsedSeconds: 42, nodes, structure: StructureKey.of(keys) };
 }
 
 describe('WorldSnapshot', () => {
@@ -48,14 +50,11 @@ describe('WorldSnapshot', () => {
         expect(NodeSnapshot.rankCount(snapshot.nodes[0])).to.equal(3);
     });
 
-    it('takes rank 0 for the coordinator of a schema-1 run once it has other processes, and a lone process for none', () => {
-        const cluster = { ...world(node('alpha', socket(0, 0, 1)), node('beta', socket(0, 2))), schemaVersion: 1 };
-        expect([0, 1, 2].map(id => WorldSnapshot.isCoordinator(cluster, id))).to.deep.equal([true, false, false]);
-        expect(WorldSnapshot.isCoordinator({ ...world(node('alpha', socket(0, 0))), schemaVersion: 1 }, 0)).to.equal(false);
+    it('takes no coordinator without a snapshot', () => {
         expect(WorldSnapshot.isCoordinator(undefined, 0)).to.equal(false);
     });
 
-    it('takes the coordinator from the role the stream gives, over rank 0', () => {
+    it('takes the coordinator from the role the stream gives, on any rank', () => {
         const roled = (snapshot: WorldSnapshot, coordinatorId: number): WorldSnapshot => ({
             ...snapshot,
             nodes: snapshot.nodes.map(each => ({ ...each, sockets: each.sockets.map(one => ({
@@ -68,8 +67,8 @@ describe('WorldSnapshot', () => {
         expect(WorldSnapshot.isCoordinator(lone, 0)).to.equal(false);
     });
 
-    it('takes no rank for a coordinator from a schema-2 run without roles: its scheduler declared none', () => {
-        const cluster = { ...world(node('alpha', socket(0, 0, 1))), schemaVersion: 2 };
+    it('takes no rank for a coordinator when every rank is a worker, as when the scheduler declared none', () => {
+        const cluster = world(node('alpha', socket(0, 0, 1)));
         expect([0, 1].map(id => WorldSnapshot.isCoordinator(cluster, id))).to.deep.equal([false, false]);
     });
 
@@ -90,7 +89,7 @@ describe('WorldSnapshot', () => {
         const narrowed = WorldSnapshot.forHost(world(node('a', socket(0, 1))), 'missing');
         expect(narrowed.nodes).to.be.empty;
         expect(narrowed.structure.keys).to.be.empty;
-        expect([narrowed.schemaVersion, narrowed.timestampMillis, narrowed.elapsedSeconds]).to.deep.equal([3, 1_700_000_000_000, 42]);
+        expect([narrowed.timestampMillis, narrowed.elapsedSeconds]).to.deep.equal([1_700_000_000_000, 42]);
     });
 
     it('forHost without a host returns the snapshot unchanged', () => {

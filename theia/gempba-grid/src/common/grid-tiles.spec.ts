@@ -6,6 +6,7 @@ const GiB = 1024 ** 3;
 
 function rank(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
     return {
+        role: 'worker', accounting: RankAccounting.none(),
         id: 3, seqNo: 1, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
         tasksStartedTotal: 6_000, tasksRunning: 3, tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0,
         cpuPct: 300, rssBytes: 0, threads: 5, elapsedSeconds: 100, peers: [], ...overrides
@@ -181,21 +182,18 @@ describe('GridTiles', () => {
         it('averages the ranks that run tasks, by what they count: rank 0 too when the coordinator is another rank', () => {
             const counted = (id: number, started: number, extra: Partial<RankAccounting>) =>
                 rank({ id, tasksStartedTotal: started, accounting: { ...RankAccounting.none(), ...extra } });
-            const run: WorldSnapshot = {
-                ...world(node('alpha', {}, [counted(0, 900, { schedWaitingMicros: 10 }), counted(1, 800, {}), counted(2, 0, { coordinatorStateMsgsTotal: 40 })])),
-                schemaVersion: 2
-            };
+            const run = world(node('alpha', {}, [counted(0, 900, { schedWaitingMicros: 10 }), counted(1, 800, {}), counted(2, 0, { coordinatorStateMsgsTotal: 40 })]));
             const idlePct = new Map([[0, [10]], [1, [30]], [2, [0]]]);
             const series = (id: number): RankSeries => ({ ...RankSeries.empty(), idlePct: idlePct.get(id) ?? [] });
             expect(GridTiles.overview(run, sources({ rank: series }), CLOCK)!.figures.find(figure => figure.label === 'Idle')?.value).to.equal('20');
         });
 
-        it('says how the run is set up, with its annotations and markers for a tooltip, and nothing of it in schema 1', () => {
+        it('says how the run is set up, with its annotations and markers for a tooltip, and nothing before a full line', () => {
             const run: RunSetup = {
                 scheduler: 'centralized', loadBalancer: 'quasi_horizontal', worldSize: 3, threadsPerProcess: 4, gempbaVersion: '4.3.0',
                 annotations: [['instance', 'tsp-100']], markers: []
             };
-            expect(GridTiles.overview({ ...SHARED, schemaVersion: 2, run }, sources(), CLOCK)!.setup).to.deep.equal({
+            expect(GridTiles.overview({ ...SHARED, run }, sources(), CLOCK)!.setup).to.deep.equal({
                 text: 'Centralized · quasi-horizontal · 3 ranks · 4 threads · gempba 4.3.0', details: ['instance: tsp-100']
             });
             expect(GridTiles.overview(SHARED, sources(), CLOCK)!.setup).to.equal(undefined);

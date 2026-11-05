@@ -141,7 +141,7 @@ export namespace CardsPanel {
         };
     }
 
-    export function forSocket(world: WorldSnapshot | undefined, node: NodeSnapshot, socket: SocketSnapshot): Panel {
+    export function forSocket(node: NodeSnapshot, socket: SocketSnapshot): Panel {
         const busy = NodeUtilization.coresBusy(socket.ranks);
         const cores = socket.logicalCores;
         return {
@@ -162,7 +162,7 @@ export namespace CardsPanel {
                     const accessible = accessibleCores(rank, socket);
                     const fraction = rank.cpuPct / (100 * accessible);
                     return {
-                        label: CardsText.rankTitle(rank, world), fraction, tone: 'cpu',
+                        label: CardsText.rankTitle(rank), fraction, tone: 'cpu',
                         valueText: `${NumberText.fixed(fraction * 100, 0)}% of ${plural(accessible, 'core')}`
                     };
                 })
@@ -177,7 +177,7 @@ export namespace CardsPanel {
         const idle = latest(series.idlePct);
         const host = world?.nodes.find(node => node.sockets.some(each => each.ranks.some(other => other.id === rank.id)))?.host;
         // a rank shows what it does, told by its own numbers: tasks where it runs them, the queue and assignments where it coordinates
-        const work = RankWork.of(world, rank);
+        const work = RankWork.of(rank);
         // gempba's process has one thread beyond its pool, which runs the tasks; a source that counts differently never shows more running than threads
         const pool = Math.max(rank.threads - 1, rank.tasksRunning, 1);
         const memory: Hero = { label: 'Memory', ...bytesValue(rank.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' };
@@ -220,7 +220,7 @@ export namespace CardsPanel {
             max: 100, capacity: RankHistoryStore.CAPACITY, tone: 'cpu'
         };
         return {
-            title: CardsText.rankTitle(rank, world),
+            title: CardsText.rankTitle(rank),
             subtitle: [...(work.coordinates && !work.runsTasks ? ['schedules the run, runs no tasks'] : []), CardsText.rankSubtitle(host ?? '—', rank)].join(' · '),
             gauge: {
                 label: `CPU on ${plural(accessible, 'core')}`, fraction: rank.cpuPct / (100 * accessible), tone: 'cpu',
@@ -284,10 +284,7 @@ export namespace CardsPanel {
     }
 
     /** The bytes of the tasks a rank moved and its time in the MPI calls that moved them, which schema 2 counts on every rank. */
-    function movingTotals(accounting: RankAccounting | undefined): Total[] {
-        if (!accounting) {
-            return [];
-        }
+    function movingTotals(accounting: RankAccounting): Total[] {
         return [
             {
                 label: 'Bytes sent', value: `${Bytes.human(accounting.bytesSentTotal)} in ${Durations.format(accounting.sendMicrosTotal)}`,
@@ -305,9 +302,6 @@ export namespace CardsPanel {
     function taskTotals(rank: RankSnapshot): Total[] {
         const accounting = rank.accounting;
         const idle = `${Durations.format(rank.idleMicrosPerThread)} per thread`;
-        if (!accounting) {
-            return [{ label: 'Pool idle', value: idle }];
-        }
         const totals: Total[] = [{
             label: 'Pool idle',
             value: `${idle}: ${Durations.format(accounting.idleMicrosStarved)} starved, ${Durations.format(accounting.idleMicrosImbalanced)} imbalanced`,
@@ -324,9 +318,9 @@ export namespace CardsPanel {
     }
 
     /** What a coordinator counted: its assignments and the reports it handled, each a scheduler counter, shown once filled. */
-    function coordinatorTotals(accounting: RankAccounting | undefined): Total[] {
+    function coordinatorTotals(accounting: RankAccounting): Total[] {
         const totals: Total[] = [];
-        if (accounting && accounting.assignCount > 0) {
+        if (accounting.assignCount > 0) {
             const mean = Math.round(accounting.assignLatencyMicrosTotal / accounting.assignCount);
             totals.push({
                 label: 'Assignments',
@@ -334,7 +328,7 @@ export namespace CardsPanel {
                 hint: 'Ranks this coordinator handed work to, and how long each took to report running.'
             });
         }
-        if (accounting && accounting.coordinatorStateMsgsTotal > 0) {
+        if (accounting.coordinatorStateMsgsTotal > 0) {
             totals.push({
                 label: 'Reports handled', value: NumberText.grouped(accounting.coordinatorStateMsgsTotal),
                 hint: 'Running and available reports this coordinator handled from the ranks.'

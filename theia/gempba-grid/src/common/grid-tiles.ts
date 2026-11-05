@@ -159,7 +159,7 @@ export namespace GridTiles {
 
     /** How much of their pools' time the ranks that run tasks wait for work now, on average; a dash before any reading. */
     function idleFigure(snapshot: WorldSnapshot, ranks: readonly RankSnapshot[], sources: Sources): GridFigure {
-        const readings = ranks.filter(rank => RankWork.of(snapshot, rank).runsTasks).map(rank => latest(sources.rank(rank.id).idlePct))
+        const readings = ranks.filter(rank => RankWork.of(rank).runsTasks).map(rank => latest(sources.rank(rank.id).idlePct))
             .filter((reading): reading is number => reading !== undefined);
         const mean = readings.length > 0 ? readings.reduce((sum, reading) => sum + reading, 0) / readings.length : undefined;
         return {

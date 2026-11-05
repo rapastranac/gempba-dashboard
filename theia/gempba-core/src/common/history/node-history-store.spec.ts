@@ -7,7 +7,7 @@ import { NodeSeries } from './node-series';
 function oneNode(timestampMillis: number, host: string, hasLiveMemory: boolean, nodeUtilPct: number,
     memUsedBytes: number, memTotalBytes: number): WorldSnapshot {
     return {
-        schemaVersion: 1, timestampMillis, elapsedSeconds: 0, structure: StructureKey.empty(),
+        runId: '', paused: false, final: false, timestampMillis, elapsedSeconds: 0, structure: StructureKey.empty(),
         nodes: [{
             host, socketCount: 1, physicalCores: 0, logicalCores: 1, hasLiveMemory, memTotalBytes, memUsedBytes,
             sentinelRank: 0, sentinelLocalMillis: 0, nodeUtilPct, sockets: []

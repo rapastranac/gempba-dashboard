@@ -2,10 +2,12 @@ import { expect } from 'chai';
 import { NodeSnapshot } from '../model/node-snapshot';
 import { SocketSnapshot } from '../model/socket-snapshot';
 import { RankSnapshot } from '../model/rank-snapshot';
+import { RankAccounting } from '../model/run-setup';
 import { CoreHeat } from './core-heat';
 
 function rank(id: number, cpuPct: number, allowedCpuIds: number[] = []): RankSnapshot {
     return {
+        role: 'worker', accounting: RankAccounting.none(),
         id, seqNo: 1, localMillis: 0, pid: 0, sentinel: false, allowedCpuIds, tasksStartedTotal: 0, tasksRunning: 0,
         tasksSentTotal: 0, tasksRecvTotal: 0, schedulerPendingCount: 0, idleMicrosPerThread: 0, cpuPct, rssBytes: 0, threads: 1,
         elapsedSeconds: 0, peers: []

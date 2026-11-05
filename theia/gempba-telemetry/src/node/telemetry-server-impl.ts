@@ -205,7 +205,6 @@ export class TelemetryServerImpl implements TelemetryServer {
                 if (epoch !== this.epoch) {
                     return;
                 }
-                // schema 1 has no final line, so a gempba 4.2 run that ends reads as a lost connection
                 this.status(this.runEnded
                     ? `the run ended; waiting for the next run on ${address}`
                     : `disconnected from ${address} (${cause ? cause.message : 'peer closed'}); retrying…`);

@@ -1,11 +1,12 @@
 import { expect } from 'chai';
-import { NodeSnapshot, SocketSnapshot, RankSnapshot, WorldSnapshot } from '@gempba/core';
+import { NodeSnapshot, RankAccounting, RankSnapshot, SocketSnapshot, WorldSnapshot } from '@gempba/core';
 import { CardsText } from './cards-text';
 
 const GiB = 1024 ** 3;
 
 function rank(overrides: Partial<RankSnapshot> = {}): RankSnapshot {
     return {
+        role: 'worker', accounting: RankAccounting.none(),
         id: 3, seqNo: 17, localMillis: 0, pid: 4100, sentinel: false, allowedCpuIds: [0, 1, 2, 3],
         tasksStartedTotal: 12450, tasksRunning: 1, tasksSentTotal: 619, tasksRecvTotal: 0, schedulerPendingCount: 2, idleMicrosPerThread: 238,
         cpuPct: 87.3, rssBytes: 256 * 1024 ** 2, threads: 12, elapsedSeconds: 100,
@@ -27,11 +28,6 @@ function node(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
     };
 }
 
-/** One node, one socket, holding these ranks, in the given telemetry schema. */
-function world(schemaVersion: number, ...ranks: RankSnapshot[]): WorldSnapshot {
-    return { ...WorldSnapshot.empty(), schemaVersion, nodes: [node({ sockets: [socket({ ranks })] })] };
-}
-
 describe('CardsText', () => {
 
     it('captions tree rows briefly', () => {
@@ -39,25 +35,15 @@ describe('CardsText', () => {
         expect(CardsText.socketTitle(socket())).to.equal('Socket 0: Xeon');
         expect(CardsText.socketTitle(socket({ hasTopology: false }))).to.equal('Socket 0');
         expect(CardsText.socketCaption(socket({ ranks: [rank()] }))).to.equal('1 rank');
-        expect(CardsText.rankTitle(rank(), undefined)).to.equal('Rank 3');
-        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }), undefined)).to.equal('Rank 0 · sentinel');
+        expect(CardsText.rankTitle(rank())).to.equal('Rank 3');
+        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true }))).to.equal('Rank 0 · aggregator · sentinel');
         expect(CardsText.rankCaption(rank(), 4)).to.equal('22% CPU · 256.0 MB');
     });
 
     it('titles a rank with its declared coordinator role, the aggregator on rank 0 and the sentinel', () => {
-        const coordinatorOn = (id: number, ...ids: number[]) => world(2, ...ids.map(each => rank({ id: each, role: each === id ? 'coordinator' : 'worker' })));
-        const zero = rank({ id: 0, sentinel: true, role: 'coordinator' });
-        expect(CardsText.rankTitle(zero, coordinatorOn(0, 0, 1))).to.equal('Rank 0 · coordinator · aggregator · sentinel');
-        const elsewhere = coordinatorOn(2, 0, 1, 2);
-        expect([0, 1, 2].map(id => CardsText.rankTitle(rank({ id, role: id === 2 ? 'coordinator' : 'worker' }), elsewhere)))
+        expect(CardsText.rankTitle(rank({ id: 0, sentinel: true, role: 'coordinator' }))).to.equal('Rank 0 · coordinator · aggregator · sentinel');
+        expect([0, 1, 2].map(id => CardsText.rankTitle(rank({ id, role: id === 2 ? 'coordinator' : 'worker' }))))
             .to.deep.equal(['Rank 0 · aggregator', 'Rank 1', 'Rank 2 · coordinator']);
-        expect(CardsText.rankTitle(rank({ id: 0, role: 'worker' }), coordinatorOn(-1, 0, 1)), 'no roles declared').to.equal('Rank 0 · aggregator');
-    });
-
-    it('titles schema 1\'s ranks as before: rank 0 the coordinator once the run has others, and no aggregator', () => {
-        const run = world(1, rank({ id: 0, sentinel: true }), rank({ id: 1 }));
-        expect(CardsText.rankTitle(run.nodes[0].sockets[0].ranks[0], run)).to.equal('Rank 0 · coordinator · sentinel');
-        expect(CardsText.rankTitle(run.nodes[0].sockets[0].ranks[1], run)).to.equal('Rank 1');
     });
 
     it('subtitles a rank with its process, frame and node', () => {

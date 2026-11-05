@@ -66,12 +66,11 @@ export namespace WorldSnapshotMapper {
         }
 
         return {
-            schemaVersion: envelope.version,
             timestampMillis: envelope.ts,
             elapsedSeconds: envelope.elapsed_seconds,
             nodes,
             structure: StructureKey.of(structure),
-            runId: envelope.run_id,
+            runId: envelope.run_id ?? '',
             run: envelope.topology?.run && toRunSetup(envelope.topology.run),
             paused: envelope.paused === true,
             final: envelope.final === true
@@ -91,8 +90,9 @@ export namespace WorldSnapshotMapper {
         };
     }
 
-    function toRole(role: string | undefined): SchedulerRole | undefined {
-        return role === 'coordinator' || role === 'worker' ? role : undefined;
+    /** gempba declares every rank a worker unless its scheduler names it the coordinator. */
+    function toRole(role: string | undefined): SchedulerRole {
+        return role === 'coordinator' ? role : 'worker';
     }
 
     function toAccounting(frame: RankFrame): RankAccounting {
