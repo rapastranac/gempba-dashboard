@@ -30,6 +30,14 @@ files:
 
 artifactName: gempba-dashboard-${version}-${os}-${arch}.${ext}
 
+# Where the app looks for updates (@gempba/updater). electron-builder writes it into the app as app-update.yml, and
+# writes the update manifests (latest*.yml) and blockmaps beside the installers. It uploads nothing (--publish never):
+# release.yml attaches them to the GitHub Release.
+publish:
+  provider: github
+  owner: rapastranac
+  repo: gempba-dashboard
+
 win:
   target:
     - nsis
