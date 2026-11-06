@@ -46,11 +46,15 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Refuse if the tag or branch already exists
+      # electron-updater never offers a lower version, so a release must go higher than every one before it.
+      - name: Refuse a version not higher than the latest v* tag, or an existing prep branch
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
-            echo "::error::tag $TAG already exists on origin"
+          latest=$(git ls-remote --tags --refs origin 'v*' \
+            | sed -n 's|.*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' | sort -V | tail -1)
+          highest=$(printf '%s\n' "$latest" "$TAG" | sort -V | tail -1)
+          if [ "$TAG" = "$latest" ] || [ "$TAG" != "$highest" ]; then
+            echo "::error::version $VERSION is not higher than the latest tag, $latest"
             exit 1
           fi
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
