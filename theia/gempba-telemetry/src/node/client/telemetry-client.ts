@@ -49,13 +49,18 @@ export class TelemetryClient {
     }
 
     /** False when not connected; true once the line is handed to the socket. */
-    sendControl(kind: ControlLine.IntervalKind, value: number): boolean {
+    send(line: ControlLine): boolean {
         const socket = this.socket;
         if (!socket || socket.readyState !== 'open') {
             return false;
         }
-        socket.write(ControlLine.format(kind, value));
+        socket.write(ControlLine.write(line));
         return true;
+    }
+
+    /** Sends an interval control, as {@link send} does. */
+    sendControl(kind: ControlLine.IntervalKind, value: number): boolean {
+        return this.send({ kind, value });
     }
 
     protected connect(): void {

@@ -4,7 +4,8 @@ import { MenuContribution, MenuModelRegistry } from '@theia/core/lib/common/menu
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { QuickInputService, QuickPickItem } from '@theia/core/lib/common/quick-pick-service';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
-import { Config, ConnectionMode, ConnectionState, SessionSpec, TargetSpec } from '@gempba/core';
+import { Config, ConnectionMode, ConnectionState, SessionSpec, StreamCondition, TargetSpec } from '@gempba/core';
+import { RunControl } from '../common/run-control';
 import { TelemetryService } from '../common/telemetry-service';
 
 export namespace TelemetryCommands {
@@ -13,6 +14,11 @@ export namespace TelemetryCommands {
     export const LISTEN: Command = { id: 'gempba.listen', category: CATEGORY, label: 'Listen…' };
     export const STOP: Command = { id: 'gempba.stop', category: CATEGORY, label: 'Stop Listening' };
     export const DISCONNECT: Command = { id: 'gempba.disconnect', category: CATEGORY, label: 'Disconnect' };
+    export const CLEAR: Command = { id: 'gempba.clear', category: CATEGORY, label: 'Clear Data' };
+    export const PAUSE: Command = { id: 'gempba.pause', category: CATEGORY, label: 'Pause' };
+    export const RESUME: Command = { id: 'gempba.resume', category: CATEGORY, label: 'Resume' };
+    export const SNAPSHOT: Command = { id: 'gempba.snapshot', category: CATEGORY, label: 'Snapshot' };
+    export const MARK: Command = { id: 'gempba.mark', category: CATEGORY, label: 'Mark…' };
     export const SET_RATE: Command = { id: 'gempba.setRefreshRate', category: CATEGORY, label: 'Set Refresh Rate…' };
 }
 
@@ -24,9 +30,11 @@ export namespace TelemetryMenus {
      * one menu item here, with no change to the views.
      */
     export const CONTROLS = ['gempba-telemetry-controls'];
+    export const RUN = [...CONTROLS, '0_run'];
     export const RATES = [...CONTROLS, '1_rates'];
     export const RATE = [...RATES, 'rate'];
     export const STREAM = [...CONTROLS, '2_stream'];
+    export const DATA = [...CONTROLS, '3_data'];
 }
 
 const MODE_LABELS: Record<ConnectionMode, string> = {
@@ -75,13 +83,50 @@ export class TelemetryCommandContribution implements CommandContribution, MenuCo
             isEnabled: () => this.telemetry.state !== ConnectionState.DISCONNECTED,
             execute: () => this.run(this.telemetry.disconnect())
         });
+        registry.registerCommand(TelemetryCommands.CLEAR, {
+            isEnabled: () => StreamCondition.isFrozen(this.telemetry.condition),
+            execute: () => this.telemetry.clear()
+        });
+        const offered = () => RunControl.offered(this.telemetry.condition);
+        registry.registerCommand(TelemetryCommands.PAUSE, {
+            isVisible: () => this.telemetry.condition !== 'paused',
+            isEnabled: () => offered().pause,
+            execute: () => this.run(this.telemetry.pause())
+        });
+        registry.registerCommand(TelemetryCommands.RESUME, {
+            isVisible: () => this.telemetry.condition === 'paused',
+            isEnabled: () => offered().resume,
+            execute: () => this.run(this.telemetry.resume())
+        });
+        registry.registerCommand(TelemetryCommands.SNAPSHOT, {
+            isEnabled: () => offered().snapshot,
+            execute: () => this.run(this.telemetry.requestSnapshot())
+        });
+        registry.registerCommand(TelemetryCommands.MARK, {
+            isEnabled: () => offered().mark,
+            execute: () => this.mark()
+        });
     }
 
     registerMenus(menus: MenuModelRegistry): void {
-        [TelemetryCommands.CONNECT, TelemetryCommands.LISTEN, TelemetryCommands.STOP, TelemetryCommands.DISCONNECT]
+        [TelemetryCommands.CONNECT, TelemetryCommands.LISTEN, TelemetryCommands.STOP, TelemetryCommands.DISCONNECT, TelemetryCommands.CLEAR]
             .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.SESSION, { commandId: command.id, order: String(index) }));
         [TelemetryCommands.STOP, TelemetryCommands.DISCONNECT]
             .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.STREAM, { commandId: command.id, order: String(index) }));
+        menus.registerMenuAction(TelemetryMenus.DATA, { commandId: TelemetryCommands.CLEAR.id });
+        [TelemetryCommands.PAUSE, TelemetryCommands.RESUME, TelemetryCommands.SNAPSHOT, TelemetryCommands.MARK]
+            .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.RUN, { commandId: command.id, order: String(index) }));
+    }
+
+    protected async mark(): Promise<void> {
+        const label = await this.quickInput.input({
+            title: 'GemPBA: Mark',
+            prompt: 'A label for this moment of the run, listed in its markers',
+            validateInput: async input => RunControl.labelProblem(input.trim())
+        });
+        if (label !== undefined) {
+            await this.run(this.telemetry.mark(label.trim()));
+        }
     }
 
     protected async connect(): Promise<void> {

@@ -444,6 +444,57 @@
     animation: none;
 }
 
+.gempba-stream-bar {
+    --gempba-stream-bar-accent: var(--theia-gempba-live-off);
+    display: flex;
+    align-items: center;
+    gap: calc(var(--theia-ui-padding) * 2);
+    min-height: 28px;
+    padding: 2px calc(var(--theia-ui-padding) * 2);
+    border-left: 3px solid var(--gempba-stream-bar-accent);
+    background: color-mix(in srgb, var(--gempba-stream-bar-accent) 12%, var(--theia-editor-background));
+    color: var(--theia-foreground);
+}
+
+.gempba-stream-bar-paused {
+    --gempba-stream-bar-accent: var(--theia-gempba-live-paused);
+}
+
+.gempba-stream-bar-ended {
+    --gempba-stream-bar-accent: var(--theia-gempba-live-ended);
+}
+
+.gempba-stream-bar-stale {
+    --gempba-stream-bar-accent: var(--theia-gempba-live-stale);
+}
+
+.gempba-stream-bar-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-stream-bar-actions {
+    display: flex;
+    flex: none;
+    gap: var(--theia-ui-padding);
+}
+
+.gempba-stream-bar-actions .theia-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    margin: 0;
+}
+
+.gempba-frozen {
+    opacity: 0.85;
+}
+
 @keyframes gempba-live-pulse {
     50% {
         opacity: 0.35;

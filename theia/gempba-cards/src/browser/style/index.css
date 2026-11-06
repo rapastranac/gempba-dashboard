@@ -1,8 +1,24 @@
 /* Colors come only from theme variables. */
 
-.gempba-cards-empty {
-    padding: calc(var(--theia-ui-padding) * 3);
-    color: var(--theia-descriptionForeground);
+/* The banner sits above the split: the stream bar at its own height, or the empty state filling the view in the split's place. */
+.gempba-cards.theia-split-widget {
+    display: flex;
+    flex-direction: column;
+}
+
+.gempba-cards.theia-split-widget > .lm-SplitPanel {
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto;
+}
+
+.gempba-cards-banner {
+    flex: none;
+    outline: none;
+}
+
+.gempba-cards-banner-empty {
+    flex: 1 1 auto;
 }
 
 .gempba-cards-icon {

@@ -5,6 +5,7 @@ import { TabBarToolbarContribution } from '@theia/core/lib/browser/shell/tab-bar
 import { bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { createTreeContainer } from '@theia/core/lib/browser/tree/tree-container';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager';
+import { CommandRegistry } from '@theia/core/lib/common/command';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { ContainerModule, interfaces } from '@theia/core/shared/inversify';
 import { TelemetryService } from '@gempba/telemetry/lib/common';
@@ -28,7 +29,7 @@ function createCardsWidget(parent: interfaces.Container): CardsWidget {
     });
     child.bind(CardsDetailsWidget).toSelf();
     return new CardsWidget(child.get(CardsTreeWidget), child.get(CardsTree), child.get(CardsDetailsWidget),
-        child.get(TelemetryService), child.get(SelectionService));
+        child.get(TelemetryService), child.get(SelectionService), child.get(CommandRegistry));
 }
 
 export default new ContainerModule(bind => {

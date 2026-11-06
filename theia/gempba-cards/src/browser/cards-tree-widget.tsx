@@ -48,11 +48,4 @@ export class CardsTreeWidget extends TreeWidget {
             {node.description && <span className={`${TREE_NODE_SEGMENT_CLASS} ${TREE_NODE_INFO_CLASS}`}>{node.description}</span>}
         </>;
     }
-
-    protected override renderTree(model: TreeModel): React.ReactNode {
-        if (CompositeTreeNode.is(model.root) && model.root.children.length === 0) {
-            return <p className='gempba-cards-empty'>No nodes yet. Listen to gempba's telemetry to see its nodes, sockets and ranks here.</p>;
-        }
-        return super.renderTree(model);
-    }
 }

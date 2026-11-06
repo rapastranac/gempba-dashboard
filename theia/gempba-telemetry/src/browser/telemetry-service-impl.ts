@@ -1,7 +1,8 @@
 import { Emitter } from '@theia/core/lib/common/event';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import {
-    ConnectionMode, ConnectionState, FrameArrivals, FrameCadence, NodeHistoryStore, RankHistoryStore, SessionSpec, TargetSpec, WorldSnapshot
+    ConnectionMode, ConnectionState, FrameArrivals, FrameCadence, NodeHistoryStore, RankHistoryStore, SessionSpec, StreamCondition, StreamLink,
+    TargetSpec, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
 import { ObservedIntervals, TelemetryService } from '../common/telemetry-service';
@@ -21,10 +22,14 @@ export class TelemetryServiceImpl implements TelemetryService {
     protected readonly onStateChangeEmitter = new Emitter<ConnectionState>();
     protected readonly onStatusEmitter = new Emitter<string>();
     protected readonly onIntervalChangeEmitter = new Emitter<number>();
+    protected readonly onLinkChangeEmitter = new Emitter<StreamLink | undefined>();
+    protected readonly onClearEmitter = new Emitter<void>();
     readonly onSnapshot = this.onSnapshotEmitter.event;
     readonly onStateChange = this.onStateChangeEmitter.event;
     readonly onStatus = this.onStatusEmitter.event;
     readonly onIntervalChange = this.onIntervalChangeEmitter.event;
+    readonly onLinkChange = this.onLinkChangeEmitter.event;
+    readonly onClear = this.onClearEmitter.event;
 
     protected currentState = ConnectionState.DISCONNECTED;
     protected latestSnapshot: WorldSnapshot | undefined;
@@ -35,6 +40,7 @@ export class TelemetryServiceImpl implements TelemetryService {
     protected latestFrameAt: number | undefined;
     protected latestLineAt: number | undefined;
     protected runId: string | undefined;
+    protected currentLink: StreamLink | undefined;
 
     get state(): ConnectionState {
         return this.currentState;
@@ -54,6 +60,14 @@ export class TelemetryServiceImpl implements TelemetryService {
 
     get status(): string {
         return this.latestStatus;
+    }
+
+    get link(): StreamLink | undefined {
+        return this.currentLink;
+    }
+
+    get condition(): StreamCondition | undefined {
+        return StreamCondition.of({ state: this.currentState, link: this.currentLink, snapshot: this.latestSnapshot });
     }
 
     get intervalMs(): number {
@@ -87,6 +101,7 @@ export class TelemetryServiceImpl implements TelemetryService {
             this.currentState = state;
             this.onStateChangeEmitter.fire(state);
         });
+        this.receiver.links(link => this.setLink(link));
         this.receiver.statuses(text => {
             this.latestStatus = text;
             this.onStatusEmitter.fire(text);
@@ -112,8 +127,9 @@ export class TelemetryServiceImpl implements TelemetryService {
     }
 
     async listen(target: TargetSpec): Promise<void> {
-        this.forget();
         this.runId = undefined;
+        this.setLink(undefined);
+        this.clear();
         await this.sendInterval();
         return this.server.listen(target);
     }
@@ -124,6 +140,27 @@ export class TelemetryServiceImpl implements TelemetryService {
 
     disconnect(): Promise<void> {
         return this.server.disconnect();
+    }
+
+    clear(): void {
+        this.forget();
+        this.onClearEmitter.fire();
+    }
+
+    pause(): Promise<void> {
+        return this.server.sendControl({ kind: 'pause' });
+    }
+
+    resume(): Promise<void> {
+        return this.server.sendControl({ kind: 'resume' });
+    }
+
+    requestSnapshot(): Promise<void> {
+        return this.server.sendControl({ kind: 'snapshot' });
+    }
+
+    mark(label: string): Promise<void> {
+        return this.server.sendControl({ kind: 'mark', label });
     }
 
     setIntervalMs(intervalMs: number): Promise<void> {
@@ -146,6 +183,13 @@ export class TelemetryServiceImpl implements TelemetryService {
         this.latestFrameAt = undefined;
         this.latestLineAt = undefined;
         this.latestSnapshot = undefined;
+    }
+
+    protected setLink(link: StreamLink | undefined): void {
+        if (this.currentLink !== link) {
+            this.currentLink = link;
+            this.onLinkChangeEmitter.fire(link);
+        }
     }
 
     protected observe(snapshot: WorldSnapshot, now: number): void {

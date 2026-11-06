@@ -3,9 +3,11 @@ import { expect } from 'chai';
 import { Emitter } from '@theia/core/lib/common/event';
 import { Container } from '@theia/core/shared/inversify';
 import {
-    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RankAccounting, RefreshInterval, SessionSpec, TargetSpec, RankHistoryStore, RankSnapshot, WorldSnapshot
+    ConnectionMode, ConnectionState, NodeHistoryStore, NodeSnapshot, RankAccounting, RefreshInterval, SessionSpec, StreamLink, TargetSpec, RankHistoryStore,
+    RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { TelemetryServer } from '../common/telemetry-protocol';
+import { RunControl } from '../common/run-control';
 import { ObservedIntervals, TelemetryService } from '../common/telemetry-service';
 import { RateSettings } from './rate-settings';
 import { TelemetryServerClientImpl } from './telemetry-server-client-impl';
@@ -58,6 +60,7 @@ describe('TelemetryServiceImpl', () => {
             stop: async () => void calls.push('stop'),
             disconnect: async () => void calls.push('disconnect'),
             pushInterval: async ms => void calls.push(`interval ${ms}`),
+            sendControl: async control => void calls.push(RunControl.text(control)),
             setClient: () => undefined,
             dispose: () => undefined
         };
@@ -174,14 +177,51 @@ describe('TelemetryServiceImpl', () => {
         expect([nodeHistory.seriesFor('h').cpu.length, service.observedIntervals.rankMs]).to.deep.equal([1, undefined]);
     });
 
-    it('a new target clears the snapshot, the histories, the observed rates and the frame times', async () => {
+    it('a new target clears the snapshot, the histories, the observed rates and the frame times, and forgets the link', async () => {
+        let cleared = 0;
+        service.onClear(() => cleared++);
+        receiver.onLink(StreamLink.UP);
         receiver.onSnapshot(snapshot('h', 1, 0));
         receiver.onSnapshot(snapshot('h', 2, 500));
         await service.listen(TargetSpec.of(undefined, 9001));
-        expect(service.snapshot).to.equal(undefined);
+        expect([service.snapshot, service.link, cleared]).to.deep.equal([undefined, undefined, 1]);
         expect([nodeHistory.hosts(), rankHistory.ranks()]).to.deep.equal([[], []]);
         expect(service.observedIntervals).to.deep.equal({ rankMs: undefined, nodeMs: undefined });
         expect([service.lastFrameAt, service.lastLineAt, service.nodeFrameAt('h')]).to.deep.equal([undefined, undefined, undefined]);
+    });
+
+    it('tells live, paused and frozen data apart, from the state, the link and the latest snapshot', () => {
+        const links: (StreamLink | undefined)[] = [];
+        service.onLinkChange(link => links.push(link));
+        expect(service.condition).to.equal(undefined);
+        receiver.onStateChange(ConnectionState.LISTENING);
+        receiver.onLink(StreamLink.UP);
+        receiver.onSnapshot(snapshot('h', 1, 0));
+        expect(service.condition).to.equal('live');
+        receiver.onSnapshot({ ...snapshot('h', 1, 0), paused: true });
+        expect(service.condition).to.equal('paused');
+        receiver.onLink(StreamLink.RETRYING);
+        receiver.onLink(StreamLink.RETRYING);
+        expect(service.condition).to.equal('reconnecting');
+        receiver.onStateChange(ConnectionState.DISCONNECTED);
+        receiver.onLink(StreamLink.STOPPED);
+        expect([service.condition, service.link]).to.deep.equal(['stopped', StreamLink.STOPPED]);
+        expect(links).to.deep.equal([StreamLink.UP, StreamLink.RETRYING, StreamLink.STOPPED]);
+    });
+
+    it('clears frozen data: the snapshot, the histories, the observed rates and the frame times, and announces it', () => {
+        let cleared = 0;
+        service.onClear(() => cleared++);
+        receiver.onSnapshot(snapshot('h', 1, 0));
+        receiver.onSnapshot(snapshot('h', 2, 500));
+        receiver.onStateChange(ConnectionState.DISCONNECTED);
+        receiver.onLink(StreamLink.STOPPED);
+        service.clear();
+        expect([service.snapshot, service.condition, cleared]).to.deep.equal([undefined, undefined, 1]);
+        expect([nodeHistory.hosts(), rankHistory.ranks()]).to.deep.equal([[], []]);
+        expect(service.observedIntervals).to.deep.equal({ rankMs: undefined, nodeMs: undefined });
+        expect([service.lastFrameAt, service.lastLineAt, service.nodeFrameAt('h')]).to.deep.equal([undefined, undefined, undefined]);
+        expect(service.link).to.equal(StreamLink.STOPPED);
     });
 
     it('forwards the other controls to the backend', async () => {
@@ -189,5 +229,13 @@ describe('TelemetryServiceImpl', () => {
         await service.disconnect();
         expect(await service.availableModes()).to.deep.equal([ConnectionMode.LOCAL]);
         expect(calls).to.deep.equal(['stop', 'disconnect']);
+    });
+
+    it('sends the run controls to the backend', async () => {
+        await service.pause();
+        await service.resume();
+        await service.requestSnapshot();
+        await service.mark('phase 2');
+        expect(calls).to.deep.equal(['pause', 'resume', 'snapshot', 'mark "phase 2"']);
     });
 });

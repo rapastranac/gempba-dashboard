@@ -2,13 +2,14 @@ import { ContextMenuRenderer } from '@theia/core/lib/browser/context-menu-render
 import { FrontendApplicationContribution } from '@theia/core/lib/browser/frontend-application-contribution';
 import { StatusBar, StatusBarAlignment } from '@theia/core/lib/browser/status-bar/status-bar-types';
 import { inject, injectable } from '@theia/core/shared/inversify';
-import { ConnectionState, Rates, RefreshInterval, RunSetupText, TaskWords } from '@gempba/core';
-import { ObservedIntervals, RankHistoryService, TelemetryService } from '../common/telemetry-service';
+import { StatusText } from '../common/status-text';
+import { RankHistoryService, TelemetryService } from '../common/telemetry-service';
 import { TelemetryMenus } from './telemetry-command-contribution';
 
 /**
- * One status-bar entry: the connection state, and while streaming the node count and the refresh rate. On hover
- * it shows the latest status, the run's tasks per second and how often frames arrive; a click opens the live controls.
+ * One status-bar entry, its words from {@link StatusText}: while live the nodes, the cluster's tasks a second and the
+ * refresh rate; with data held but not live, why and when it is from; else the connection state. On hover it shows the
+ * latest status, the run's setup and how often frames arrive; a click opens the live controls.
  */
 @injectable()
 export class TelemetryStatusBarContribution implements FrontendApplicationContribution {
@@ -28,29 +29,18 @@ export class TelemetryStatusBarContribution implements FrontendApplicationContri
         this.telemetry.onStatus(() => this.update());
         this.telemetry.onSnapshot(() => this.update());
         this.telemetry.onIntervalChange(() => this.update());
+        this.telemetry.onLinkChange(() => this.update());
+        this.telemetry.onClear(() => this.update());
     }
 
     protected update(): void {
-        const state = this.telemetry.state;
-        const listening = state === ConnectionState.LISTENING;
-        const nodes = this.telemetry.snapshot?.nodes.length;
-        const rate = RefreshInterval.label(this.telemetry.intervalMs);
-        const text = listening && nodes !== undefined
-            ? `$(pulse) GemPBA: ${nodes} ${nodes === 1 ? 'node' : 'nodes'} · ${rate}`
-            : `$(plug) GemPBA: ${state.toLowerCase()}`;
-        const lines = [this.telemetry.status || state.toLowerCase()];
-        const run = this.telemetry.snapshot?.run;
-        if (listening && run) {
-            lines.push(RunSetupText.line(run));
-        }
         const throughput = this.rankHistory.clusterThroughput();
-        if (listening && throughput.length > 0) {
-            lines.push(`${TaskWords.STARTED}: ${Rates.text(throughput[throughput.length - 1])}`);
-        }
-        const arriving = listening ? ObservedIntervals.text(this.telemetry.observedIntervals) : '';
-        lines.push(`Refresh rate ${rate}${arriving ? `; ${arriving}` : ''}`);
-        lines.push('Click for the refresh rate; the other GemPBA commands are in the command palette (F1).');
-        const tooltip = lines.join('\n');
+        const snapshot = this.telemetry.snapshot;
+        const { text, tooltip } = StatusText.of({
+            state: this.telemetry.state, condition: this.telemetry.condition, status: this.telemetry.status, nodes: snapshot?.nodes.length,
+            throughput: throughput.at(-1), intervalMs: this.telemetry.intervalMs, observed: this.telemetry.observedIntervals, run: snapshot?.run,
+            lastFrameAt: this.telemetry.lastFrameAt
+        });
         if (text + tooltip === this.shown) {
             return;
         }

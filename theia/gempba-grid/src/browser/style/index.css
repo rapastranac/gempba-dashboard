@@ -2,6 +2,13 @@
     overflow-y: auto;
 }
 
+/* The stream bar stays in sight while the tiles scroll under it. */
+.gempba-grid .gempba-stream-bar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
 .gempba-grid-overview {
     display: flex;
     flex-direction: column;

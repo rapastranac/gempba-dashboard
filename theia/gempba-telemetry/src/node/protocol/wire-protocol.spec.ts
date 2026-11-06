@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { RunControl } from '../../common/run-control';
 import { BroadcastEnvelope, ControlKind, ControlLine, RankFrame, RankIdentity } from './wire-protocol';
 
 const CANONICAL_ENVELOPE = `{
@@ -133,6 +134,14 @@ describe('ControlLine', () => {
     it('formats one newline-terminated JSON line per message', () => {
         expect(ControlLine.format(ControlKind.SetWorkerIntervalMs, 2500)).to.equal('{"kind":"set_worker_interval_ms","value":2500}\n');
         expect(ControlLine.format(ControlKind.SetNodeIntervalMs, 1000)).to.equal('{"kind":"set_node_interval_ms","value":1000}\n');
+    });
+
+    it('writes each run control as gempba v4.3.0 takes it, a mark with its label', () => {
+        expect([{ kind: 'pause' }, { kind: 'resume' }, { kind: 'snapshot' }, { kind: 'mark', label: 'phase "2"' }]
+            .map(control => ControlLine.write(ControlLine.of(control as RunControl)))).to.deep.equal([
+            '{"kind":"pause"}\n', '{"kind":"resume"}\n', '{"kind":"snapshot"}\n', '{"kind":"mark","label":"phase \\"2\\""}\n'
+        ]);
+        expect(ControlLine.parse(ControlLine.write({ kind: ControlKind.Mark, label: 'phase 2' }))).to.deep.equal({ kind: ControlKind.Mark, label: 'phase 2' });
     });
 
     it('does not pre-clamp the value; gempba clamps it', () => {

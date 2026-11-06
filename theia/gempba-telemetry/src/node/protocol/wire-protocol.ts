@@ -8,6 +8,8 @@
  * lists stay undefined (a missing topology node `sockets` means something different from an empty one).
  */
 
+import { RunControl } from '../../common/run-control';
+
 export interface BroadcastEnvelope {
     readonly version: number;
     /** A UUID v4 drawn once per run; schema 2. */
@@ -415,14 +417,36 @@ export namespace ControlLine {
     }
 
     /** gempba keeps a marker's label from 1 to 64 bytes. */
-    export const MAX_LABEL_BYTES = 64;
+    export const MAX_LABEL_BYTES = RunControl.MAX_LABEL_BYTES;
 
     export function isInterval(line: ControlLine): line is Interval {
         return line.kind === ControlKind.SetIntervalMs || line.kind === ControlKind.SetWorkerIntervalMs || line.kind === ControlKind.SetNodeIntervalMs;
     }
 
+    /** The line as written on the socket, its newline included: an interval in whole milliseconds, a mark with its label. */
+    export function write(line: ControlLine): string {
+        if (isInterval(line)) {
+            return JSON.stringify({ kind: line.kind, value: Math.round(line.value) }) + '\n';
+        }
+        return JSON.stringify(line.kind === ControlKind.Mark ? { kind: line.kind, label: line.label } : { kind: line.kind }) + '\n';
+    }
+
     export function format(kind: IntervalKind, value: number): string {
-        return JSON.stringify({ kind, value: Math.round(value) }) + '\n';
+        return write({ kind, value });
+    }
+
+    /** The line a user's run control goes out as. */
+    export function of(control: RunControl): ControlLine {
+        switch (control.kind) {
+            case 'pause':
+                return { kind: ControlKind.Pause };
+            case 'resume':
+                return { kind: ControlKind.Resume };
+            case 'snapshot':
+                return { kind: ControlKind.Snapshot };
+            case 'mark':
+                return { kind: ControlKind.Mark, label: control.label };
+        }
     }
 
     /** Mirrors gempba's forgiving parser: anything malformed or unknown reads as undefined. */

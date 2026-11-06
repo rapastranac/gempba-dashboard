@@ -1,11 +1,12 @@
 import { ContributionProvider } from '@theia/core/lib/common/contribution-provider';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { inject, injectable, named } from '@theia/core/shared/inversify';
-import { ConnectionMode, ConnectionState, RefreshInterval, SessionSpec, TargetSpec } from '@gempba/core';
+import { ConnectionMode, ConnectionState, RefreshInterval, SessionSpec, StreamLink, TargetSpec } from '@gempba/core';
+import { RunControl } from '../common/run-control';
 import { TelemetryServer, TelemetryServerClient } from '../common/telemetry-protocol';
 import { FrameListener } from './client/frame-listener';
 import { TelemetryClient } from './client/telemetry-client';
-import { ControlKind } from './protocol/wire-protocol';
+import { ControlKind, ControlLine } from './protocol/wire-protocol';
 import { TelemetryStore } from './telemetry/telemetry-store';
 import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
 
@@ -39,6 +40,8 @@ export class TelemetryServerImpl implements TelemetryServer {
     protected readonly store = new TelemetryStore();
     /** Whether the stream's latest line was the run's final one: gempba closes the connection after it. */
     protected runEnded = false;
+    /** The link last reported, so each change is sent once; a new Listen forgets it. */
+    protected link: StreamLink | undefined;
     protected intervalMs = RefreshInterval.DEFAULT_MS;
 
     setClient(client: TelemetryServerClient | undefined): void {
@@ -104,6 +107,7 @@ export class TelemetryServerImpl implements TelemetryServer {
         this.forward = forward;
         this.store.reset();
         this.runEnded = false;
+        this.link = undefined;
         const address = `${TelemetryServerImpl.LOOPBACK}:${forward.port}`;
         this.telemetry = new TelemetryClient(TelemetryServerImpl.LOOPBACK, forward.port, this.frameListener(epoch, address));
         this.setState(ConnectionState.LISTENING);
@@ -116,6 +120,7 @@ export class TelemetryServerImpl implements TelemetryServer {
             return;
         }
         this.endStream();
+        this.setLink(StreamLink.STOPPED);
         this.status('stopped listening');
     }
 
@@ -157,6 +162,7 @@ export class TelemetryServerImpl implements TelemetryServer {
         const host = this.sessionHost;
         this.teardown();
         this.setState(ConnectionState.DISCONNECTED);
+        this.setLink(StreamLink.SESSION_CLOSED);
         this.status(`SSH session to ${host} closed (${cause ? cause.message : 'the server ended it'}); connect again`);
     }
 
@@ -165,6 +171,7 @@ export class TelemetryServerImpl implements TelemetryServer {
         this.teardown();
         if (wasConnected) {
             this.setState(ConnectionState.DISCONNECTED);
+            this.setLink(StreamLink.DISCONNECTED);
             this.status('disconnected');
         }
     }
@@ -181,6 +188,16 @@ export class TelemetryServerImpl implements TelemetryServer {
         }
     }
 
+    async sendControl(control: RunControl): Promise<void> {
+        const what = RunControl.text(control);
+        const problem = control.kind === 'mark' ? RunControl.labelProblem(control.label) : undefined;
+        if (problem) {
+            this.status(`${what} not sent: ${problem}`);
+        } else {
+            this.status(this.telemetry?.send(ControlLine.of(control)) ? `${what} sent` : `${what} not sent, the connection is down`);
+        }
+    }
+
     dispose(): void {
         this.teardown();
         this.client = undefined;
@@ -191,6 +208,7 @@ export class TelemetryServerImpl implements TelemetryServer {
             onConnected: () => {
                 if (epoch === this.epoch && this.telemetry) {
                     this.sendInterval(this.telemetry);
+                    this.setLink(StreamLink.UP);
                     this.status(`connected to ${address}`);
                 }
             },
@@ -205,6 +223,7 @@ export class TelemetryServerImpl implements TelemetryServer {
                 if (epoch !== this.epoch) {
                     return;
                 }
+                this.setLink(StreamLink.RETRYING);
                 this.status(this.runEnded
                     ? `the run ended; waiting for the next run on ${address}`
                     : `disconnected from ${address} (${cause ? cause.message : 'peer closed'}); retrying…`);
@@ -239,6 +258,13 @@ export class TelemetryServerImpl implements TelemetryServer {
         if (this.state !== state) {
             this.state = state;
             this.client?.onStateChange(state);
+        }
+    }
+
+    protected setLink(link: StreamLink): void {
+        if (this.link !== link) {
+            this.link = link;
+            this.client?.onLink(link);
         }
     }
 
