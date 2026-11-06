@@ -215,7 +215,10 @@ export namespace CardsPanel {
         ];
         // only gempba's centralized coordinator queues tasks, for the workers that run out
         if (rank.schedulerPendingCount > 0) {
-            heroes.push({ label: 'Queued', value: NumberText.grouped(rank.schedulerPendingCount), unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
+            heroes.push({
+                label: 'Queued', value: NumberText.grouped(rank.schedulerPendingCount), unit: noun(rank.schedulerPendingCount, 'task'), detail: 'waiting for idle workers',
+                tone: 'network'
+            });
         }
         const bars: Bars[] = work.runsTasks ? [{
             title: 'Thread pool',
@@ -228,10 +231,13 @@ export namespace CardsPanel {
             bars.push({
                 title: 'Busiest peers',
                 peers: true,
-                rows: peers.map(peer => ({
-                    label: peer.host === '—' ? peer.peer : `${peer.peer} · ${peer.host}`, fraction: (counts.get(peer.peer) ?? 0) / busiest,
-                    valueText: `${peer.tasks} tasks · ${peer.bytes}`, tone: 'network'
-                }))
+                rows: peers.map(peer => {
+                    const count = counts.get(peer.peer) ?? 0;
+                    return {
+                        label: peer.host === '—' ? peer.peer : `${peer.peer} · ${peer.host}`, fraction: count / busiest,
+                        valueText: `${peer.tasks} ${noun(count, 'task')} · ${peer.bytes}`, tone: 'network'
+                    };
+                })
             });
         }
         const cpu: Chart = {
@@ -432,7 +438,11 @@ export namespace CardsPanel {
         return values.length > 0 ? values[values.length - 1] : undefined;
     }
 
-    function plural(count: number, noun: string): string {
-        return `${count} ${noun}${count === 1 ? '' : 's'}`;
+    function plural(count: number, word: string): string {
+        return `${count} ${noun(count, word)}`;
+    }
+
+    function noun(count: number, word: string): string {
+        return count === 1 ? word : `${word}s`;
     }
 }

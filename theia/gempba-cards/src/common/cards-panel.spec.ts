@@ -220,6 +220,11 @@ describe('CardsPanel', () => {
             expect(coordinator.heroes[3]).to.deep.equal({ label: 'Queued', value: '1,200', unit: 'tasks', detail: 'waiting for idle workers', tone: 'network' });
         });
 
+        it('says one queued task in the singular', () => {
+            const queued = (count: number) => CardsPanel.forRank(undefined, socket(), rank({ id: 0, schedulerPendingCount: count }), histories()).heroes[3];
+            expect([1, 2].map(count => [queued(count).value, queued(count).unit])).to.deep.equal([['1', 'task'], ['2', 'tasks']]);
+        });
+
         it('totals what no figure shows: tasks started, sent and received with their run averages, the bytes moved, and the pool\'s idle time', () => {
             const totals = CardsPanel.forRank(undefined, socket(), rank({ tasksSentTotal: 30, idleMicrosPerThread: 4_500_000 }), histories()).totals;
             expect(totals.map(total => [total.label, total.value])).to.deep.equal([
@@ -314,6 +319,12 @@ describe('CardsPanel', () => {
                 ['Rank 7 · beta', 1, '70 tasks · 7.0 KB'], ['Rank 6', 6 / 7, '60 tasks · 6.0 KB'], ['Rank 5', 5 / 7, '50 tasks · 5.0 KB'],
                 ['Rank 4', 4 / 7, '40 tasks · 4.0 KB'], ['Rank 2', 2 / 7, '20 tasks · 2.0 KB']
             ]);
+        });
+
+        it('says a peer sent one task in the singular, and several in the plural with their digits grouped', () => {
+            const peers = [{ peerRank: 1, count: 1, bytes: 512 }, { peerRank: 2, count: 2, bytes: 1024 }, { peerRank: 4, count: 12_450, bytes: 2048 }];
+            const busiest = CardsPanel.forRank(undefined, socket(), rank({ peers }), histories()).bars[1];
+            expect(busiest.rows.map(row => row.valueText)).to.deep.equal(['12,450 tasks · 2.0 KB', '2 tasks · 1.0 KB', '1 task · 512 B']);
         });
 
         it('has no peers panel without peers', () => {
