@@ -27,7 +27,9 @@ export interface RemoteConnectionOptions {
  * A persistent, authenticated SSH session to the VM (HOST) or the login node (JUMP), established once, paying any
  * MFA cost, and held until disconnect. Each target gets a cheap {@link Forward} over it, never re-authenticating.
  * JUMP runs the hop to the compute node on the login node itself (`ssh -N -L` over a PTY exec channel), so it uses
- * the cluster's own node-to-node trust and closing the channel hangs the hop up.
+ * the cluster's own node-to-node trust and closing the channel hangs the hop up. ProxyJump would not do: this machine
+ * would complete the handshake with the compute node, which trusts only connections from a login node and asks for a
+ * password the user doesn't have.
  */
 export class RemoteConnection {
 
