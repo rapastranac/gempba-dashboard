@@ -181,10 +181,11 @@ export namespace CardsPanel {
         // gempba's process has one thread beyond its pool, which runs the tasks; a source that counts differently never shows more running than threads
         const pool = Math.max(rank.threads - 1, rank.tasksRunning, 1);
         const memory: Hero = { label: 'Memory', ...bytesValue(rank.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' };
+        const started = series.counts.tasksStarted.perSecond;
         const heroes: Hero[] = [
             ...(work.runsTasks ? [
                 {
-                    label: TaskWords.STARTED, ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks' as const,
+                    label: TaskWords.STARTED, ...Rates.of(latest(started)), trend: Trend.of(started), tone: 'tasks' as const,
                     detail: runAverage([rank]), hint: TaskWords.STARTED_HINT
                 },
                 {
@@ -228,7 +229,7 @@ export namespace CardsPanel {
             },
             heroes,
             charts: work.runsTasks ? [
-                rateChart(series.tasksPerSecond),
+                rateChart(series.counts.tasksStarted.perSecond),
                 {
                     title: 'Idle', latest: idle === undefined ? '—' : `${NumberText.fixed(idle, 0)}%`, values: series.idlePct, max: 100,
                     capacity: RankHistoryStore.CAPACITY, tone: 'idle'

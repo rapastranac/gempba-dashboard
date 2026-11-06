@@ -33,7 +33,10 @@ function node(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
 function histories(overrides: Partial<{ node: NodeSeries, rank: RankSeries, throughput: number[] }> = {}): CardsPanel.Histories {
     return {
         node: () => overrides.node ?? { cpu: [50, 75], mem: [3 * GiB, 4 * GiB], cpuLatest: 75, memUsedLatest: 4 * GiB, memTotalLatest: 16 * GiB },
-        rank: () => overrides.rank ?? { cpu: [280, 300], tasksPerSecond: [110, 120], idlePct: [10, 12.4], rssBytes: [250 * 1024 ** 2, 256 * 1024 ** 2] },
+        rank: () => overrides.rank ?? {
+            cpu: [280, 300], idlePct: [10, 12.4], rssBytes: [250 * 1024 ** 2, 256 * 1024 ** 2],
+            counts: { ...RankSeries.empty().counts, tasksStarted: { total: [], perSecond: [110, 120] } }
+        },
         throughput: () => overrides.throughput ?? [100, 100, 100, 100, 100, 130, 130, 130, 130, 130]
     };
 }

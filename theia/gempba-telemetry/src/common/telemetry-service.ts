@@ -1,6 +1,6 @@
 import { Event } from '@theia/core/lib/common/event';
 import {
-    ConnectionMode, ConnectionState, NodeSeries, RankSeries, RefreshInterval, SessionSpec, StreamCondition, StreamLink, TargetSpec, WorldSnapshot
+    ConnectionMode, ConnectionState, CountHistories, NodeSeries, RankSeries, RefreshInterval, SessionSpec, StreamCondition, StreamLink, TargetSpec, WorldSnapshot
 } from '@gempba/core';
 
 /**
@@ -106,6 +106,8 @@ export interface RankHistoryService {
     seriesFor(id: number): RankSeries;
     /** Tasks started per second by all of one node's ranks, oldest first. */
     throughputFor(host: string): readonly number[];
+    /** One node's sums of its ranks' counts, as running totals and as rates, oldest first; tasks run locally leave out a coordinator. */
+    countsFor(host: string): CountHistories;
     /** Tasks started per second by every rank, oldest first. */
     clusterThroughput(): readonly number[];
 }
