@@ -41,6 +41,14 @@ describe('check-layers', () => {
         expect(findViolations([plugins])).to.deep.equal(['@gempba/plugins must not depend on @gempba/telemetry (dependencies)']);
     });
 
+    it('keeps the updater free of every other GemPBA package', () => {
+        const updater = { name: '@gempba/updater', dependencies: { '@gempba/shell': '2.0.0', '@gempba/telemetry': '2.0.0', '@theia/core': '1.76.0' } };
+        expect(findViolations([updater])).to.deep.equal([
+            '@gempba/updater must not depend on @gempba/shell (dependencies)',
+            '@gempba/updater must not depend on @gempba/telemetry (dependencies)'
+        ]);
+    });
+
     it('lets the app compose anything', () => {
         const app = { name: '@gempba/electron-app', dependencies: { '@gempba/shell': '2.0.0', '@gempba/grid': '2.0.0' } };
         expect(findViolations([app])).to.deep.equal([]);
