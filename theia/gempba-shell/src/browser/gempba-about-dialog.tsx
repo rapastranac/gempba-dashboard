@@ -21,7 +21,7 @@ export class GemPbaAboutDialog extends AboutDialog {
     protected override renderHeader(): React.ReactNode {
         const theiaVersion = this.extensionsInfos.find(extension => extension.name === '@theia/core')?.version;
         return <div className='about-details'>
-            <p>Live telemetry monitor for the GemPBA framework.</p>
+            <p>Live telemetry monitor for the GemPBA hybrid parallel framework.</p>
             {this.applicationInfo && <p>Version {this.applicationInfo.version}</p>}
             <p>Author: {APPLICATION_AUTHOR} · {APPLICATION_LICENSE}</p>
             {theiaVersion && <p>Built on Eclipse Theia {theiaVersion}</p>}

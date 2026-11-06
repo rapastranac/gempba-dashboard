@@ -3,7 +3,7 @@
   "name": "@gempba/electron-app",
   "productName": "GemPBA Dashboard",
   "version": "2.0.0",
-  "description": "Live dashboard for GemPBA, the parallel branch-and-bound framework: nodes, sockets and workers of a running job.",
+  "description": "Live dashboard for GemPBA, the hybrid parallel framework: nodes, sockets and workers of a running job.",
   "license": "MIT",
   "author": "Andres Pastrana",
   "homepage": "https://rapastranac.github.io/gempba-docs/",
