@@ -77,6 +77,65 @@ export namespace ChartCatalog {
         return tiles;
     }
 
+    /** Whether the layout can take another tile of this id: a level once, a count once as a running total and once as a rate. */
+    export function canAdd(tiles: readonly Tile[], id: Id): boolean {
+        return added(tiles, id) !== undefined;
+    }
+
+    /** The layout with a tile of this id at its end, a count as its running total, or as its rate once its total shows. */
+    export function add(tiles: readonly Tile[], id: Id): Tile[] {
+        const tile = added(tiles, id);
+        return tile ? [...tiles, tile] : [...tiles];
+    }
+
+    /** Whether the tile at `index` can become one of this id, a count keeping its form, without repeating a tile shown. */
+    export function canSwap(tiles: readonly Tile[], index: number, id: Id): boolean {
+        const tile = tiles[index];
+        return tile !== undefined && tile.id !== id && !shows(tiles, swapped(tile, id), index);
+    }
+
+    export function swap(tiles: readonly Tile[], index: number, id: Id): Tile[] {
+        return canSwap(tiles, index, id) ? tiles.map((tile, at) => at === index ? swapped(tile, id) : tile) : [...tiles];
+    }
+
+    /** Whether the count at `index` can show in this form, which another tile doesn't show already. */
+    export function canShowAs(tiles: readonly Tile[], index: number, form: Form): boolean {
+        const tile = tiles[index];
+        return tile !== undefined && countOf(tile.id) !== undefined && (tile.form ?? 'total') !== form && !shows(tiles, { id: tile.id, form }, index);
+    }
+
+    export function showAs(tiles: readonly Tile[], index: number, form: Form): Tile[] {
+        return canShowAs(tiles, index, form) ? tiles.map((tile, at) => at === index ? { id: tile.id, form } : tile) : [...tiles];
+    }
+
+    /** The layout with the tile at `from` moved to `to`, the tiles between shifting over. */
+    export function move(tiles: readonly Tile[], from: number, to: number): Tile[] {
+        if (from === to || tiles[from] === undefined || to < 0 || to >= tiles.length) {
+            return [...tiles];
+        }
+        const moved = [...tiles];
+        moved.splice(to, 0, ...moved.splice(from, 1));
+        return moved;
+    }
+
+    export function remove(tiles: readonly Tile[], index: number): Tile[] {
+        return tiles.filter((_, at) => at !== index);
+    }
+
+    function added(tiles: readonly Tile[], id: Id): Tile | undefined {
+        const forms: (Form | undefined)[] = countOf(id) ? ['total', 'rate'] : [undefined];
+        return forms.map((form): Tile => form ? { id, form } : { id }).find(tile => !shows(tiles, tile));
+    }
+
+    function swapped(tile: Tile, id: Id): Tile {
+        return countOf(id) ? { id, form: tile.form ?? 'total' } : { id };
+    }
+
+    /** Whether a tile other than the one at `except` shows this one. */
+    function shows(tiles: readonly Tile[], tile: Tile, except = -1): boolean {
+        return tiles.some((each, at) => at !== except && key(each) === key(tile));
+    }
+
     function parse(kind: Kind, entry: string): Tile | undefined {
         const [id, form, ...rest] = entry.trim().split(':');
         if (rest.length > 0 || !IDS[kind].includes(id as Id)) {
