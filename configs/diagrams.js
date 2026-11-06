@@ -121,12 +121,12 @@ const reach = {
 
 /** The app's three processes, the packages in each, and what crosses between them. */
 const processes = {
-    title: 'How the app runs: the backend holds the TCP and SSH connections, the frontend draws the views, Electron main owns the windows',
-    width: 1080, height: 560,
+    title: 'How the app runs: the backend holds the TCP and SSH connections, the frontend draws the views, Electron main owns the windows and updates',
+    width: 1080, height: 670,
     parts: [
         group({ x: 240, y: 20, w: 300, h: 520, label: 'Backend: Node.js' }),
         group({ x: 660, y: 20, w: 400, h: 520, label: 'Frontend: the window' }),
-        group({ x: 20, y: 360, w: 190, h: 180, label: 'Electron main' }),
+        group({ x: 20, y: 300, w: 190, h: 260, label: 'Electron main' }),
         box({ x: 20, y: 200, w: 190, h: 70, title: 'gempba run', sub: ['telemetry on rank 0'], kind: 'external' }),
         box({ x: 260, y: 45, w: 260, h: 80, title: '@gempba/telemetry', sub: ['TelemetryServer: TCP client,', 'wire protocol, store, mapper'], kind: 'hub' }),
         box({ x: 260, y: 200, w: 260, h: 70, title: '@gempba/auth', sub: ['SSH session, HOST and JUMP tunnels'], kind: 'feature' }),
@@ -137,7 +137,14 @@ const processes = {
         box({ x: 680, y: 270, w: 170, h: 70, title: '@gempba/auth', sub: ['MFA, passphrase,', 'host-key prompts'], kind: 'feature' }),
         box({ x: 870, y: 270, w: 170, h: 70, title: '@gempba/shell', sub: ['branding,', 'IDE parts stripped'], kind: 'theia' }),
         box({ x: 680, y: 380, w: 170, h: 70, title: '@gempba/controls', sub: ['Connection view'], kind: 'feature' }),
-        box({ x: 35, y: 410, w: 160, h: 80, title: '@gempba/shell', sub: ['window icon,', 'background throttling'], kind: 'theia' }),
+        box({ x: 35, y: 330, w: 160, h: 70, title: '@gempba/shell', sub: ['window icon,', 'background throttling'], kind: 'theia' }),
+        box({ x: 35, y: 430, w: 160, h: 80, title: '@gempba/updater', sub: ['electron-updater:', 'check, download,', 'install'], kind: 'theia' }),
+        box({ x: 870, y: 470, w: 170, h: 60, title: '@gempba/updater', sub: ['Check for Updates…'], kind: 'theia' }),
+        box({ x: 20, y: 600, w: 190, h: 56, title: 'GitHub Releases', sub: ['rapastranac/gempba-dashboard'], kind: 'external' }),
+        arrow({ points: [[115, 600], [115, 510]] }),
+        label({ x: 125, y: 582, rows: ['HTTPS: manifests,', 'installer'], anchor: 'start' }),
+        arrow({ points: [[955, 530], [955, 580], [225, 580], [225, 470], [195, 470]], both: true }),
+        label({ x: 590, y: 572, rows: ['Electron IPC: check, download with progress, install'] }),
         arrow({ points: [[115, 200], [115, 85], [260, 85]], both: true }),
         label({ x: 130, y: 62, rows: ['TCP: lines in,', 'controls out'], anchor: 'start' }),
         arrow({ points: [[390, 125], [390, 200]], dashed: true }),
@@ -176,6 +183,7 @@ const packages = {
             sub: ['the hub:', 'TelemetryService,', 'histories, commands,', 'live controls,', 'TunnelProvider'], kind: 'hub'
         }),
         box({ x: 800, y: 244, w: 160, h: 108, title: '@gempba/core', sub: ['read-model,', 'formatters, policies;', 'no Theia; features', 'use its types too'], kind: 'kernel' }),
+        box({ x: 40, y: 110, w: 180, h: 56, title: '@gempba/updater', sub: ['updates, on request'], kind: 'theia' }),
         box({ x: 40, y: 190, w: 180, h: 216, title: '@gempba/ui', sub: ['the UI kit: tiles,', 'charts, gauges,', 'panels, themes'], kind: 'plain' }),
         box({ x: 40, y: 440, w: 180, h: 56, title: '@gempba/plugins', sub: ['VS Code plugins'], kind: 'theia' }),
         box({ x: 40, y: 520, w: 180, h: 56, title: '@gempba/shell', sub: ['branding, IDE stripped'], kind: 'theia' }),

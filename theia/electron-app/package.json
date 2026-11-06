@@ -42,6 +42,7 @@
     "@gempba/plugins": "2.0.0",
     "@gempba/shell": "2.0.0",
     "@gempba/telemetry": "2.0.0",
+    "@gempba/updater": "2.0.0",
     "@theia/core": "1.76.0",
     "@theia/electron": "1.76.0",
     "@theia/messages": "1.76.0",

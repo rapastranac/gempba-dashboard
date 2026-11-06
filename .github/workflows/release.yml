@@ -1,7 +1,7 @@
 name: Release
 
 # Builds the installers on each OS, boots every packaged app, and on a v* tag attaches the installers to the GitHub
-# Release. A manual run builds and checks them without publishing, and so does a pull request that changes the
+# Release, with the update manifests (latest*.yml) and blockmaps the app's updater reads. A manual run builds and checks them without publishing, and so does a pull request that changes the
 # packaging, so packaging is tested whenever it changes and costs no minutes otherwise. Unsigned: Windows shows
 # "Unknown publisher" and macOS Gatekeeper asks the user to allow the app once.
 
@@ -14,6 +14,7 @@ on:
       - .github/workflows/release.yml
       - .github/actions/setup-node-theia/**
       - configs/build-production.js
+      - configs/merge-update-manifests.js
       - configs/smoke-test.js
       - configs/fixtures/plugins/**
       - theia/electron-app/electron-builder.yml
@@ -67,6 +68,18 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run package
+      # The updater reads app-update.yml inside the app, and the release's manifest beside the installers.
+      - name: Check the update files
+        run: |
+          dist=theia/electron-app/dist
+          case "$RUNNER_OS" in
+            Linux) manifest=latest-linux.yml; config="$dist/${{ matrix.unpacked }}/resources/app-update.yml" ;;
+            Windows) manifest=latest.yml; config="$dist/${{ matrix.unpacked }}/resources/app-update.yml" ;;
+            macOS) manifest=latest-mac.yml; config="$(ls -d "$dist/${{ matrix.unpacked }}"/*.app)/Contents/Resources/app-update.yml" ;;
+          esac
+          for file in "$dist/$manifest" "$config"; do
+            [ -f "$file" ] || { echo "::error::$file is missing"; exit 1; }
+          done
       - name: Boot the packaged app
         run: |
           dir="theia/electron-app/dist/${{ matrix.unpacked }}"
@@ -84,6 +97,8 @@ jobs:
             theia/electron-app/dist/*.zip
             theia/electron-app/dist/*.AppImage
             theia/electron-app/dist/*.deb
+            theia/electron-app/dist/latest*.yml
+            theia/electron-app/dist/*.blockmap
           if-no-files-found: error
 
   # One job publishes, so the four uploads do not race to create the release.
@@ -95,10 +110,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
       - uses: actions/download-artifact@v8
         with:
-          path: dist
-          merge-multiple: true
+          path: artifacts
+      # Each artifact lands in a folder of its own: both macOS builds wrote a latest-mac.yml, merged here into one.
+      - name: Gather the release files
+        run: node configs/merge-update-manifests.js artifacts dist
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*

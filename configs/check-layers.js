@@ -12,6 +12,7 @@ const ALLOWED = {
     '@gempba/shell': [],
     '@gempba/plugins': ['@gempba/shell', '@gempba/ui'],
     '@gempba/ui': [],
+    '@gempba/updater': [],
     '@gempba/electron-app': '*'
 };
 const FEATURE_ALLOWED = ['@gempba/core', '@gempba/telemetry', '@gempba/ui'];
