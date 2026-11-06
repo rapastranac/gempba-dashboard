@@ -2,7 +2,8 @@ name: Prepare release
 
 # Manually triggered: opens a release-prep PR against main for version X.Y.Z. It sets every package to the version
 # (configs/set-version.js), refreshes the lockfile, drafts the release notes from git log, and opens the PR. After
-# curating the notes and merging, push the vX.Y.Z tag and release.yml builds and publishes the installers.
+# curating the notes and merging, push the vX.Y.Z tag: release.yml builds the installers and opens a draft release
+# with the notes, to publish by hand after a look.
 
 on:
   workflow_dispatch:
@@ -135,9 +136,10 @@ jobs:
             "" \
             "**Operator checklist**" \
             "" \
-            "- [ ] Curate \`docs/releases/release-notes-v${VERSION}.md\`." \
+            "- [ ] Curate \`docs/releases/release-notes-v${VERSION}.md\`; it becomes the release's description." \
             "- [ ] Confirm CI is green on this branch." \
             "- [ ] Merge to \`main\`." \
-            "- [ ] Push the \`${TAG}\` tag — release.yml builds, boots and publishes the installers." \
+            "- [ ] Push the \`${TAG}\` tag — release.yml builds and boots the installers and opens a draft release with them and the notes." \
+            "- [ ] Look over the draft's notes and files, then publish it: every installed app is offered it at once." \
             > "$BODY"
           gh pr create --base main --head "$BRANCH" --title "Prep release ${TAG}" --label Release --body-file "$BODY"
