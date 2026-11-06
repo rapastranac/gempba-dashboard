@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import {
-    NodeHistoryStore, NodeSeries, NodeSnapshot, RankAccounting, RankHistoryStore, RankSeries, RankSnapshot, SchedulerRole, SocketSnapshot, StructureKey, TaskWords,
+    CountHistories, NodeHistoryStore, NodeSeries, NodeSnapshot, RankAccounting, RankHistoryStore, RankSeries, RankSnapshot, SchedulerRole, SocketSnapshot, StructureKey, TaskWords,
     WorldSnapshot
 } from '@gempba/core';
 import { CardsPanel } from './cards-panel';
@@ -30,11 +30,20 @@ function node(overrides: Partial<NodeSnapshot> = {}): NodeSnapshot {
     };
 }
 
-function histories(overrides: Partial<{ node: NodeSeries, rank: RankSeries, throughput: number[] }> = {}): CardsPanel.Histories {
+/** The counts with only tasks started kept, its running totals and rates. */
+function started(perSecond: number[], total: number[] = []): CountHistories {
+    return { ...CountHistories.empty(), tasksStarted: { total, perSecond } };
+}
+
+function histories(overrides: Partial<{ node: NodeSeries, rank: RankSeries, throughput: number[], counts: CountHistories }> = {}): CardsPanel.Histories {
     return {
         node: () => overrides.node ?? { cpu: [50, 75], mem: [3 * GiB, 4 * GiB], cpuLatest: 75, memUsedLatest: 4 * GiB, memTotalLatest: 16 * GiB },
-        rank: () => overrides.rank ?? { cpu: [280, 300], tasksPerSecond: [110, 120], idlePct: [10, 12.4], rssBytes: [250 * 1024 ** 2, 256 * 1024 ** 2] },
-        throughput: () => overrides.throughput ?? [100, 100, 100, 100, 100, 130, 130, 130, 130, 130]
+        rank: () => overrides.rank ?? {
+            cpu: [280, 300], idlePct: [10, 12.4], rssBytes: [250 * 1024 ** 2, 256 * 1024 ** 2],
+            counts: started([110, 120], [11_000, 12_200])
+        },
+        throughput: () => overrides.throughput ?? [100, 100, 100, 100, 100, 130, 130, 130, 130, 130],
+        counts: () => overrides.counts ?? started([100, 130], [1_000, 2_300])
     };
 }
 
@@ -74,7 +83,7 @@ describe('CardsPanel', () => {
         it('shows no rate before the ranks sent two frames', () => {
             const [tasks] = CardsPanel.forNode(node(), histories({ throughput: [] })).heroes;
             expect([tasks.value, tasks.unit]).to.deep.equal(['—', undefined]);
-            expect(CardsPanel.forNode(node(), histories({ throughput: [] })).charts[2].latest).to.equal('—');
+            expect(CardsPanel.forNode(node(), histories({ throughput: [], counts: CountHistories.empty() })).charts[1].latest).to.equal('—');
         });
 
         it('takes memory from the node frame before the history has any, and leaves it out when unknown', () => {
@@ -83,19 +92,35 @@ describe('CardsPanel', () => {
             expect(CardsPanel.forNode(node({ memTotalBytes: 0, hasLiveMemory: false }), fresh).heroes.map(hero => hero.label)).to.not.include('Memory');
         });
 
-        it('charts CPU on a 0–100 scale, memory up to the total, and tasks started on a round scale', () => {
+        it('charts by default CPU on a 0–100 scale, its tasks started so far on a round scale, and memory up to the total', () => {
             const charts = CardsPanel.forNode(node(), histories()).charts;
-            expect(charts.map(chart => chart.capacity)).to.deep.equal([NodeHistoryStore.CAPACITY, NodeHistoryStore.CAPACITY, RankHistoryStore.CAPACITY]);
-            expect(charts.map(chart => [chart.title, chart.latest, chart.max, chart.tone])).to.deep.equal([
-                ['CPU', '75%', 100, 'cpu'], ['Memory', '4.0 GB', 16 * GiB, 'memory'], ['Tasks started', '130 tasks/s', undefined, 'tasks']
+            expect(charts.map(chart => chart.capacity)).to.deep.equal([NodeHistoryStore.CAPACITY, RankHistoryStore.CAPACITY, NodeHistoryStore.CAPACITY]);
+            expect(charts.map(chart => [chart.key, chart.title, chart.latest, chart.max, chart.tone])).to.deep.equal([
+                ['cpu', 'CPU', '75%', 100, 'cpu'], ['tasks-started:total', 'Tasks started', '2,300 so far', undefined, 'tasks'],
+                ['memory', 'Memory', '4.0 GB', 16 * GiB, 'memory']
+            ]);
+        });
+
+        it('charts the counts its layout asks for, summed over its ranks, as rates or so far', () => {
+            const counts: CountHistories = {
+                ...started([100, 130], [1_000, 2_300]), tasksLocal: { total: [700, 1_500], perSecond: [70, 80] },
+                bytesReceived: { total: [2_048, 4_096], perSecond: [1_024, 2_048] }
+            };
+            const charts = CardsPanel.forNode(node(), histories({ counts }), [
+                { id: 'tasks-local', form: 'rate' }, { id: 'tasks-local', form: 'total' }, { id: 'bytes-received', form: 'rate' }, { id: 'bytes-received', form: 'total' }
+            ]).charts;
+            expect(charts.map(chart => [chart.key, chart.latest, chart.values, chart.tone])).to.deep.equal([
+                ['tasks-local:rate', '80 tasks/s', [70, 80], 'tasks'], ['tasks-local:total', '1,500 so far', [700, 1_500], 'tasks'],
+                ['bytes-received:rate', '2.0 KB/s', [1_024, 2_048], 'network'], ['bytes-received:total', '4.0 KB so far', [2_048, 4_096], 'network']
             ]);
         });
 
         it('counts slow tasks per minute, the chart in one unit for its whole history', () => {
-            const panel = CardsPanel.forNode(node(), histories({ throughput: [0.1, 0.2] }));
+            const rate = [{ id: 'tasks-started', form: 'rate' }] as const;
+            const panel = CardsPanel.forNode(node(), histories({ throughput: [0.1, 0.2], counts: started([0.1, 0.2]) }), rate);
             expect(panel.heroes[0]).to.include({ value: '12', unit: '/min' });
-            expect([panel.charts[2].latest, panel.charts[2].values]).to.deep.equal(['12 tasks/min', [6, 12]]);
-            const mixed = CardsPanel.forNode(node(), histories({ throughput: [2, 0.5] })).charts[2];
+            expect([panel.charts[0].latest, panel.charts[0].values]).to.deep.equal(['12 tasks/min', [6, 12]]);
+            const mixed = CardsPanel.forNode(node(), histories({ counts: started([2, 0.5]) }), rate).charts[0];
             expect([mixed.latest, mixed.values]).to.deep.equal(['0.50 tasks/s', [2, 0.5]]);
         });
 
@@ -156,11 +181,31 @@ describe('CardsPanel', () => {
             expect(memory).to.include({ value: '256.0', unit: 'MB', tone: 'memory' });
         });
 
-        it('charts its tasks started, idle time and CPU, the CPU as a share of its cores as the gauge reads it', () => {
+        it('charts by default its CPU, as a share of its cores as the gauge reads it, its tasks started so far and its idle time', () => {
             const charts = CardsPanel.forRank(undefined, socket(), rank(), histories()).charts;
-            expect(charts.map(chart => [chart.title, chart.latest, chart.max]))
-                .to.deep.equal([['Tasks started', '120 tasks/s', undefined], ['Idle', '12%', 100], ['CPU', '75% of 4 cores', 100]]);
-            expect(charts[2].values).to.deep.equal([70, 75]);
+            expect(charts.map(chart => [chart.title, chart.latest, chart.max, chart.unavailable]))
+                .to.deep.equal([['CPU', '75% of 4 cores', 100, undefined], ['Tasks started', '12,200 so far', undefined, undefined], ['Idle', '12%', 100, undefined]]);
+            expect(charts[0].values).to.deep.equal([70, 75]);
+        });
+
+        it('charts each tile its layout asks for, a count as a rate or so far', () => {
+            const series: RankSeries = {
+                ...RankSeries.empty(), rssBytes: [GiB, 2 * GiB],
+                counts: {
+                    ...started([110, 120], [11_000, 12_200]), tasksSent: { total: [4, 9], perSecond: [0.05, 0.1] }, tasksReceived: { total: [3, 3], perSecond: [0, 0] },
+                    bytesSent: { total: [1_024, 3_072], perSecond: [512, 1_024] }
+                }
+            };
+            const charts = CardsPanel.forRank(undefined, socket(), rank(), histories({ rank: series }), [
+                { id: 'memory' }, { id: 'tasks-started', form: 'rate' }, { id: 'tasks-sent', form: 'rate' }, { id: 'tasks-received', form: 'total' },
+                { id: 'bytes-sent', form: 'rate' }, { id: 'bytes-sent', form: 'total' }
+            ]).charts;
+            expect(charts.map(chart => [chart.key, chart.latest, chart.values, chart.tone])).to.deep.equal([
+                ['memory', '256.0 MB', [GiB, 2 * GiB], 'memory'], ['tasks-started:rate', '120 tasks/s', [110, 120], 'tasks'],
+                ['tasks-sent:rate', '6.0 tasks/min', [3, 6], 'network'], ['tasks-received:total', '3 so far', [3, 3], 'network'],
+                ['bytes-sent:rate', '1.0 KB/s', [512, 1_024], 'network'], ['bytes-sent:total', '3.0 KB so far', [1_024, 3_072], 'network']
+            ]);
+            expect(charts[1].hint).to.equal(TaskWords.STARTED_HINT);
         });
 
         it('meters its thread pool: the tasks running of its threads', () => {
@@ -211,7 +256,12 @@ describe('CardsPanel', () => {
                 const panel = panelOf(coordinator);
                 expect(panel.title).to.equal('Rank 2 · coordinator');
                 expect(panel.subtitle).to.match(/^schedules the run, runs no tasks · /);
-                expect([labels(panel.heroes), labels(panel.charts.map(chart => ({ label: chart.title }))), panel.bars]).to.deep.equal([['Memory', 'Queued'], ['CPU'], []]);
+                expect([labels(panel.heroes), panel.bars]).to.deep.equal([['Memory', 'Queued'], []]);
+                expect(panel.charts.map(chart => [chart.title, chart.unavailable])).to.deep.equal([
+                    ['CPU', undefined], ['Tasks started', 'Schedules the run and runs no tasks'], ['Idle', 'Schedules the run and runs no tasks']
+                ]);
+                expect(CardsPanel.forRank(undefined, socket(), coordinator, histories(), [{ id: 'tasks-local', form: 'total' }]).charts[0].unavailable)
+                    .to.equal('A coordinator queues the tasks it receives and starts none, so it runs none locally');
                 expect(panel.totals.map(total => [total.label, total.value])).to.deep.equal([
                     ['Tasks sent', '0'], ['Tasks received', '0'], ['Bytes sent', '2.0 KB in 1.5 ms'], ['Bytes received', '0 B in 0 µs'],
                     ['Assignments', '4 · 500 µs mean, 900 µs max'], ['Reports handled', '30']
@@ -240,9 +290,11 @@ describe('CardsPanel', () => {
                 expect(labels(panelOf(unassigned).totals).slice(-1)).to.deep.equal(['Reports handled']);
             });
 
-            it('shows a rank that has done nothing yet its memory and CPU alone', () => {
+            it('shows a rank that has done nothing yet its memory and CPU, and says its task charts have nothing yet', () => {
                 const panel = panelOf(counted('worker', { tasksStartedTotal: 0, schedulerPendingCount: 0 }, {}));
-                expect([labels(panel.heroes), panel.charts.map(chart => chart.title), panel.bars]).to.deep.equal([['Memory'], ['CPU'], []]);
+                expect([labels(panel.heroes), panel.bars]).to.deep.equal([['Memory'], []]);
+                expect(panel.charts.map(chart => [chart.title, chart.unavailable]))
+                    .to.deep.equal([['CPU', undefined], ['Tasks started', 'No tasks run yet'], ['Idle', 'No tasks run yet']]);
                 expect(labels(panel.totals)).to.deep.equal(['Tasks sent', 'Tasks received', 'Bytes sent', 'Bytes received']);
                 expect(panel.subtitle).to.not.match(/schedules the run/);
             });

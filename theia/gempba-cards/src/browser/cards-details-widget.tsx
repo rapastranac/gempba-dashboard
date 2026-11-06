@@ -1,3 +1,4 @@
+import { ContextMenuRenderer } from '@theia/core/lib/browser/context-menu-renderer';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { codicon } from '@theia/core/lib/browser/widgets/widget';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
@@ -8,7 +9,10 @@ import { Gauge, HeatStrip, HeroStat, LiveIndicator, LivenessWatch, MeterBar, Pan
 import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { MotionTiming } from '@gempba/ui/lib/common/motion-timing';
 import { CardsPanel } from '../common/cards-panel';
+import { ChartCatalog } from '../common/chart-catalog';
 import { CardsTreeNode } from './cards-tree';
+import { ChartLayouts } from './chart-layouts';
+import { ChartMenus } from './chart-menus';
 import { PeersDialog } from './peers-dialog';
 
 /** What the details pane shows: the picked row, found again in the latest snapshot. */
@@ -16,11 +20,14 @@ interface Shown {
     readonly panel: CardsPanel.Panel;
     readonly icon: string;
     readonly rank?: RankSnapshot;
+    /** Whose chart layout the panel follows: a node's or a rank's; a socket has no charts. */
+    readonly kind?: ChartCatalog.Kind;
 }
 
 /**
  * The picked row of the Cards tree as a live instrument panel beside it: a gauge and headline figures, history
- * charts, heat strips and bars, then the run's totals. Each figure shows once. The Cards view tells it what to show.
+ * charts, heat strips and bars, then the run's totals. Each figure shows once. The Cards view tells it what to show; the
+ * charts follow the saved layout of every rank's or node's panel, which its menus edit and a drag reorders.
  */
 @injectable()
 export class CardsDetailsWidget extends ReactWidget {
@@ -30,15 +37,21 @@ export class CardsDetailsWidget extends ReactWidget {
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
     @inject(NodeHistoryService) protected readonly nodeHistory: NodeHistoryService;
     @inject(RankHistoryService) protected readonly rankHistory: RankHistoryService;
+    @inject(ChartLayouts) protected readonly layouts: ChartLayouts;
+    @inject(ContextMenuRenderer) protected readonly contextMenu: ContextMenuRenderer;
 
     protected snapshot: WorldSnapshot | undefined;
     protected row: CardsTreeNode | undefined;
+    /** The chart being dragged, and the one it is over, by their place in the layout. */
+    protected dragFrom: number | undefined;
+    protected dragOver: number | undefined;
     protected readonly liveness = new LivenessWatch(this, () => this.streamLiveness(), () => this.update());
 
     protected readonly histories: CardsPanel.Histories = {
         node: host => this.nodeHistory.seriesFor(host),
         rank: id => this.rankHistory.seriesFor(id),
-        throughput: host => this.rankHistory.throughputFor(host)
+        throughput: host => this.rankHistory.throughputFor(host),
+        counts: host => this.rankHistory.countsFor(host)
     };
 
     @postConstruct()
@@ -47,6 +60,7 @@ export class CardsDetailsWidget extends ReactWidget {
         this.addClass('gempba-cards-details');
         this.scrollOptions = { suppressScrollX: true };
         this.toDispose.push(this.liveness);
+        this.toDispose.push(this.layouts.onChange(() => this.update()));
     }
 
     showDetails(snapshot: WorldSnapshot | undefined, row: CardsTreeNode | undefined): void {
@@ -61,7 +75,7 @@ export class CardsDetailsWidget extends ReactWidget {
             this.liveness.none();
             return <p className='gempba-cards-empty'>Pick a node, socket or rank to see its details.</p>;
         }
-        const { panel, icon, rank } = shown;
+        const { panel, icon, rank, kind } = shown;
         return <div className='gempba-cards-panel' style={{ '--gempba-motion-duration': `${this.motionMs()}ms` } as React.CSSProperties}>
             <header className='gempba-cards-details-header'>
                 <div>
@@ -77,11 +91,7 @@ export class CardsDetailsWidget extends ReactWidget {
                 {panel.gauge && <Gauge {...panel.gauge} />}
                 {panel.heroes.map(hero => <HeroStat key={hero.label} {...hero} />)}
             </div>
-            {panel.charts.length > 0 && <div className='gempba-cards-charts'>
-                {panel.charts.map(chart => <Panel key={chart.title} title={chart.title} actions={<span className='gempba-cards-latest'>{chart.latest}</span>}>
-                    <Sparkline values={chart.values} max={chart.max} capacity={chart.capacity} tone={chart.tone} label={`${chart.title} of ${panel.title}`} />
-                </Panel>)}
-            </div>}
+            {kind && this.renderCharts(panel, kind)}
             {panel.strips.map(strip => <Panel key={strip.title} title={`${strip.title}: load per CPU`}>
                 <HeatStrip cells={strip.cells} label={`Estimated load on each CPU of ${strip.title}`} />
             </Panel>)}
@@ -103,6 +113,85 @@ export class CardsDetailsWidget extends ReactWidget {
                 </table>
             </Panel>}
         </div>;
+    }
+
+    /** The charts three to a row under a button with the area's menu; an emptied layout keeps the button, to add one again. */
+    protected renderCharts(panel: CardsPanel.Panel, kind: ChartCatalog.Kind): React.ReactNode {
+        return <section className='gempba-cards-chart-area' aria-label='Charts'>
+            <header className='gempba-cards-chart-area-header'>
+                <button type='button' className='theia-button secondary gempba-cards-charts-menu' title={`Add a chart to every ${kind}'s panel, or reset its charts`}
+                    onClick={event => this.openMenu(event, ChartMenus.AREA, [kind])}>
+                    <span className='codicon codicon-graph' aria-hidden={true} />
+                    Charts
+                    <span className='codicon codicon-chevron-down' aria-hidden={true} />
+                </button>
+            </header>
+            {panel.charts.length === 0
+                ? <p className='gempba-cards-chart-unavailable'>No charts: add one from Charts.</p>
+                : <div className='gempba-cards-charts'>{panel.charts.map((chart, index) => this.renderChart(panel, kind, chart, index))}</div>}
+        </section>;
+    }
+
+    /** One chart, with its menu beside its latest figure; dragging it onto another moves it there in every panel of its kind. */
+    protected renderChart(panel: CardsPanel.Panel, kind: ChartCatalog.Kind, chart: CardsPanel.Chart, index: number): React.ReactNode {
+        const classes = ['gempba-cards-chart', ...(this.dragFrom === index ? ['gempba-cards-chart-dragging'] : []),
+            ...(this.dragOver === index && this.dragFrom !== undefined && this.dragFrom !== index ? ['gempba-cards-chart-drop'] : [])];
+        return <div key={chart.key} className={classes.join(' ')} draggable={true} title={chart.hint}
+            onDragStart={event => {
+                this.dragFrom = index;
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', chart.title);
+            }}
+            onDragEnter={event => this.acceptDrag(event)}
+            onDragOver={event => {
+                if (this.acceptDrag(event) && this.dragOver !== index) {
+                    this.dragOver = index;
+                    this.update();
+                }
+            }}
+            onDrop={event => {
+                event.preventDefault();
+                const from = this.dragFrom;
+                this.dragFrom = this.dragOver = undefined;
+                if (from !== undefined && from !== index) {
+                    this.layouts.set(kind, ChartCatalog.move(this.layouts.get(kind), from, index)).catch(() => undefined);
+                }
+                this.update();
+            }}
+            onDragEnd={() => {
+                this.dragFrom = this.dragOver = undefined;
+                this.update();
+            }}>
+            <Panel title={chart.title} actions={<>
+                {!chart.unavailable && <span className='gempba-cards-latest'>{chart.latest}</span>}
+                <button type='button' className='gempba-cards-chart-options codicon codicon-chevron-down' title='Chart options' aria-label={`Options of the ${chart.title} chart`}
+                    onClick={event => this.openMenu(event, ChartMenus.TILE, [kind, index])} />
+            </>}>
+                {chart.unavailable
+                    ? <p className='gempba-cards-chart-unavailable'>{chart.unavailable}</p>
+                    : <Sparkline values={chart.values} max={chart.max} capacity={chart.capacity} tone={chart.tone} label={`${chart.title} of ${panel.title}`} />}
+            </Panel>
+        </div>;
+    }
+
+    /**
+     * Lets a chart being dragged drop here. Theia's document listener refuses every drop on the window, against files dragged
+     * in, so a chart's own drag stops before it gets there.
+     */
+    protected acceptDrag(event: React.DragEvent): boolean {
+        if (this.dragFrom === undefined) {
+            return false;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = 'move';
+        return true;
+    }
+
+    /** Opens a chart menu under the button that asked for it, which works from the keyboard too. */
+    protected openMenu(event: React.MouseEvent<HTMLElement>, menuPath: string[], args: unknown[]): void {
+        const box = event.currentTarget.getBoundingClientRect();
+        this.contextMenu.render({ menuPath, anchor: { x: box.left, y: box.bottom }, args, context: event.currentTarget });
     }
 
     protected renderViewAll(rank: RankSnapshot): React.ReactNode {
@@ -138,7 +227,7 @@ export class CardsDetailsWidget extends ReactWidget {
             return undefined;
         }
         if (row.kind === 'node') {
-            return { panel: CardsPanel.forNode(node, this.histories), icon: codicon('server') };
+            return { panel: CardsPanel.forNode(node, this.histories, this.layouts.get('node')), icon: codicon('server'), kind: 'node' };
         }
         const socket = node.sockets.find(candidate => candidate.socketId === row.socketId);
         if (!socket) {
@@ -148,6 +237,9 @@ export class CardsDetailsWidget extends ReactWidget {
             return { panel: CardsPanel.forSocket(node, socket), icon: codicon('circuit-board') };
         }
         const rank = socket.ranks.find(candidate => candidate.id === row.rank);
-        return rank && { panel: CardsPanel.forRank(this.snapshot, socket, rank, this.histories), icon: codicon(rank.sentinel ? 'star-full' : 'gear'), rank };
+        return rank && {
+            panel: CardsPanel.forRank(this.snapshot, socket, rank, this.histories, this.layouts.get('rank')), icon: codicon(rank.sentinel ? 'star-full' : 'gear'), rank,
+            kind: 'rank'
+        };
     }
 }

@@ -1,12 +1,18 @@
 import { WorldSnapshot } from '../model/world-snapshot';
 import { RingSeries } from './ring-series';
-import { RankSeries } from './rank-series';
+import { CountHistories, RankCount, RankSeries } from './rank-series';
 import { RankTrack } from './rank-track';
 
+/** One node's sums of its ranks' counts, as running totals and as rates. */
+interface NodeCounts {
+    readonly totals: Record<RankCount, RingSeries>;
+    readonly rates: Record<RankCount, RingSeries>;
+}
+
 /**
- * Per-rank rolling history with live rates, and the throughput of each node and of the whole run; the telemetry
- * stream itself keeps none. The frames repeat a rank's latest sample until it sends a new one, so only a frame with
- * a new sequence number adds a sample. Ranks and nodes that leave the frames are dropped.
+ * Per-rank rolling history with live rates, each node's sums of its ranks' counts, and the throughput of the whole run;
+ * the telemetry stream itself keeps none. The frames repeat a rank's latest sample until it sends a new one, so only a
+ * frame with a new sequence number adds a sample. Ranks and nodes that leave the frames are dropped.
  */
 export class RankHistoryStore {
 
@@ -14,7 +20,7 @@ export class RankHistoryStore {
     static readonly CAPACITY = 120;
 
     protected readonly tracks = new Map<number, RankTrack>();
-    protected readonly throughputByHost = new Map<string, RingSeries>();
+    protected readonly nodeCounts = new Map<string, NodeCounts>();
     protected readonly throughputOfCluster = new RingSeries(RankHistoryStore.CAPACITY);
 
     update(snapshot: WorldSnapshot | undefined): void {
@@ -27,7 +33,8 @@ export class RankHistoryStore {
         let clusterChanged = false;
         for (const node of snapshot.nodes) {
             hosts.add(node.host);
-            let total = 0;
+            const totals = zeros();
+            const rates = zeros();
             let rated = false;
             let changed = false;
             for (const socket of node.sockets) {
@@ -35,25 +42,32 @@ export class RankHistoryStore {
                     seen.add(rank.id);
                     const track = this.trackOf(rank.id);
                     changed = track.record(rank) || changed;
-                    const rate = track.latestTasksPerSecond();
-                    if (rate !== undefined) {
-                        total += rate;
-                        rated = true;
+                    const rankTotals = track.latestTotals();
+                    const rankRates = track.latestRates();
+                    rated = rated || rankRates !== undefined;
+                    // a count that means nothing on a rank, such as tasks run locally on a coordinator, stays out of its node's sum
+                    for (const count of RankCount.ALL.filter(each => RankCount.applies(rank, each))) {
+                        totals[count] += rankTotals[count];
+                        rates[count] += rankRates?.[count] ?? 0;
                     }
                 }
             }
-            // a node adds a sample when one of its ranks sent a new frame, once one of them has a rate
-            if (changed && rated) {
-                this.throughputRingOf(node.host).push(total);
-                clusterChanged = true;
+            // a node adds a sample when one of its ranks sent a new frame, and a rate once one of them has a rate
+            if (changed) {
+                const counts = this.countsOf(node.host);
+                RankCount.ALL.forEach(count => counts.totals[count].push(totals[count]));
+                if (rated) {
+                    RankCount.ALL.forEach(count => counts.rates[count].push(rates[count]));
+                    clusterChanged = true;
+                }
             }
-            clusterTotal += total;
+            clusterTotal += rates.tasksStarted;
         }
         if (clusterChanged) {
             this.throughputOfCluster.push(clusterTotal);
         }
         dropMissing(this.tracks, seen);
-        dropMissing(this.throughputByHost, hosts);
+        dropMissing(this.nodeCounts, hosts);
     }
 
     seriesFor(id: number): RankSeries {
@@ -62,7 +76,13 @@ export class RankHistoryStore {
 
     /** Tasks started per second by all of one node's ranks, oldest first. */
     throughputFor(host: string): readonly number[] {
-        return this.throughputByHost.get(host)?.values() ?? [];
+        return this.nodeCounts.get(host)?.rates.tasksStarted.values() ?? [];
+    }
+
+    /** One node's sums of its ranks' counts, as running totals and as rates, oldest first; tasks run locally leave out a coordinator. */
+    countsFor(host: string): CountHistories {
+        const counts = this.nodeCounts.get(host);
+        return counts ? CountHistories.of(count => ({ total: counts.totals[count].values(), perSecond: counts.rates[count].values() })) : CountHistories.empty();
     }
 
     /** Tasks started per second by every rank, oldest first. */
@@ -77,7 +97,7 @@ export class RankHistoryStore {
 
     clear(): void {
         this.tracks.clear();
-        this.throughputByHost.clear();
+        this.nodeCounts.clear();
         this.throughputOfCluster.clear();
     }
 
@@ -90,14 +110,22 @@ export class RankHistoryStore {
         return track;
     }
 
-    protected throughputRingOf(host: string): RingSeries {
-        let ring = this.throughputByHost.get(host);
-        if (!ring) {
-            ring = new RingSeries(RankHistoryStore.CAPACITY);
-            this.throughputByHost.set(host, ring);
+    protected countsOf(host: string): NodeCounts {
+        let counts = this.nodeCounts.get(host);
+        if (!counts) {
+            counts = { totals: rings(), rates: rings() };
+            this.nodeCounts.set(host, counts);
         }
-        return ring;
+        return counts;
     }
+}
+
+function zeros(): Record<RankCount, number> {
+    return Object.fromEntries(RankCount.ALL.map(count => [count, 0])) as Record<RankCount, number>;
+}
+
+function rings(): Record<RankCount, RingSeries> {
+    return Object.fromEntries(RankCount.ALL.map(count => [count, new RingSeries(RankHistoryStore.CAPACITY)])) as Record<RankCount, RingSeries>;
 }
 
 function dropMissing<K>(map: Map<K, unknown>, kept: ReadonlySet<K>): void {

@@ -5,11 +5,15 @@ import { TabBarToolbarContribution } from '@theia/core/lib/browser/shell/tab-bar
 import { bindViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { createTreeContainer } from '@theia/core/lib/browser/tree/tree-container';
 import { WidgetFactory } from '@theia/core/lib/browser/widget-manager';
-import { CommandRegistry } from '@theia/core/lib/common/command';
+import { CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
+import { MenuContribution } from '@theia/core/lib/common/menu';
+import { PreferenceContribution } from '@theia/core/lib/common/preferences/preference-schema';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { ContainerModule, interfaces } from '@theia/core/shared/inversify';
 import { TelemetryService } from '@gempba/telemetry/lib/common';
 import { CardsDetailsWidget } from './cards-details-widget';
+import { ChartLayouts, ChartPreferences } from './chart-layouts';
+import { ChartMenuContribution } from './chart-menus';
 import { CardsNodeOpener } from './cards-node-opener';
 import { CardsTree } from './cards-tree';
 import { CardsTreeWidget } from './cards-tree-widget';
@@ -41,5 +45,10 @@ export default new ContainerModule(bind => {
     bind(FrontendApplicationContribution).toService(CardsViewContribution);
     bind(TabBarToolbarContribution).toService(CardsViewContribution);
     bind(CardsNodeOpener).toSelf().inSingletonScope();
+    bind(PreferenceContribution).toConstantValue({ schema: ChartPreferences.SCHEMA });
+    bind(ChartLayouts).toSelf().inSingletonScope();
+    bind(ChartMenuContribution).toSelf().inSingletonScope();
+    bind(CommandContribution).toService(ChartMenuContribution);
+    bind(MenuContribution).toService(ChartMenuContribution);
     bind(OpenHandler).toService(CardsNodeOpener);
 });

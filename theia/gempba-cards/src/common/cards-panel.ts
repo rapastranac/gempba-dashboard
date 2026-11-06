@@ -1,14 +1,16 @@
 import {
-    Bytes, CoreHeat, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, RankAccounting, RankHistoryStore, RankSeries,
-    RankSnapshot, RankWork, Rates, SocketSnapshot, TaskWords, WorldSnapshot
+    Bytes, CoreHeat, CountHistories, CountSeries, Cpu, Durations, NodeHistoryStore, NodeSeries, NodeSnapshot, NodeUtilization, NumberText, RankAccounting,
+    RankCount, RankHistoryStore, RankSeries, RankSnapshot, RankWork, Rates, SocketSnapshot, TaskWords, WorldSnapshot
 } from '@gempba/core';
 import { Trend } from '@gempba/ui/lib/common/trend';
 import { CardsText } from './cards-text';
+import { ChartCatalog } from './chart-catalog';
 
 /**
  * The live instrument panel of the row picked in the Cards tree: its header, headline figures, a gauge, history charts,
  * heat strips, bars and run totals, all worded and scaled here. Each figure appears once, and a rank's CPU always
- * reads as a share of the cores it may use. Pure, so the view only lays it out with the UI kit.
+ * reads as a share of the cores it may use. The charts follow the panel's layout of {@link ChartCatalog} tiles. Pure, so the
+ * view only lays it out with the UI kit.
  */
 export namespace CardsPanel {
 
@@ -35,6 +37,8 @@ export namespace CardsPanel {
     }
 
     export interface Chart {
+        /** The tile it draws, as its layout saves it. */
+        readonly key: string;
         readonly title: string;
         /** The newest sample, in words, beside the title. */
         readonly latest: string;
@@ -45,6 +49,10 @@ export namespace CardsPanel {
         /** How many samples a full chart holds: its history's. */
         readonly capacity: number;
         readonly tone: Tone;
+        /** What the chart counts, on hover. */
+        readonly hint?: string;
+        /** Why this panel has nothing to chart for the tile, shown in the chart's place. */
+        readonly unavailable?: string;
     }
 
     export interface HeatCell {
@@ -99,12 +107,14 @@ export namespace CardsPanel {
         node(host: string): NodeSeries;
         rank(id: number): RankSeries;
         throughput(host: string): readonly number[];
+        /** A node's sums of its ranks' counts. */
+        counts(host: string): CountHistories;
     }
 
     /** The busiest peers a rank's panel shows; the rest open with View all…. */
     export const TOP_PEERS = 5;
 
-    export function forNode(node: NodeSnapshot, histories: Histories): Panel {
+    export function forNode(node: NodeSnapshot, histories: Histories, layout: readonly ChartCatalog.Tile[] = ChartCatalog.DEFAULTS.node): Panel {
         const series = histories.node(node.host);
         const throughput = histories.throughput(node.host);
         const ranks = node.sockets.flatMap(socket => socket.ranks);
@@ -127,14 +137,21 @@ export namespace CardsPanel {
             subtitle: nodeFacts(node),
             gauge: { label: 'CPU of the allocation', fraction: node.nodeUtilPct / 100, valueText: `${NumberText.fixed(node.nodeUtilPct, 0)}%`, tone: 'cpu' },
             heroes,
-            charts: [
-                { title: 'CPU', latest: `${NumberText.fixed(series.cpuLatest, 0)}%`, values: series.cpu, max: 100, capacity: NodeHistoryStore.CAPACITY, tone: 'cpu' },
-                {
-                    title: 'Memory', latest: memTotal > 0 ? Bytes.human(memUsed) : '—', values: series.mem, max: memTotal > 0 ? memTotal : undefined,
-                    capacity: NodeHistoryStore.CAPACITY, tone: 'memory'
-                },
-                rateChart(throughput)
-            ],
+            charts: layout.map(tile => {
+                const count = ChartCatalog.countOf(tile.id);
+                if (count) {
+                    return countChart(tile, histories.counts(node.host)[count]);
+                }
+                return tile.id === 'memory'
+                    ? {
+                        key: 'memory', title: 'Memory', latest: memTotal > 0 ? Bytes.human(memUsed) : '—', values: series.mem, max: memTotal > 0 ? memTotal : undefined,
+                        capacity: NodeHistoryStore.CAPACITY, tone: 'memory'
+                    }
+                    : {
+                        key: 'cpu', title: 'CPU', latest: `${NumberText.fixed(series.cpuLatest, 0)}%`, values: series.cpu, max: 100,
+                        capacity: NodeHistoryStore.CAPACITY, tone: 'cpu'
+                    };
+            }),
             strips: node.sockets.filter(socket => socket.cpuIds.length > 0).map(socket => strip(node, socket)),
             bars: [],
             totals: []
@@ -171,7 +188,8 @@ export namespace CardsPanel {
         };
     }
 
-    export function forRank(world: WorldSnapshot | undefined, socket: SocketSnapshot, rank: RankSnapshot, histories: Histories): Panel {
+    export function forRank(world: WorldSnapshot | undefined, socket: SocketSnapshot, rank: RankSnapshot, histories: Histories,
+        layout: readonly ChartCatalog.Tile[] = ChartCatalog.DEFAULTS.rank): Panel {
         const series = histories.rank(rank.id);
         const accessible = accessibleCores(rank, socket);
         const idle = latest(series.idlePct);
@@ -181,10 +199,11 @@ export namespace CardsPanel {
         // gempba's process has one thread beyond its pool, which runs the tasks; a source that counts differently never shows more running than threads
         const pool = Math.max(rank.threads - 1, rank.tasksRunning, 1);
         const memory: Hero = { label: 'Memory', ...bytesValue(rank.rssBytes), trend: Trend.of(series.rssBytes), tone: 'memory' };
+        const started = series.counts.tasksStarted.perSecond;
         const heroes: Hero[] = [
             ...(work.runsTasks ? [
                 {
-                    label: TaskWords.STARTED, ...Rates.of(latest(series.tasksPerSecond)), trend: Trend.of(series.tasksPerSecond), tone: 'tasks' as const,
+                    label: TaskWords.STARTED, ...Rates.of(latest(started)), trend: Trend.of(started), tone: 'tasks' as const,
                     detail: runAverage([rank]), hint: TaskWords.STARTED_HINT
                 },
                 {
@@ -216,7 +235,7 @@ export namespace CardsPanel {
             });
         }
         const cpu: Chart = {
-            title: 'CPU', latest: `${NumberText.fixed(rank.cpuPct / accessible, 0)}% of ${plural(accessible, 'core')}`, values: series.cpu.map(pct => pct / accessible),
+            key: 'cpu', title: 'CPU', latest: `${NumberText.fixed(rank.cpuPct / accessible, 0)}% of ${plural(accessible, 'core')}`, values: series.cpu.map(pct => pct / accessible),
             max: 100, capacity: RankHistoryStore.CAPACITY, tone: 'cpu'
         };
         return {
@@ -227,14 +246,28 @@ export namespace CardsPanel {
                 valueText: `${NumberText.fixed(rank.cpuPct / accessible, 0)}%`
             },
             heroes,
-            charts: work.runsTasks ? [
-                rateChart(series.tasksPerSecond),
-                {
-                    title: 'Idle', latest: idle === undefined ? '—' : `${NumberText.fixed(idle, 0)}%`, values: series.idlePct, max: 100,
-                    capacity: RankHistoryStore.CAPACITY, tone: 'idle'
-                },
-                cpu
-            ] : [cpu],
+            charts: layout.map(tile => {
+                const count = ChartCatalog.countOf(tile.id);
+                // a tile whose data this rank doesn't have says why, rather than drawing an empty chart
+                const idleRank = work.coordinates ? 'Schedules the run and runs no tasks' : 'No tasks run yet';
+                if (count) {
+                    if (!RankCount.applies(rank, count)) {
+                        return { ...countChart(tile, CountSeries.EMPTY), unavailable: 'A coordinator queues the tasks it receives and starts none, so it runs none locally' };
+                    }
+                    const tasksOfItsOwn = count === 'tasksStarted' || count === 'tasksLocal';
+                    return { ...countChart(tile, series.counts[count]), unavailable: tasksOfItsOwn && !work.runsTasks ? idleRank : undefined };
+                }
+                if (tile.id === 'memory') {
+                    return { key: 'memory', title: 'Memory', latest: Bytes.human(rank.rssBytes), values: series.rssBytes, capacity: RankHistoryStore.CAPACITY, tone: 'memory' };
+                }
+                if (tile.id === 'idle') {
+                    return {
+                        key: 'idle', title: 'Idle', latest: idle === undefined ? '—' : `${NumberText.fixed(idle, 0)}%`, values: series.idlePct, max: 100,
+                        capacity: RankHistoryStore.CAPACITY, tone: 'idle', unavailable: work.runsTasks ? undefined : idleRank
+                    };
+                }
+                return cpu;
+            }),
             strips: [],
             bars,
             totals: [
@@ -337,13 +370,38 @@ export namespace CardsPanel {
         return totals;
     }
 
-    /** Tasks started per second or per minute, one unit for the whole history: per second once any sample reaches one a second. */
-    function rateChart(perSecond: readonly number[]): Chart {
-        const unit = Rates.unitFor(Math.max(0, ...perSecond));
-        return {
-            title: TaskWords.STARTED, latest: Rates.text(latest(perSecond), 'tasks', unit), values: perSecond.map(rate => Rates.inUnit(rate, unit)),
-            capacity: RankHistoryStore.CAPACITY, tone: 'tasks'
-        };
+    const COUNT_TONES: Readonly<Record<RankCount, Tone>> = {
+        tasksStarted: 'tasks', tasksLocal: 'tasks', tasksSent: 'network', tasksReceived: 'network', bytesSent: 'network', bytesReceived: 'network'
+    };
+
+    const COUNT_HINTS: Readonly<Record<RankCount, string>> = {
+        tasksStarted: TaskWords.STARTED_HINT,
+        tasksLocal: 'Subtrees handed to a pool thread from the rank\'s own work: tasks started less those received. Branches explored inline '
+            + 'count nowhere. It holds for gempba\'s built-in schedulers, which hand every subtree to the pool the same way.',
+        tasksSent: TaskWords.SENT_HINT,
+        tasksReceived: TaskWords.RECEIVED_HINT,
+        bytesSent: 'Bytes of the tasks shipped to other ranks.',
+        bytesReceived: 'Bytes of the tasks that arrived from other ranks.'
+    };
+
+    /**
+     * A count's chart: its running total, or its rate in one unit for the whole history, tasks per second once any sample
+     * reaches one a second and per minute below, bytes per second.
+     */
+    function countChart(tile: ChartCatalog.Tile, series: CountSeries): Chart {
+        const count = ChartCatalog.countOf(tile.id)!;
+        const bytes = count === 'bytesSent' || count === 'bytesReceived';
+        const base = { key: ChartCatalog.key(tile), title: ChartCatalog.label(tile.id), capacity: RankHistoryStore.CAPACITY, tone: COUNT_TONES[count], hint: COUNT_HINTS[count] };
+        if (tile.form === 'rate') {
+            const rate = latest(series.perSecond);
+            if (bytes) {
+                return { ...base, latest: rate === undefined ? '—' : `${Bytes.human(rate)}/s`, values: series.perSecond };
+            }
+            const unit = Rates.unitFor(Math.max(0, ...series.perSecond));
+            return { ...base, latest: Rates.text(rate, 'tasks', unit), values: series.perSecond.map(each => Rates.inUnit(each, unit)) };
+        }
+        const total = latest(series.total);
+        return { ...base, latest: total === undefined ? '—' : `${bytes ? Bytes.human(total) : NumberText.grouped(total)} so far`, values: series.total };
     }
 
     function bytesValue(bytes: number): { value: string, unit?: string } {
