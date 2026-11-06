@@ -109,9 +109,19 @@
     }
 }
 
+/* a tile with nothing to chart for this row says why, at the height of a chart */
+.gempba-cards-chart-unavailable {
+    display: flex;
+    align-items: center;
+    min-height: 60px;
+    margin: 0;
+    color: var(--theia-descriptionForeground);
+}
+
 .gempba-cards-latest {
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     color: var(--theia-gempba-hero-foreground);
 }
 

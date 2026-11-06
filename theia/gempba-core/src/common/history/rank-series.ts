@@ -45,6 +45,12 @@ export interface CountSeries {
     readonly perSecond: readonly number[];
 }
 
+export namespace CountSeries {
+
+    /** A count with no history, for a chart that has none to show. */
+    export const EMPTY: CountSeries = { total: [], perSecond: [] };
+}
+
 /** Every count's history. */
 export type CountHistories = Readonly<Record<RankCount, CountSeries>>;
 

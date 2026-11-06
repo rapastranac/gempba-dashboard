@@ -38,7 +38,8 @@ export class CardsDetailsWidget extends ReactWidget {
     protected readonly histories: CardsPanel.Histories = {
         node: host => this.nodeHistory.seriesFor(host),
         rank: id => this.rankHistory.seriesFor(id),
-        throughput: host => this.rankHistory.throughputFor(host)
+        throughput: host => this.rankHistory.throughputFor(host),
+        counts: host => this.rankHistory.countsFor(host)
     };
 
     @postConstruct()
@@ -78,8 +79,11 @@ export class CardsDetailsWidget extends ReactWidget {
                 {panel.heroes.map(hero => <HeroStat key={hero.label} {...hero} />)}
             </div>
             {panel.charts.length > 0 && <div className='gempba-cards-charts'>
-                {panel.charts.map(chart => <Panel key={chart.title} title={chart.title} actions={<span className='gempba-cards-latest'>{chart.latest}</span>}>
-                    <Sparkline values={chart.values} max={chart.max} capacity={chart.capacity} tone={chart.tone} label={`${chart.title} of ${panel.title}`} />
+                {panel.charts.map(chart => <Panel key={chart.key} title={chart.title}
+                    actions={chart.unavailable ? undefined : <span className='gempba-cards-latest' title={chart.hint}>{chart.latest}</span>}>
+                    {chart.unavailable
+                        ? <p className='gempba-cards-chart-unavailable'>{chart.unavailable}</p>
+                        : <Sparkline values={chart.values} max={chart.max} capacity={chart.capacity} tone={chart.tone} label={`${chart.title} of ${panel.title}`} />}
                 </Panel>)}
             </div>}
             {panel.strips.map(strip => <Panel key={strip.title} title={`${strip.title}: load per CPU`}>
