@@ -50,85 +50,27 @@ In this version the rule is enforced by package boundaries and by a process boun
 
 An Electron app is three cooperating processes. Our packages each contribute to one or more of them, on top of the shared kernel and the Theia platform.
 
-```mermaid
-flowchart LR
-    gempba["gempba run's telemetry<br/><i>TCP, one JSON line per tick</i>"]
-    subgraph app["GemPBA Dashboard (Electron app)"]
-        direction LR
-        subgraph backend["Backend: Node.js"]
-            telemetry["@gempba/telemetry<br/>TelemetryServer: TCP client,<br/>wire protocol, mapper, store"]
-            authNode["@gempba/auth<br/>SSH session, HOST and JUMP tunnels"]
-            settingsNode["@gempba/controls<br/>SettingsStore: ~/.gempba-dashboard"]
-        end
-        subgraph frontend["Frontend: the window"]
-            service["@gempba/telemetry<br/>TelemetryService, commands, status bar"]
-            authUi["@gempba/auth<br/>MFA, passphrase, host-key prompts"]
-            controlsUi["@gempba/controls<br/>Connection view"]
-            shellUi["@gempba/shell<br/>branding, IDE parts stripped"]
-            gridUi["@gempba/grid<br/>Grid view: one tile per node"]
-            cardsUi["@gempba/cards<br/>Cards view: tree and details"]
-        end
-        subgraph main["Electron main"]
-            shellMain["@gempba/shell<br/>window icon, background throttling"]
-        end
-    end
-    gempba <-->|"TCP: frames in, control lines out"| telemetry
-    telemetry -.->|"HOST, JUMP: dials a tunnel's local port"| authNode
-    authNode -.->|SSH| gempba
-    authNode -.->|"prompts over JSON-RPC"| authUi
-    telemetry -->|"WorldSnapshot over JSON-RPC"| service
-    service -->|onSnapshot| gridUi
-    service -->|onSnapshot| cardsUi
-    controlsUi -->|"connect, listen, refresh rate"| service
-    controlsUi -.->|"settings over JSON-RPC"| settingsNode
-```
+<p align="center">
+  <img alt="How the app runs: the backend holds the TCP and SSH connections, the frontend draws the views, Electron main owns the windows" src="docs/diagrams/processes.svg">
+</p>
 
 - **Electron main** owns native windows. `@gempba/shell` sets the GemPBA icon on them here, and turns Chromium's background throttling back on once the frontend is ready, so a minimized window counts as hidden.
 - **Backend** (Node.js) owns the TCP connection and, in HOST and JUMP mode, the SSH session that tunnels it. Each window gets its own `TelemetryServer`, which parses each telemetry line, maps it to a `WorldSnapshot`, and writes refresh-rate control lines back on the same socket.
 - **Frontend** (Chromium) draws the UI. `TelemetryService` receives `WorldSnapshot`s from the backend over Theia's built-in JSON-RPC messaging, never raw wire frames, and hands them to the views.
 
+A telemetry line's way from gempba's ranks to the views, and the controls' way back:
+
+<p align="center">
+  <img alt="The data path: rank frames reach rank 0, which sends one line per interval; the backend maps it to a WorldSnapshot for the window, where the hub keeps the histories the views draw; the controls go back the same way" src="docs/diagrams/data-path.svg">
+</p>
+
 ---
 
 ## Packages
 
-```mermaid
-flowchart TB
-    app["@gempba/electron-app<br/>the product"]
-    shell["@gempba/shell<br/>Theia extension"]
-    plugins["@gempba/plugins<br/>plugin support"]
-    telemetry["@gempba/telemetry<br/>the hub"]
-    auth["@gempba/auth<br/>a feature"]
-    controls["@gempba/controls<br/>a feature"]
-    grid["@gempba/grid<br/>a feature"]
-    cards["@gempba/cards<br/>a feature"]
-    mock["@gempba/mock<br/>a feature, development builds only"]
-    ui["@gempba/ui<br/>UI kit"]
-    core["@gempba/core<br/>pure kernel"]
-    theia["Theia platform<br/>@theia/core, electron, monaco, preferences, messages"]
-    app --> shell
-    app --> plugins
-    app --> auth
-    app --> controls
-    app --> grid
-    app --> cards
-    app -.-> mock
-    app --> telemetry
-    app --> theia
-    auth --> telemetry
-    controls --> telemetry
-    grid --> telemetry
-    grid --> ui
-    cards --> telemetry
-    cards --> ui
-    mock --> telemetry
-    ui --> theia
-    shell --> theia
-    plugins --> shell
-    plugins --> ui
-    plugins --> theia
-    telemetry --> core
-    telemetry --> theia
-```
+<p align="center">
+  <img alt="The packages: features depend on the telemetry hub, the views on the UI kit too, the hub on the kernel; every package but the kernel builds on Theia" src="docs/diagrams/packages.svg">
+</p>
 
 | Package | What it holds | Java equivalent | Uses Theia? |
 |---|---|---|---|
@@ -189,25 +131,9 @@ export default new ContainerModule((bind, _unbind, _isBound, rebind) => {
 
 Every feature is its own Theia extension, and features plug into one hub, `@gempba/telemetry`, never into each other. Adding or removing a feature means touching that package plus one line in [`theia/electron-app/package.json`](theia/electron-app/package.json), the product's list of extensions (like a Maven `<modules>` list).
 
-```mermaid
-flowchart TB
-    auth["@gempba/auth<br/>adds HOST, JUMP"]
-    controls["@gempba/controls<br/>Connection view"]
-    grid["@gempba/grid<br/>one tile per node"]
-    cards["@gempba/cards<br/>tree and details"]
-    mock["@gempba/mock<br/>built-in mocker"]
-    telemetry["@gempba/telemetry, the hub<br/>TelemetryService, commands, live controls, TunnelProvider"]
-    ui["@gempba/ui, the UI kit<br/>tiles, charts, gauges, panels, theme colors"]
-    core["@gempba/core<br/>read-model and formatters, no Theia"]
-    auth --> telemetry
-    controls --> telemetry
-    grid --> telemetry
-    grid --> ui
-    cards --> telemetry
-    cards --> ui
-    mock --> telemetry
-    telemetry --> core
-```
+<p align="center">
+  <img alt="How extensions connect: each feature depends on the telemetry hub, the views on the UI kit too, and the hub on the kernel" src="docs/diagrams/extensions.svg">
+</p>
 
 Arrows mean "depends on"; they only point down. Extensions talk through three Theia mechanisms:
 
@@ -302,6 +228,12 @@ GemPBA's features are Theia *extensions*, composed when the app is built, not VS
 
 ### The hub and the stream
 
+What the views say about the data they hold, and what moves it from one condition to another:
+
+<p align="center">
+  <img alt="The stream's conditions: no data until a run's first frame; live, paused, reconnecting and ended while listening; stopped, disconnected and lost once not; Clear or a new Listen empties the views" src="docs/diagrams/conditions.svg">
+</p>
+
 - **A pause keeps the views; another run starts them afresh.** While gempba is paused it sends only the line's header. [`TelemetryStore`](theia/gempba-telemetry/src/node/telemetry/telemetry-store.ts) answers such a line with the last snapshot, marked paused and `headerOnly`, rather than a world without frames, and the hub's [`TelemetryServiceImpl`](theia/gempba-telemetry/src/browser/telemetry-service-impl.ts) takes it as no new frame: no history sample, observed rate or frame time, so the charts hold still. A snapshot or the final line sent while paused carries frames and is taken as data. A line with another `run_id` is gempba restarted on the same port: the store forgets the last run's topology and snapshot, and the hub clears the histories, observed rates and frame times before the new run's first snapshot, as a new Listen does.
 - **Data that stops arriving stays as it was, and says why.** Whatever the cause, the views keep what they last showed, fully usable, until Clear or a new Listen empties them; a new run on a live stream is new data, not frozen data.
   - **Why:** the backend reports what the stream's link did as a [`StreamLink`](theia/gempba-core/src/common/config/stream-link.ts) beside the connection state: up, retrying on its own, or stopped, disconnected, or the SSH session closed. The hub turns the state, the link and the latest snapshot into a [`StreamCondition`](theia/gempba-core/src/common/policy/stream-condition.ts): live, paused, ended (the final line; the hub listens for the next run), reconnecting, stopped, disconnected or lost.
@@ -312,6 +244,12 @@ GemPBA's features are Theia *extensions*, composed when the app is built, not VS
 - **Whether data is live is judged from the hub's frame times.** The hub notes when the latest snapshot arrived and, through [`FrameArrivals`](theia/gempba-core/src/common/history/frame-arrivals.ts), when each node's ranks last sent a frame they had not sent before, on this machine's clock, like a heartbeat timestamp. A view turns that into `Liveness`: live, paused, run ended, waiting, or off. Paused holds while gempba sends its paused lines, judged by when any line last arrived, so a pause whose stream then drops turns to waiting; run ended follows the final line until the stream stops. Since a stream that stops sends no event to redraw on, [`LivenessWatch`](theia/gempba-ui/src/browser/liveness-watch.ts) rechecks once a second while the view is visible and redraws it only when what it shows would change. The Cards header and the Grid overview show the stream's liveness; each Grid tile shows its own node's, so a stalled node fades and its dot turns to waiting while the others stay live, and shows a pause or the run's end as the stream does, without fading.
 
 ### Connections and SSH
+
+How JUMP reaches a compute node, beside ProxyJump, which a cluster refuses (see *SSH follows the Java client and OpenSSH* below):
+
+<p align="center">
+  <img alt="JUMP next to ProxyJump: with ProxyJump this machine signs in to the compute node, which refuses it; JUMP signs in to the login node, which runs the hop to the compute node with the cluster's own trust" src="docs/diagrams/jump.svg">
+</p>
 
 - **Remembered connections are not Theia preferences.** The Connection view keeps the Java app's `~/.gempba-dashboard/settings.json` (one block per mode, recents capped at ten), served by one application-wide `SettingsServer`, so an existing user's hosts and targets come back pre-filled. The view never connects on its own. The file used to hold the refresh rates as well; the rate is the hub's setting now, and at startup [`RememberedRatesMove`](theia/gempba-controls/src/browser/remembered-rates-move.ts) moves a worker rate still changed there over to it, once, leaving the defaults in the file (which keeps both fields, as the Java app reads them). The view loads the file only after that, so it never saves an old rate back.
 - **Only SSH has a session.** Connect pays the authentication (keys, MFA) once and Listen points that session at a gempba, as often as needed. A local gempba has nothing to authenticate, so Listen streams it straight away and Stop ends it, back to disconnected; Connect exists only for HOST and JUMP.
@@ -352,6 +290,7 @@ npm test                  # check the layering, lint, compile, then run every pa
 npm run lint              # the code style alone; npx eslint --fix . repairs most of it
 npm run mock              # after a build: the built-in mocker on 127.0.0.1:9000 (npm run mock -- --help)
 npm run package           # installers for this OS in theia/electron-app/dist/
+npm run diagrams          # redraw docs/diagrams after changing configs/diagrams.js
 ```
 
 To see live data without a cluster, start the app and open the Mock panel (the beaker icon on the left), or press F1 and run `GemPBA Mock: Start…`. Pick how the dashboard reaches the mock and what the run does, press Start, then Connect this window. The Grid tab shows the cluster's overview and one tile per node (double-click one to open it in Cards; the Stall a node fault fades its tile), the Cards tab the node, socket and rank tree with the picked row's details, and the status bar the node count. The panel also changes the run live, injects faults, and lists what to type into the Connection view to reach the mock by hand. Without the app's mocker, as for an installed app, `npm run mock` serves the same run: in the Connection view pick Local and press Listen (port 9000).
