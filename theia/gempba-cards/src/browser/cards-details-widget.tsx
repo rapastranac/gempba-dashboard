@@ -9,6 +9,7 @@ import { Liveness } from '@gempba/ui/lib/common/liveness';
 import { MotionTiming } from '@gempba/ui/lib/common/motion-timing';
 import { CardsPanel } from '../common/cards-panel';
 import { CardsTreeNode } from './cards-tree';
+import { ChartLayouts } from './chart-layouts';
 import { PeersDialog } from './peers-dialog';
 
 /** What the details pane shows: the picked row, found again in the latest snapshot. */
@@ -20,7 +21,8 @@ interface Shown {
 
 /**
  * The picked row of the Cards tree as a live instrument panel beside it: a gauge and headline figures, history
- * charts, heat strips and bars, then the run's totals. Each figure shows once. The Cards view tells it what to show.
+ * charts, heat strips and bars, then the run's totals. Each figure shows once. The Cards view tells it what to show; the
+ * charts follow the saved layout of every rank's or node's panel.
  */
 @injectable()
 export class CardsDetailsWidget extends ReactWidget {
@@ -30,6 +32,7 @@ export class CardsDetailsWidget extends ReactWidget {
     @inject(TelemetryService) protected readonly telemetry: TelemetryService;
     @inject(NodeHistoryService) protected readonly nodeHistory: NodeHistoryService;
     @inject(RankHistoryService) protected readonly rankHistory: RankHistoryService;
+    @inject(ChartLayouts) protected readonly layouts: ChartLayouts;
 
     protected snapshot: WorldSnapshot | undefined;
     protected row: CardsTreeNode | undefined;
@@ -48,6 +51,7 @@ export class CardsDetailsWidget extends ReactWidget {
         this.addClass('gempba-cards-details');
         this.scrollOptions = { suppressScrollX: true };
         this.toDispose.push(this.liveness);
+        this.toDispose.push(this.layouts.onChange(() => this.update()));
     }
 
     showDetails(snapshot: WorldSnapshot | undefined, row: CardsTreeNode | undefined): void {
@@ -142,7 +146,7 @@ export class CardsDetailsWidget extends ReactWidget {
             return undefined;
         }
         if (row.kind === 'node') {
-            return { panel: CardsPanel.forNode(node, this.histories), icon: codicon('server') };
+            return { panel: CardsPanel.forNode(node, this.histories, this.layouts.get('node')), icon: codicon('server') };
         }
         const socket = node.sockets.find(candidate => candidate.socketId === row.socketId);
         if (!socket) {
@@ -152,6 +156,8 @@ export class CardsDetailsWidget extends ReactWidget {
             return { panel: CardsPanel.forSocket(node, socket), icon: codicon('circuit-board') };
         }
         const rank = socket.ranks.find(candidate => candidate.id === row.rank);
-        return rank && { panel: CardsPanel.forRank(this.snapshot, socket, rank, this.histories), icon: codicon(rank.sentinel ? 'star-full' : 'gear'), rank };
+        return rank && {
+            panel: CardsPanel.forRank(this.snapshot, socket, rank, this.histories, this.layouts.get('rank')), icon: codicon(rank.sentinel ? 'star-full' : 'gear'), rank
+        };
     }
 }
