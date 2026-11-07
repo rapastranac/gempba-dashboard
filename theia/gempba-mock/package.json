@@ -1,0 +1,33 @@
+{
+  "name": "@gempba/mock",
+  "version": "2.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "GemPBA built-in mocker for development builds: a seeded gempba run served like gempba's telemetry over TCP or SSH.",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/mock-frontend-module",
+      "backend": "lib/node/mock-backend-module"
+    }
+  ],
+  "dependencies": {
+    "@gempba/core": "2.0.0",
+    "@gempba/telemetry": "2.0.0",
+    "@theia/core": "1.76.0",
+    "ssh2": "^1.17.0",
+    "tslib": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/ssh2": "^1.15.6"
+  },
+  "scripts": {
+    "clean": "rimraf lib *.tsbuildinfo",
+    "compile": "tsc -b",
+    "test": "mocha \"lib/**/*.spec.js\"",
+    "mock": "node lib/node/mock-main.js"
+  }
+}

@@ -1,17 +1,22 @@
 name: Prepare release
 
-# Manually-triggered: opens a release-prep PR against main for version X.Y.Z —
-# bumps the Maven reactor version, drafts release notes from git log, and opens
-# the PR. After curating the notes and merging, push the v<version> tag and
-# release-desktop.yml builds and publishes the app-images.
+# Manually triggered: opens a release-prep PR against main, or the base branch given, for version X.Y.Z. It sets every
+# package to the version (configs/set-version.js), refreshes the lockfile, drafts the release notes from git log, and
+# opens the PR. After curating the notes and merging, push the vX.Y.Z tag: release.yml builds the installers and opens
+# a draft release with the notes, to publish by hand after a look.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Target version (e.g. 1.1.0; no leading v)'
+        description: 'Target version (e.g. 2.1.0; no leading v)'
         required: true
         type: string
+      base_branch:
+        description: 'Branch to release from and open the prep PR against (another branch tries the flow out)'
+        required: false
+        type: string
+        default: main
 
 permissions:
   contents: write
@@ -21,6 +26,8 @@ jobs:
   prepare:
     runs-on: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
     timeout-minutes: 15
+    env:
+      BASE: ${{ inputs.base_branch || 'main' }}
     steps:
       - name: Validate version
         run: |
@@ -36,20 +43,25 @@ jobs:
             echo "BRANCH=prep/v$V"
           } >> "$GITHUB_ENV"
 
-      - name: Checkout main
-        uses: actions/checkout@v6
+      - name: Checkout the base branch
+        uses: actions/checkout@v7
         with:
-          ref: main
-          fetch-depth: 0  # full history so release-notes generation sees the prior tag
+          ref: ${{ env.BASE }}
+          fetch-depth: 0  # full history, so the notes see the previous tag
 
-      - name: Setup JDK 25
-        uses: ./.github/actions/setup-java-jdk
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
 
-      - name: Refuse if the tag or branch already exists
+      # electron-updater never offers a lower version, so a release must go higher than every one before it.
+      - name: Refuse a version not higher than the latest v* tag, or an existing prep branch
         run: |
           set -euo pipefail
-          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
-            echo "::error::tag $TAG already exists on origin"
+          latest=$(git ls-remote --tags --refs origin 'v*' \
+            | sed -n 's|.*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' | sort -V | tail -1)
+          highest=$(printf '%s\n' "$latest" "$TAG" | sort -V | tail -1)
+          if [ "$TAG" = "$latest" ] || [ "$TAG" != "$highest" ]; then
+            echo "::error::version $VERSION is not higher than the latest tag, $latest"
             exit 1
           fi
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
@@ -65,8 +77,11 @@ jobs:
       - name: Create the prep branch
         run: git switch -c "$BRANCH"
 
-      - name: Bump the Maven reactor version
-        run: mvn -B -ntp versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+      - name: Set every package to the version
+        run: |
+          set -euo pipefail
+          node configs/set-version.js "$VERSION"
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Draft the release notes
         run: |
@@ -94,7 +109,7 @@ jobs:
             printf '%s\n\n' "<!-- TODO: one-line tagline -->"
             printf '%s\n\n' "## Changed"
             if [ -n "$RANGE" ]; then
-              git log --no-merges --pretty='- %s' "$RANGE" | head -200
+              git log --no-merges --pretty='- %s' -n 200 "$RANGE"
             fi
             printf '\n%s\n' "<!-- TODO: curate — drop CI / internal items, rewrite for end-users; add Added / Fixed / Removed sections as needed. -->"
           } > "$NOTES"
@@ -110,7 +125,7 @@ jobs:
           fi
           git commit -m "$(printf '%s\n\n%s\n%s' \
             "Prep release ${TAG}" \
-            "- Bump the Maven reactor version to ${VERSION}" \
+            "- Set every package and the lockfile to ${VERSION}" \
             "- Add docs/releases/release-notes-v${VERSION}.md draft (curate before merging)")"
 
       - name: Push the prep branch
@@ -127,14 +142,15 @@ jobs:
             "" \
             "**Changes**" \
             "" \
-            "- Maven reactor version bumped to \`${VERSION}\` (\`mvn versions:set\`)." \
+            "- Every package, the @gempba dependencies between them and the lockfile set to \`${VERSION}\` (\`configs/set-version.js\`)." \
             "- Release-notes draft at \`docs/releases/release-notes-v${VERSION}.md\`, generated from \`git log\` — **curate before merging** (drop CI / internal items, write for end-users)." \
             "" \
             "**Operator checklist**" \
             "" \
-            "- [ ] Curate \`docs/releases/release-notes-v${VERSION}.md\`." \
+            "- [ ] Curate \`docs/releases/release-notes-v${VERSION}.md\`; it becomes the release's description." \
             "- [ ] Confirm CI is green on this branch." \
-            "- [ ] Merge to \`main\`." \
-            "- [ ] Push the \`${TAG}\` tag — release-desktop.yml builds and publishes the app-images." \
+            "- [ ] Merge to \`${BASE}\`." \
+            "- [ ] Push the \`${TAG}\` tag — release.yml builds and boots the installers and opens a draft release with them and the notes." \
+            "- [ ] Look over the draft's notes and files, then publish it: every installed app is offered it at once." \
             > "$BODY"
-          gh pr create --base main --head "$BRANCH" --title "Prep release ${TAG}" --label Release --body-file "$BODY"
+          gh pr create --base "$BASE" --head "$BRANCH" --title "Prep release ${TAG}" --label Release --body-file "$BODY"
