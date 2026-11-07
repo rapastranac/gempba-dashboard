@@ -109,7 +109,7 @@ jobs:
             printf '%s\n\n' "<!-- TODO: one-line tagline -->"
             printf '%s\n\n' "## Changed"
             if [ -n "$RANGE" ]; then
-              git log --no-merges --pretty='- %s' "$RANGE" | head -200
+              git log --no-merges --pretty='- %s' -n 200 "$RANGE"
             fi
             printf '\n%s\n' "<!-- TODO: curate — drop CI / internal items, rewrite for end-users; add Added / Fixed / Removed sections as needed. -->"
           } > "$NOTES"
