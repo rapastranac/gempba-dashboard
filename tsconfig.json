@@ -1,0 +1,16 @@
+{
+  "files": [],
+  "references": [
+    { "path": "theia/gempba-auth" },
+    { "path": "theia/gempba-cards" },
+    { "path": "theia/gempba-controls" },
+    { "path": "theia/gempba-core" },
+    { "path": "theia/gempba-grid" },
+    { "path": "theia/gempba-mock" },
+    { "path": "theia/gempba-plugins" },
+    { "path": "theia/gempba-shell" },
+    { "path": "theia/gempba-telemetry" },
+    { "path": "theia/gempba-ui" },
+    { "path": "theia/gempba-updater" }
+  ]
+}

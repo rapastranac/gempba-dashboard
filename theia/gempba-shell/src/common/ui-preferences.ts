@@ -1,0 +1,40 @@
+/**
+ * Which settings the Settings page shows: those about the dashboard's own UI, and GemPBA's own. An allowlist, so the
+ * editor, file and workspace settings Theia's packages register stay off the page, and so do any a later Theia version
+ * adds. A hidden setting keeps its value and default; it is only not offered for editing.
+ */
+export namespace UiPreferences {
+
+    /** The prefix of the settings GemPBA's own packages register. */
+    export const GEMPBA_PREFIX = 'gempba.';
+
+    const SHOWN = [
+        'workbench.colorTheme',
+        'workbench.statusBar.visible',
+        'workbench.silentNotifications',
+        'workbench.commandPalette.history',
+        'workbench.hover.delay',
+        'keyboard.dispatch'
+    ];
+    const SHOWN_PREFIXES = [GEMPBA_PREFIX, 'window.', 'workbench.tab.', 'workbench.tree.', 'workbench.sash.', 'notification.'];
+    /** Window settings for moving a view to a window of its own, which the dashboard offers no way to do. */
+    const HIDDEN_PREFIXES = ['window.secondaryWindow'];
+
+    /** The settings a fresh Settings page opens on, instead of Theia's code-editor ones. */
+    export const COMMONLY_USED = [
+        'workbench.colorTheme',
+        'window.zoomLevel',
+        'window.titleBarStyle',
+        'window.menuBarVisibility',
+        'workbench.statusBar.visible',
+        'notification.timeout'
+    ];
+
+    /** Whether the Settings page shows `key`; `contributedPrefixes` are the ones ShellContributions add. */
+    export function isShown(key: string, contributedPrefixes: readonly string[] = []): boolean {
+        if (HIDDEN_PREFIXES.some(prefix => key.startsWith(prefix))) {
+            return false;
+        }
+        return SHOWN.includes(key) || [...SHOWN_PREFIXES, ...contributedPrefixes].some(prefix => key.startsWith(prefix));
+    }
+}

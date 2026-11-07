@@ -1,0 +1,127 @@
+.gempba-mock {
+    padding: var(--theia-ui-padding) calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-mock-form section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theia-ui-padding);
+    margin-bottom: calc(var(--theia-ui-padding) * 3);
+}
+
+.gempba-mock-form h3 {
+    margin: 0;
+    font-size: var(--theia-ui-font-size1);
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-mock-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.gempba-mock-form input:not([type="checkbox"]),
+.gempba-mock-form select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.gempba-mock-form .gempba-mock-check {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--theia-ui-padding);
+}
+
+.gempba-mock-row {
+    display: flex;
+    gap: var(--theia-ui-padding);
+    align-items: center;
+}
+
+.gempba-mock-row .theia-button,
+.gempba-mock-faults .theia-button {
+    margin-left: 0;
+}
+
+/* A label and a compact box on one row: every box has the same width, so they line up in one column. */
+.gempba-mock-form .gempba-mock-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 5.5em;
+    align-items: center;
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-mock-number input {
+    padding-inline-end: calc(var(--theia-ui-padding) * 1.5);
+    text-align: end;
+    font-variant-numeric: tabular-nums;
+}
+
+.gempba-mock-hint {
+    margin: 0;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-mock-faults {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--theia-ui-padding);
+}
+
+.gempba-mock-state {
+    margin: 0;
+    font-weight: 600;
+}
+
+.gempba-mock-warning {
+    margin: 0;
+    color: var(--theia-editorWarning-foreground);
+    word-break: break-word;
+}
+
+.gempba-mock-problem {
+    color: var(--theia-errorForeground);
+}
+
+.gempba-mock-reach {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 2px calc(var(--theia-ui-padding) * 2);
+    margin: 0;
+}
+
+.gempba-mock-reach dt {
+    color: var(--theia-descriptionForeground);
+}
+
+/* A key path or fingerprint keeps to one line; hovering shows it whole. */
+.gempba-mock-reach dd {
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: text;
+}
+
+.gempba-mock-log {
+    max-height: 240px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--theia-code-font-family);
+    font-size: var(--theia-code-font-size);
+    user-select: text;
+}
+
+.gempba-mock-log li {
+    padding: 1px 0;
+    word-break: break-word;
+}
+
+.gempba-mock-log-time {
+    color: var(--theia-descriptionForeground);
+}

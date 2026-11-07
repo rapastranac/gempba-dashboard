@@ -1,0 +1,38 @@
+{
+  "name": "@gempba/plugins",
+  "version": "2.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "GemPBA Dashboard plugin support: VS Code extensions from Open VSX, such as color themes, with the IDE parts the plugin runtime brings stripped again.",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/plugins-frontend-module"
+    }
+  ],
+  "dependencies": {
+    "@gempba/shell": "2.0.0",
+    "@gempba/ui": "2.0.0",
+    "@theia/ai-core": "1.76.0",
+    "@theia/ai-mcp": "1.76.0",
+    "@theia/core": "1.76.0",
+    "@theia/debug": "1.76.0",
+    "@theia/file-search": "1.76.0",
+    "@theia/monaco": "1.76.0",
+    "@theia/notebook": "1.76.0",
+    "@theia/plugin-ext": "1.76.0",
+    "@theia/plugin-ext-vscode": "1.76.0",
+    "@theia/scm": "1.76.0",
+    "@theia/task": "1.76.0",
+    "@theia/terminal": "1.76.0",
+    "@theia/vsx-registry": "1.76.0",
+    "tslib": "^2.8.1"
+  },
+  "scripts": {
+    "clean": "rimraf lib *.tsbuildinfo",
+    "compile": "tsc -b"
+  }
+}

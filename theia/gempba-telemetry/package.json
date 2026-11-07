@@ -1,0 +1,28 @@
+{
+  "name": "@gempba/telemetry",
+  "version": "2.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "GemPBA telemetry hub: the gempba wire protocol, the TCP client, the backend telemetry service and its tunnel contribution point.",
+  "files": [
+    "fixtures",
+    "lib",
+    "src"
+  ],
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/telemetry-frontend-module",
+      "backend": "lib/node/telemetry-backend-module"
+    }
+  ],
+  "dependencies": {
+    "@gempba/core": "2.0.0",
+    "@theia/core": "1.76.0",
+    "tslib": "^2.8.1"
+  },
+  "scripts": {
+    "clean": "rimraf lib *.tsbuildinfo",
+    "compile": "tsc -b",
+    "test": "mocha \"lib/**/*.spec.js\""
+  }
+}

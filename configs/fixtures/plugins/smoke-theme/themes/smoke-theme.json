@@ -1,0 +1,7 @@
+{
+  "name": "GemPBA Smoke Theme",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#101820"
+  }
+}

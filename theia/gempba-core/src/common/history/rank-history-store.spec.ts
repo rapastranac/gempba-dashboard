@@ -1,0 +1,232 @@
+import { expect } from 'chai';
+import { NodeSnapshot } from '../model/node-snapshot';
+import { StructureKey } from '../model/structure-key';
+import { RankSnapshot, SchedulerRole } from '../model/rank-snapshot';
+import { RankAccounting } from '../model/run-setup';
+import { WorldSnapshot } from '../model/world-snapshot';
+import { RankHistoryStore } from './rank-history-store';
+import { CountHistories, RankSeries } from './rank-series';
+
+interface Frame {
+    readonly seqNo: number;
+    readonly localMillis: number;
+    readonly tasks?: number;
+    readonly idleMicros?: number;
+    readonly cpuPct?: number;
+    readonly rssBytes?: number;
+    readonly received?: number;
+    readonly sent?: number;
+    readonly bytesSent?: number;
+    readonly bytesReceived?: number;
+    readonly role?: SchedulerRole;
+}
+
+function rank(id: number, frame: Frame): RankSnapshot {
+    return {
+        role: frame.role ?? 'worker', accounting: { ...RankAccounting.none(), bytesSentTotal: frame.bytesSent ?? 0, bytesRecvTotal: frame.bytesReceived ?? 0 },
+        id: id, seqNo: frame.seqNo, localMillis: frame.localMillis, pid: 0, sentinel: false, allowedCpuIds: [],
+        tasksStartedTotal: frame.tasks ?? 0, tasksRunning: 0, tasksSentTotal: frame.sent ?? 0, tasksRecvTotal: frame.received ?? 0, schedulerPendingCount: 0,
+        idleMicrosPerThread: frame.idleMicros ?? 0, cpuPct: frame.cpuPct ?? 0, rssBytes: frame.rssBytes ?? 0, threads: 1,
+        elapsedSeconds: 0, peers: []
+    };
+}
+
+function node(host: string, ...ranks: RankSnapshot[]): NodeSnapshot {
+    return {
+        host, socketCount: 1, physicalCores: 0, logicalCores: 0, hasLiveMemory: false, memTotalBytes: 0, memUsedBytes: 0,
+        sentinelRank: 0, sentinelLocalMillis: 0, nodeUtilPct: 0,
+        sockets: [{ socketId: 0, physicalCores: 0, logicalCores: 0, cpuIds: [], hasTopology: false, coreUsage: [], ranks: ranks }]
+    };
+}
+
+function world(...nodes: NodeSnapshot[]): WorldSnapshot {
+    return { runId: '', paused: false, final: false, timestampMillis: 0, elapsedSeconds: 0, nodes, structure: StructureKey.empty() };
+}
+
+/** Rank 1 on host "h". */
+function solo(frame: Frame): WorldSnapshot {
+    return world(node('h', rank(1, frame)));
+}
+
+describe('RankHistoryStore', () => {
+
+    it('records CPU and memory from every new frame, and rates from the second one', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 1_000, tasks: 10, idleMicros: 0, cpuPct: 80, rssBytes: 100 }));
+        store.update(solo({ seqNo: 2, localMillis: 1_500, tasks: 60, idleMicros: 125_000, cpuPct: 90, rssBytes: 120 }));
+        const series = store.seriesFor(1);
+        expect([series.cpu, series.counts.tasksStarted.perSecond, series.idlePct, series.rssBytes]).to.deep.equal([[80, 90], [100], [25], [100, 120]]);
+    });
+
+    it('measures rates on the rank\'s own clock', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0, tasks: 0 }));
+        store.update(solo({ seqNo: 2, localMillis: 2_000, tasks: 30 }));
+        expect(store.seriesFor(1).counts.tasksStarted.perSecond).to.deep.equal([15]);
+    });
+
+    it('a repeated frame adds no sample', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0, tasks: 0, cpuPct: 50 }));
+        store.update(solo({ seqNo: 1, localMillis: 0, tasks: 0, cpuPct: 50 }));
+        store.update(solo({ seqNo: 2, localMillis: 500, tasks: 50, cpuPct: 60 }));
+        store.update(solo({ seqNo: 2, localMillis: 500, tasks: 50, cpuPct: 60 }));
+        const series = store.seriesFor(1);
+        expect([series.cpu, series.counts.tasksStarted.perSecond]).to.deep.equal([[50, 60], [100]]);
+    });
+
+    it('a restarted rank gives no rate until its next frame', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 40, localMillis: 20_000, tasks: 4_000, idleMicros: 1_000_000, cpuPct: 90 }));
+        store.update(solo({ seqNo: 41, localMillis: 20_500, tasks: 4_050, idleMicros: 1_000_000, cpuPct: 90 }));
+        store.update(solo({ seqNo: 1, localMillis: 21_000, tasks: 5, idleMicros: 0, cpuPct: 10 }));
+        expect(store.seriesFor(1).counts.tasksStarted.perSecond).to.deep.equal([100]);
+        store.update(solo({ seqNo: 2, localMillis: 21_500, tasks: 25, idleMicros: 0, cpuPct: 20 }));
+        const series = store.seriesFor(1);
+        expect([series.cpu, series.counts.tasksStarted.perSecond, series.idlePct]).to.deep.equal([[90, 90, 10, 20], [100, 40], [0, 0]]);
+    });
+
+    it('measures tasks over the last 10 s, so a task every few seconds reads a steady rate rather than 0 and spikes', () => {
+        const store = new RankHistoryStore();
+        // a frame every 500 ms, a task finished every 3 s
+        for (let frame = 0; frame <= 60; frame++) {
+            const millis = frame * 500;
+            store.update(solo({ seqNo: frame + 1, localMillis: millis, tasks: Math.floor(millis / 3_000) }));
+        }
+        const steady = store.seriesFor(1).counts.tasksStarted.perSecond.slice(20);
+        expect(Math.min(...steady)).to.be.at.least(0.3);
+        expect(Math.max(...steady)).to.be.at.most(0.4);
+    });
+
+    it('a counter that went back with a rising sequence number gives no rate', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0, tasks: 100 }));
+        store.update(solo({ seqNo: 2, localMillis: 500, tasks: 10 }));
+        expect(store.seriesFor(1).counts.tasksStarted.perSecond).to.be.empty;
+    });
+
+    it('keeps every count as a running total at each new frame and as a rate over the rank\'s last 10 s', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0, tasks: 10, received: 2, sent: 1, bytesSent: 1_000, bytesReceived: 4_000 }));
+        store.update(solo({ seqNo: 2, localMillis: 1_000, tasks: 30, received: 6, sent: 4, bytesSent: 3_000, bytesReceived: 4_500 }));
+        const { counts } = store.seriesFor(1);
+        expect(Object.fromEntries(Object.entries(counts).map(([count, series]) => [count, [series.total, series.perSecond]]))).to.deep.equal({
+            tasksStarted: [[10, 30], [20]], tasksLocal: [[8, 24], [16]], tasksSent: [[1, 4], [3]], tasksReceived: [[2, 6], [4]],
+            bytesSent: [[1_000, 3_000], [2_000]], bytesReceived: [[4_000, 4_500], [500]]
+        });
+    });
+
+    it('reads tasks run locally as started less received, clamped at 0, and a dip as a rate of 0 rather than a restart', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0, tasks: 5, received: 8 }));
+        store.update(solo({ seqNo: 2, localMillis: 1_000, tasks: 20, received: 10 }));
+        store.update(solo({ seqNo: 3, localMillis: 2_000, tasks: 21, received: 14 }));
+        const { tasksLocal, tasksStarted } = store.seriesFor(1).counts;
+        expect([tasksLocal.total, tasksLocal.perSecond, tasksStarted.perSecond]).to.deep.equal([[0, 10, 7], [10, 3.5], [15, 8]]);
+    });
+
+    it('idle time is capped at 100 percent', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0, idleMicros: 0 }));
+        store.update(solo({ seqNo: 2, localMillis: 500, idleMicros: 600_000 }));
+        expect(store.seriesFor(1).idlePct).to.deep.equal([100]);
+    });
+
+    it('each series is capped and drops the oldest samples', () => {
+        const store = new RankHistoryStore();
+        const n = RankHistoryStore.CAPACITY + 10;
+        for (let i = 0; i <= n; i++) {
+            store.update(solo({ seqNo: i + 1, localMillis: i * 1_000, tasks: i * i, cpuPct: i }));
+        }
+        const series = store.seriesFor(1);
+        expect(series.cpu).to.have.lengthOf(RankHistoryStore.CAPACITY);
+        expect(series.cpu[0]).to.equal(n + 1 - RankHistoryStore.CAPACITY);
+        expect(series.counts.tasksStarted.perSecond).to.have.lengthOf(RankHistoryStore.CAPACITY);
+        // over the last 10 s, frames n - 10 to n: (n² - (n - 10)²) / 10 = 2n - 10
+        expect(series.counts.tasksStarted.perSecond[series.counts.tasksStarted.perSecond.length - 1]).to.equal(2 * n - 10);
+        expect(store.clusterThroughput()).to.have.lengthOf(RankHistoryStore.CAPACITY);
+    });
+
+    it('a node\'s throughput sums its ranks\' latest rates, and the cluster\'s sums every node', () => {
+        const store = new RankHistoryStore();
+        store.update(world(node('a', rank(1, { seqNo: 1, localMillis: 0 }), rank(2, { seqNo: 1, localMillis: 0 })),
+            node('b', rank(3, { seqNo: 1, localMillis: 0 }))));
+        store.update(world(node('a', rank(1, { seqNo: 2, localMillis: 1_000, tasks: 10 }), rank(2, { seqNo: 2, localMillis: 1_000, tasks: 20 })),
+            node('b', rank(3, { seqNo: 2, localMillis: 1_000, tasks: 5 }))));
+        expect([store.throughputFor('a'), store.throughputFor('b'), store.clusterThroughput()]).to.deep.equal([[30], [5], [35]]);
+    });
+
+    it('a rank that sent no new frame keeps counting at its latest rate', () => {
+        const store = new RankHistoryStore();
+        store.update(world(node('a', rank(1, { seqNo: 1, localMillis: 0 }), rank(2, { seqNo: 1, localMillis: 0 }))));
+        store.update(world(node('a', rank(1, { seqNo: 2, localMillis: 1_000, tasks: 10 }), rank(2, { seqNo: 2, localMillis: 1_000, tasks: 20 }))));
+        store.update(world(node('a', rank(1, { seqNo: 3, localMillis: 2_000, tasks: 50 }), rank(2, { seqNo: 2, localMillis: 1_000, tasks: 20 }))));
+        // rank 1 over its last 2 s: 50 / 2
+        expect(store.throughputFor('a')).to.deep.equal([30, 45]);
+    });
+
+    it('a node adds no throughput sample until one of its ranks has a rate, nor while none sends a new frame', () => {
+        const store = new RankHistoryStore();
+        store.update(world(node('a', rank(1, { seqNo: 1, localMillis: 0 }))));
+        expect(store.throughputFor('a')).to.be.empty;
+        store.update(world(node('a', rank(1, { seqNo: 2, localMillis: 1_000, tasks: 10 }))));
+        store.update(world(node('a', rank(1, { seqNo: 2, localMillis: 1_000, tasks: 10 }))));
+        expect([store.throughputFor('a'), store.clusterThroughput()]).to.deep.equal([[10], [10]]);
+    });
+
+    it('sums each node\'s counts over its ranks, as totals and rates, leaving a coordinator out of tasks run locally', () => {
+        const store = new RankHistoryStore();
+        const at = (seqNo: number, localMillis: number, scale: number) => world(node('a',
+            rank(0, { seqNo, localMillis, role: 'coordinator', received: 50 * scale, sent: 50 * scale, bytesSent: 900 * scale }),
+            rank(1, { seqNo, localMillis, tasks: 100 * scale, received: 20 * scale, sent: 3 * scale, bytesReceived: 400 * scale }),
+            rank(2, { seqNo, localMillis, tasks: 60 * scale, received: 30 * scale, bytesReceived: 500 * scale })));
+        store.update(at(1, 0, 1));
+        store.update(at(2, 1_000, 2));
+        const counts = store.countsFor('a');
+        expect([counts.tasksStarted.total, counts.tasksStarted.perSecond]).to.deep.equal([[160, 320], [160]]);
+        expect([counts.tasksLocal.total, counts.tasksLocal.perSecond]).to.deep.equal([[110, 220], [110]]);
+        expect([counts.tasksReceived.total, counts.tasksSent.total, counts.bytesSent.total, counts.bytesReceived.total])
+            .to.deep.equal([[100, 200], [53, 106], [900, 1_800], [900, 1_800]]);
+        expect(store.throughputFor('a')).to.deep.equal(counts.tasksStarted.perSecond);
+    });
+
+    it('drops the ranks and nodes that leave the frames', () => {
+        const store = new RankHistoryStore();
+        store.update(world(node('a', rank(1, { seqNo: 1, localMillis: 0 })), node('b', rank(2, { seqNo: 1, localMillis: 0 }))));
+        store.update(world(node('a', rank(1, { seqNo: 2, localMillis: 500 })), node('b', rank(2, { seqNo: 2, localMillis: 500 }))));
+        store.update(world(node('a', rank(1, { seqNo: 3, localMillis: 1_000 }))));
+        expect(store.ranks()).to.deep.equal([1]);
+        expect(RankSeries.isEmpty(store.seriesFor(2))).to.be.true;
+        expect(store.throughputFor('b')).to.be.empty;
+        expect(store.throughputFor('a')).to.have.lengthOf(2);
+    });
+
+    it('clear drops every history', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0 }));
+        store.update(solo({ seqNo: 2, localMillis: 500, tasks: 5 }));
+        store.clear();
+        expect([store.ranks(), store.throughputFor('h'), store.clusterThroughput()]).to.deep.equal([[], [], []]);
+        expect(store.countsFor('h')).to.deep.equal(CountHistories.empty());
+        expect(RankSeries.isEmpty(store.seriesFor(1))).to.be.true;
+    });
+
+    it('seriesFor an unknown rank is empty', () => {
+        expect(new RankHistoryStore().seriesFor(7)).to.deep.equal(RankSeries.empty());
+    });
+
+    it('a missing snapshot is a no-op', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0 }));
+        store.update(undefined);
+        expect(store.ranks()).to.deep.equal([1]);
+    });
+
+    it('a returned series is a copy, unaffected by later frames', () => {
+        const store = new RankHistoryStore();
+        store.update(solo({ seqNo: 1, localMillis: 0, cpuPct: 10 }));
+        const series = store.seriesFor(1);
+        store.update(solo({ seqNo: 2, localMillis: 500, cpuPct: 20 }));
+        expect(series.cpu).to.deep.equal([10]);
+    });
+});

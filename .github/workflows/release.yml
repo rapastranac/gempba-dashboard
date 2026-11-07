@@ -1,0 +1,165 @@
+name: Release
+
+# Builds the installers on each OS, boots every packaged app, and on a v* tag opens a draft GitHub Release with the
+# installers, the update manifests (latest*.yml) and blockmaps the app's updater reads, and the tag's curated notes
+# (docs/releases/release-notes-vX.Y.Z.md) as its description. A manual run builds and checks them without publishing,
+# and so does a pull request that changes the packaging, so packaging is tested whenever it changes and costs no
+# minutes otherwise. Unsigned: Windows shows "Unknown publisher" and macOS Gatekeeper asks the user to allow the app
+# once.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/actions/setup-node-theia/**
+      - configs/build-production.js
+      - configs/merge-update-manifests.js
+      - configs/smoke-test.js
+      - configs/fixtures/plugins/**
+      - theia/electron-app/electron-builder.yml
+      - theia/electron-app/package.json
+      - theia/electron-app/resources/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Refuses a tag in seconds rather than after the four builds. A manual or pull-request run skips it.
+  check:
+    name: check the tag
+    if: github.ref_type == 'tag'
+    runs-on: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # electron-updater never offers a lower version, so a release must go higher than every one before it.
+      - name: Refuse a version not higher than every other v* tag
+        run: |
+          set -euo pipefail
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag $GITHUB_REF_NAME is not vX.Y.Z"
+            exit 1
+          fi
+          latest=$(git ls-remote --tags --refs origin 'v*' \
+            | sed -n 's|.*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' | sort -V | tail -1)
+          if [ "$latest" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME is not higher than $latest"
+            exit 1
+          fi
+      - name: Refuse a tag without its release notes
+        run: |
+          notes="docs/releases/release-notes-$GITHUB_REF_NAME.md"
+          if [ ! -s "$notes" ]; then
+            echo "::error::$notes is missing or empty; curate it in the prep PR before tagging"
+            exit 1
+          fi
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Match the tag to the app version
+        run: |
+          version=$(node -p "require('./theia/electron-app/package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the app version $version"
+            exit 1
+          fi
+
+  package:
+    name: package (${{ matrix.target }})
+    needs: check
+    if: ${{ !cancelled() && !failure() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
+            unpacked: linux-unpacked
+          - target: windows-x64
+            runner: ${{ fromJSON(vars.RUNNER_WINDOWS || '["windows-2025"]') }}
+            unpacked: win-unpacked
+          - target: macos-arm64
+            runner: ${{ fromJSON(vars.RUNNER_MACOS_ARM || '["macos-26"]') }}
+            unpacked: mac-arm64
+          - target: macos-x64
+            runner: ${{ fromJSON(vars.RUNNER_MACOS_INTEL || '["macos-26-intel"]') }}
+            unpacked: mac
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-node-theia
+      # Native modules are compiled on each OS against Electron's ABI, so every runner packages its own OS only.
+      - name: Package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run package
+      # The updater reads app-update.yml inside the app, and the release's manifest beside the installers.
+      - name: Check the update files
+        run: |
+          dist=theia/electron-app/dist
+          case "$RUNNER_OS" in
+            Linux) manifest=latest-linux.yml; config="$dist/${{ matrix.unpacked }}/resources/app-update.yml" ;;
+            Windows) manifest=latest.yml; config="$dist/${{ matrix.unpacked }}/resources/app-update.yml" ;;
+            macOS) manifest=latest-mac.yml; config="$(ls -d "$dist/${{ matrix.unpacked }}"/*.app)/Contents/Resources/app-update.yml" ;;
+          esac
+          for file in "$dist/$manifest" "$config"; do
+            [ -f "$file" ] || { echo "::error::$file is missing"; exit 1; }
+          done
+      - name: Boot the packaged app
+        run: |
+          dir="theia/electron-app/dist/${{ matrix.unpacked }}"
+          case "$RUNNER_OS" in
+            Linux) xvfb-run -a node configs/smoke-test.js "$dir/gempba-dashboard" ;;
+            Windows) node configs/smoke-test.js "$dir/gempba-dashboard.exe" ;;
+            macOS) node configs/smoke-test.js "$(ls -d "$dir"/*.app)/Contents/MacOS/"* ;;
+          esac
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gempba-dashboard-${{ matrix.target }}
+          path: |
+            theia/electron-app/dist/*.exe
+            theia/electron-app/dist/*.dmg
+            theia/electron-app/dist/*.zip
+            theia/electron-app/dist/*.AppImage
+            theia/electron-app/dist/*.deb
+            theia/electron-app/dist/latest*.yml
+            theia/electron-app/dist/*.blockmap
+          if-no-files-found: error
+
+  # One job publishes, so the four uploads do not race to create the release.
+  publish:
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ${{ fromJSON(vars.RUNNER_LINUX || '["ubuntu-24.04"]') }}
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+      # Each artifact lands in a folder of its own: both macOS builds wrote a latest-mac.yml, merged here into one.
+      - name: Gather the release files
+        run: node configs/merge-update-manifests.js artifacts dist
+      # A draft, published by hand after a look: the updater ignores drafts, and offers a published release to every
+      # installed app at once.
+      - uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          body_path: docs/releases/release-notes-${{ github.ref_name }}.md
+          files: dist/*

@@ -1,0 +1,28 @@
+{
+  "name": "@gempba/grid",
+  "version": "2.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "GemPBA grid view: one Task Manager style tile per node, with its CPU history and memory.",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/grid-frontend-module"
+    }
+  ],
+  "dependencies": {
+    "@gempba/core": "2.0.0",
+    "@gempba/telemetry": "2.0.0",
+    "@gempba/ui": "2.0.0",
+    "@theia/core": "1.76.0",
+    "tslib": "^2.8.1"
+  },
+  "scripts": {
+    "clean": "rimraf lib *.tsbuildinfo",
+    "compile": "tsc -b",
+    "test": "mocha \"lib/**/*.spec.js\""
+  }
+}

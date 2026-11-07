@@ -1,0 +1,68 @@
+{
+  "private": true,
+  "name": "@gempba/electron-app",
+  "productName": "GemPBA Dashboard",
+  "version": "2.0.0",
+  "description": "Live dashboard for GemPBA, the hybrid parallel framework: nodes, sockets and workers of a running job.",
+  "license": "MIT",
+  "author": "Andres Pastrana",
+  "homepage": "https://rapastranac.github.io/gempba-docs/",
+  "main": "lib/backend/electron-main.js",
+  "theia": {
+    "target": "electron",
+    "frontend": {
+      "config": {
+        "applicationName": "GemPBA Dashboard",
+        "defaultTheme": {
+          "light": "gempba-light",
+          "dark": "gempba-dark"
+        },
+        "preferences": {},
+        "electron": {
+          "splashScreenOptions": {
+            "content": "resources/gempba-logo.svg",
+            "width": 240,
+            "height": 240
+          }
+        }
+      }
+    },
+    "backend": {
+      "config": {
+        "configurationFolder": ".gempba-dashboard/theia"
+      }
+    }
+  },
+  "dependencies": {
+    "@gempba/auth": "2.0.0",
+    "@gempba/cards": "2.0.0",
+    "@gempba/controls": "2.0.0",
+    "@gempba/grid": "2.0.0",
+    "@gempba/mock": "2.0.0",
+    "@gempba/plugins": "2.0.0",
+    "@gempba/shell": "2.0.0",
+    "@gempba/telemetry": "2.0.0",
+    "@gempba/updater": "2.0.0",
+    "@theia/core": "1.76.0",
+    "@theia/electron": "1.76.0",
+    "@theia/messages": "1.76.0",
+    "@theia/monaco": "1.76.0",
+    "@theia/preferences": "1.76.0"
+  },
+  "gempbaDevExtensions": [
+    "@gempba/mock"
+  ],
+  "devDependencies": {
+    "@theia/cli": "1.76.0",
+    "electron": "42.8.1",
+    "electron-builder": "^26.17.0"
+  },
+  "scripts": {
+    "clean": "theia clean",
+    "build": "theia build --mode development",
+    "package": "node ../../configs/build-production.js && electron-builder --publish never",
+    "rebuild": "theia rebuild:electron --cacheRoot ../..",
+    "start": "theia start",
+    "watch": "theia build --watch --mode development"
+  }
+}

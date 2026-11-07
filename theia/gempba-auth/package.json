@@ -1,0 +1,32 @@
+{
+  "name": "@gempba/auth",
+  "version": "2.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "GemPBA SSH connections: the HOST and JUMP tunnel providers, host-key trust on first use, and MFA prompts.",
+  "files": [
+    "lib",
+    "src"
+  ],
+  "theiaExtensions": [
+    {
+      "frontend": "lib/browser/auth-frontend-module",
+      "backend": "lib/node/auth-backend-module"
+    }
+  ],
+  "dependencies": {
+    "@gempba/core": "2.0.0",
+    "@gempba/telemetry": "2.0.0",
+    "@theia/core": "1.76.0",
+    "ssh2": "^1.17.0",
+    "tslib": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/ssh2": "^1.15.6"
+  },
+  "scripts": {
+    "clean": "rimraf lib *.tsbuildinfo",
+    "compile": "tsc -b",
+    "test": "mocha \"lib/**/*.spec.js\""
+  }
+}

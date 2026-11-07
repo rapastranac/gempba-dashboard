@@ -96,3 +96,17 @@ desktop.ini
 
 # ─── Claude Code session files (never commit these) ───────────────────────────
 .claude/
+
+# --- Node / Theia (migration) ---
+node_modules/
+theia/*/lib/
+theia/*/src-gen/
+theia/*/gen-webpack*.js
+.browser_modules/
+theia/electron-app/dist/
+*.tsbuildinfo
+.eslintcache
+plugins/
+!configs/fixtures/plugins/
+theia/*/esbuild.mjs
+theia/*/gen-esbuild*.mjs

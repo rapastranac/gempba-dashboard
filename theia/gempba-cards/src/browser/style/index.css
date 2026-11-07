@@ -1,0 +1,220 @@
+/* Colors come only from theme variables. */
+
+/* The banner sits above the split: the stream bar at its own height, or the empty state filling the view in the split's place. */
+.gempba-cards.theia-split-widget {
+    display: flex;
+    flex-direction: column;
+}
+
+.gempba-cards.theia-split-widget > .lm-SplitPanel {
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto;
+}
+
+.gempba-cards-banner {
+    flex: none;
+    outline: none;
+}
+
+.gempba-cards-banner-empty {
+    flex: 1 1 auto;
+}
+
+.gempba-cards-icon {
+    margin-right: var(--theia-ui-padding);
+}
+
+/* In a narrow tree a row's caption gives way before its name, which is what finds the row. */
+.gempba-cards .theia-TreeNodeSegmentGrow {
+    flex-shrink: 0;
+}
+
+.gempba-cards .theia-TreeNodeInfo {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* A tree row's CPU, at a glance, between its name and its caption. */
+.gempba-cards-row-meter {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    width: 40px;
+    margin-left: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-cards-row-meter .gempba-meter {
+    width: 100%;
+    height: 4px;
+}
+
+/* On a selected row the meter takes the row's text color, which the selection keeps readable. */
+.theia-TreeNode.theia-mod-selected .gempba-cards-row-meter .gempba-meter {
+    background: color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.theia-TreeNode.theia-mod-selected .gempba-cards-row-meter .gempba-meter-fill {
+    background: currentColor;
+}
+
+.gempba-cards-details {
+    padding: calc(var(--theia-ui-padding) * 3) calc(var(--theia-ui-padding) * 4);
+}
+
+.gempba-cards-details-title {
+    display: flex;
+    align-items: center;
+    font-size: var(--theia-ui-font-size2);
+    font-weight: 600;
+}
+
+.gempba-cards-details-subtitle {
+    color: var(--theia-descriptionForeground);
+}
+
+/* The live instrument panel; the container query stacks it in a narrow pane. */
+.gempba-cards-panel {
+    container-type: inline-size;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--theia-ui-padding) * 3);
+}
+
+.gempba-cards-details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-cards-heroes {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--theia-ui-padding) * 3) calc(var(--theia-ui-padding) * 6);
+}
+
+.gempba-cards-charts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: calc(var(--theia-ui-padding) * 3);
+}
+
+/* three charts side by side once they fit, else one per row: never two and a gap; a lone chart takes the row */
+@container (min-width: 640px) {
+    .gempba-cards-charts:not(:has(> :only-child)) {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+/* the charts under their menu button, at the right of the area */
+.gempba-cards-chart-area {
+    display: flex;
+    flex-direction: column;
+    gap: var(--theia-ui-padding);
+}
+
+.gempba-cards-chart-area-header {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.gempba-cards-charts-menu.theia-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    margin: 0;
+}
+
+/* a chart is dragged by any part of it; the one it is over shows where it lands */
+.gempba-cards-chart {
+    min-width: 0;
+    cursor: grab;
+}
+
+.gempba-cards-chart-dragging {
+    opacity: 0.5;
+}
+
+.gempba-cards-chart-drop > .gempba-panel {
+    outline: 2px dashed var(--theia-focusBorder);
+    outline-offset: 2px;
+}
+
+.gempba-cards-chart-options {
+    padding: 0 2px;
+    border: none;
+    background: none;
+    color: var(--theia-descriptionForeground);
+    cursor: pointer;
+}
+
+.gempba-cards-chart-options:hover {
+    color: var(--theia-foreground);
+}
+
+/* a tile with nothing to chart for this row says why, at the height of a chart */
+.gempba-cards-chart-unavailable {
+    display: flex;
+    align-items: center;
+    min-height: 60px;
+    margin: 0;
+    color: var(--theia-descriptionForeground);
+}
+
+.gempba-cards-latest {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--theia-gempba-hero-foreground);
+}
+
+.gempba-cards-bar {
+    display: grid;
+    grid-template-columns: minmax(80px, 30%) 1fr auto;
+    align-items: center;
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-cards-bar-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gempba-cards-bar-value {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--theia-descriptionForeground);
+}
+
+@container (max-width: 420px) {
+    .gempba-cards-bar {
+        grid-template-columns: 1fr auto;
+    }
+
+    .gempba-cards-bar .gempba-meter {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+}
+
+.gempba-cards-view-all.theia-button {
+    margin: 0;
+    min-width: 0;
+    padding: 0 calc(var(--theia-ui-padding) * 2);
+    line-height: calc(var(--theia-content-line-height) - 4px);
+}
+
+.gempba-peers-table {
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.gempba-peers-total {
+    padding-top: calc(var(--theia-ui-padding) * 2);
+    color: var(--theia-descriptionForeground);
+}

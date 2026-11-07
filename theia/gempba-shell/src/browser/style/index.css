@@ -1,0 +1,6 @@
+.theia-icon {
+  background-image: url('./gempba-icon.svg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}

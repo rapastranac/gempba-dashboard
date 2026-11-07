@@ -1,0 +1,92 @@
+.gempba-connection {
+    padding: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-connection-form {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--theia-ui-padding) * 2);
+}
+
+/* The stream's state, as the status bar words it, with the hub's latest status line under it. */
+.gempba-connection-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 0 var(--theia-ui-padding);
+}
+
+.gempba-connection-header .gempba-live {
+    font-size: var(--theia-ui-font-size1);
+    font-weight: 600;
+    color: var(--theia-foreground);
+}
+
+.gempba-connection-status {
+    color: var(--theia-descriptionForeground);
+    word-break: break-word;
+}
+
+/* A side panel is narrow: the panels keep a smaller padding than the instrument panels' default. */
+.gempba-connection-panel {
+    padding: calc(var(--theia-ui-padding) * 2);
+}
+
+.gempba-connection-panel label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.gempba-connection-panel input,
+.gempba-connection-panel select {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* The mode and the rate presets fill the panel's width, each option an equal share. */
+.gempba-connection .gempba-segmented {
+    display: flex;
+    width: 100%;
+}
+
+.gempba-connection .gempba-segmented-option {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 2px var(--theia-ui-padding);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gempba-connection-row {
+    display: flex;
+    gap: var(--theia-ui-padding);
+    align-items: center;
+}
+
+.gempba-connection-wrap {
+    flex-wrap: wrap;
+}
+
+.gempba-connection-row input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.gempba-connection-row .theia-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 0;
+}
+
+.gempba-connection-problem {
+    margin: 0;
+    color: var(--theia-errorForeground);
+}
+
+.gempba-connection-hint {
+    margin: 0;
+    color: var(--theia-descriptionForeground);
+}
