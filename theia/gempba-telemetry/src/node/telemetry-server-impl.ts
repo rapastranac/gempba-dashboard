@@ -1,7 +1,7 @@
 import { ContributionProvider } from '@theia/core/lib/common/contribution-provider';
 import { Disposable } from '@theia/core/lib/common/disposable';
 import { inject, injectable, named } from '@theia/core/shared/inversify';
-import { ConnectionMode, ConnectionState, RefreshInterval, SessionSpec, StreamLink, TargetSpec } from '@gempba/core';
+import { ConnectionMode, ConnectionState, RefreshInterval, RunEnd, SessionSpec, StreamLink, TargetSpec } from '@gempba/core';
 import { RunControl } from '../common/run-control';
 import { TelemetryServer, TelemetryServerClient } from '../common/telemetry-protocol';
 import { FrameListener } from './client/frame-listener';
@@ -17,7 +17,7 @@ import { Forward, Tunnel, TunnelProvider } from './tunnel/tunnel-provider';
  * A local gempba needs no session: listening while disconnected streams it directly, and stopping that stream
  * disconnects. Connect is for the modes that authenticate. An SSH session that drops on its own cannot recover
  * without authenticating again, so it disconnects and says so instead of retrying the stream. A stream that closes
- * after the run's final line says the run ended, and waits for the next run on the same port.
+ * after the run's final line says how the run ended, and waits for the next run on the same port.
  */
 @injectable()
 export class TelemetryServerImpl implements TelemetryServer {
@@ -40,6 +40,8 @@ export class TelemetryServerImpl implements TelemetryServer {
     protected readonly store = new TelemetryStore();
     /** Whether the stream's latest line was the run's final one: gempba closes the connection after it. */
     protected runEnded = false;
+    /** How that final line says the run ended; gempba v5.0.0 on. */
+    protected runEnd: RunEnd | undefined;
     /** The link last reported, so each change is sent once; a new Listen forgets it. */
     protected link: StreamLink | undefined;
     protected intervalMs = RefreshInterval.DEFAULT_MS;
@@ -216,6 +218,7 @@ export class TelemetryServerImpl implements TelemetryServer {
                 if (epoch === this.epoch) {
                     const snapshot = this.store.ingest(frame);
                     this.runEnded = snapshot.final === true;
+                    this.runEnd = snapshot.end;
                     this.client?.onSnapshot(snapshot);
                 }
             },
@@ -225,7 +228,7 @@ export class TelemetryServerImpl implements TelemetryServer {
                 }
                 this.setLink(StreamLink.RETRYING);
                 this.status(this.runEnded
-                    ? `the run ended; waiting for the next run on ${address}`
+                    ? `${endedText(this.runEnd)}; waiting for the next run on ${address}`
                     : `disconnected from ${address} (${cause ? cause.message : 'peer closed'}); retrying…`);
             }
         };
@@ -280,4 +283,13 @@ export class TelemetryServerImpl implements TelemetryServer {
 
 function messageOf(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+/** `run interrupted by SIGTERM`, `run completed`, or `the run ended` from a gempba that doesn't say how. */
+function endedText(end: RunEnd | undefined): string {
+    if (!end) {
+        return 'the run ended';
+    }
+    const headline = RunEnd.headline(end);
+    return headline.charAt(0).toLowerCase() + headline.slice(1);
 }

@@ -253,6 +253,12 @@ describe('TelemetryServerImpl', () => {
         expect(client.links).to.deep.equal([StreamLink.UP, StreamLink.RETRYING]);
     });
 
+    it('says how the run ended when its final line does', async () => {
+        await listenToOneLine(RECORDED.replace('"final":false', '"final":true,"end":{"reason":"interrupted","trigger":"signal","signal":"SIGTERM"}'));
+        await eventually(() => client.statuses.some(text => text.startsWith('run interrupted by SIGTERM; waiting for the next run on ')));
+        expect(client.snapshots[0].end).to.deep.equal({ reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' });
+    });
+
     it('reads a stream that closes without the final line as a lost connection, and retries', async () => {
         await listenToOneLine(RECORDED);
         await eventually(() => client.statuses.some(text => text.endsWith('(peer closed); retrying…')));
