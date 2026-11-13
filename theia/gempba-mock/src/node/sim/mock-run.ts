@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto';
-import { RefreshInterval, SchedulerRole } from '@gempba/core';
+import { RefreshInterval, RunEnd, SchedulerRole } from '@gempba/core';
 import { RunMarkerFrame } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
 import { Schema2Frame, Schema2NodeFrame, Schema2Topology } from './schema2-lines';
-import { MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
+import { MockConfig, MockLive, MockRoles, MockScheduler, MockShape } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
 import { CoordinatorQueue, QueuedTask } from './coordinator-queue';
 import { MockRandom } from './mock-random';
@@ -181,6 +181,8 @@ export class MockRun {
     static readonly PROPOSALS_PER_TASK = 1e-4;
     /** gempba keeps at most this many markers; it ignores the rest. */
     static readonly MAX_MARKERS = 32;
+    /** How long a stopped run winds down before its final line, as the nodes already running finish their own work. */
+    static readonly WIND_DOWN_MS = 1000;
 
     protected readonly random: MockRandom;
     /** The counters' own noise, apart from the run's, so the same seed steps the same run whatever schema 2 counts. */
@@ -203,6 +205,10 @@ export class MockRun {
     protected readonly runSeed: number;
     protected pausedNow = false;
     protected readonly markers: RunMarkerFrame[] = [];
+    /** How the run ends: set by the first stop, or completed once its search finishes. */
+    protected outcome: RunEnd | undefined;
+    /** When a stopped run's wind-down ends, in simulated time. */
+    protected stopAtMs: number | undefined;
     /** Drawn at each Start, so the dashboard tells this run from the one before, whatever the seed. */
     readonly runId = randomUUID();
 
@@ -233,6 +239,29 @@ export class MockRun {
     /** Whether gempba's process has exited: the search tree was explored, or the run was ended. */
     get ended(): boolean {
         return this.endedNow;
+    }
+
+    /** How the run ended, once it has: completed, or interrupted by a stop. */
+    get end(): RunEnd | undefined {
+        return this.endedNow ? this.outcome : undefined;
+    }
+
+    /** Whether a stop is winding the run down. */
+    get stopping(): boolean {
+        return this.stopAtMs !== undefined && !this.endedNow;
+    }
+
+    /**
+     * Stops the run as gempba v5.0.0 does: the first stop wins, the run winds down for {@link WIND_DOWN_MS} and ends
+     * interrupted with its trigger. False when the run already ended or is stopping.
+     */
+    requestStop(trigger: NonNullable<RunEnd['trigger']>, signal?: string): boolean {
+        if (this.endedNow || this.stopAtMs !== undefined) {
+            return false;
+        }
+        this.outcome = { reason: 'interrupted', trigger, ...(signal && { signal }) };
+        this.stopAtMs = this.time + MockRun.WIND_DOWN_MS;
+        return true;
     }
 
     get topology(): MockTopology {
@@ -318,7 +347,12 @@ export class MockRun {
             case 'remove-rank': return this.removeRank();
             case 'end-run':
                 this.endedNow = true;
-                return 'Ended the run, as when gempba\'s process exits';
+                this.outcome ??= { reason: 'completed' };
+                return 'Ended the run: its search finished, and gempba\'s process exits';
+            case 'signal-run':
+                return this.requestStop('signal', 'SIGTERM')
+                    ? 'Sent SIGTERM: the run winds down and ends interrupted'
+                    : 'Sent SIGTERM: the run is already stopping';
         }
     }
 
@@ -338,7 +372,8 @@ export class MockRun {
         this.frameOrder ??= [...this.topologyNow.ranks].sort((a, b) => a.nodeIndex - b.nodeIndex || a.id - b.id).map(place => place.id);
         const ranks = this.frameOrder.map(id => this.ranks.get(id)).map(rank => rank && this.rankJson(rank)).filter(frame => frame !== undefined);
         const nodes = this.nodes.map(node => this.nodeJson(node)).filter(frame => frame !== undefined);
-        return `{"version":2,"run_id":"${this.runId}",${clock},"paused":${this.pausedNow},"final":${final},`
+        const end = final && this.outcome && MockConfig.endsAndStops(this.liveNow.fidelity) ? `"end":${JSON.stringify(this.outcome)},` : '';
+        return `{"version":2,"run_id":"${this.runId}",${clock},"paused":${this.pausedNow},"final":${final},${end}`
             + `"topology":${this.topologyJson},"ranks":[${ranks.join(',')}],"nodes":[${nodes.join(',')}]}`;
     }
 
@@ -365,9 +400,13 @@ export class MockRun {
             this.scheduleSemiCentralized();
         }
         const busy = [...this.ranks.values()].some(rank => !this.isCoordinator(rank) && rank.phase !== 'available');
-        if (!busy && this.queue.length === 0) {
-            if (this.model.endsWhenDrained) {
+        if (this.stopAtMs !== undefined && this.time >= this.stopAtMs) {
+            this.endedNow = true;
+        } else if (!busy && this.queue.length === 0) {
+            if (this.model.endsWhenDrained || this.stopAtMs !== undefined) {
+                // a search that finishes before any stop is complete; one that drains while winding down keeps its stop
                 this.endedNow = true;
+                this.outcome ??= { reason: 'completed' };
             } else {
                 // every subtree was explored before its time: the program starts another search
                 this.seed();
@@ -856,8 +895,8 @@ export class MockRun {
 }
 
 export namespace MockRun {
-    /** The faults the run carries out itself; dropping clients and sending a malformed line belong to the transport. */
-    export type Fault = Exclude<MockFault, 'drop-clients' | 'malformed-line'>;
+    /** The faults the run carries out itself; dropping clients, sending a malformed line and killing the process belong to the transport. */
+    export type Fault = Exclude<MockFault, 'drop-clients' | 'malformed-line' | 'kill-run'>;
 
     /** A rank's state at the coordinator: exploring a subtree, idle, or reserved to receive one (semi-centralized). */
     export type Phase = 'running' | 'available' | 'assigned';

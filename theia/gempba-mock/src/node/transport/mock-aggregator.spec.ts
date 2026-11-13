@@ -40,13 +40,19 @@ describe('MockAggregator', () => {
     let port: number;
     let logged: string[];
     let ended: boolean;
+    let killed: boolean;
     const clients: { close(): void }[] = [];
 
     async function serve(live: Partial<MockLive> = {}, shape: Partial<MockShape> = {}, intervalMs?: number, options: MockAggregatorOptions = {}): Promise<void> {
         logged = [];
-        ended = false;
+        ended = killed = false;
         const run = new MockRun({ ...defaults.shape, ...shape }, defaults.scheduler, { ...defaults.live, ...live }, 42, intervalMs);
-        aggregator = new MockAggregator(run, { ...options, log: message => logged.push(message), onEnded: () => ended = true });
+        aggregator = new MockAggregator(run, {
+            ...options, log: message => logged.push(message), onEnded: wasKilled => {
+                ended = true;
+                killed = wasKilled;
+            }
+        });
         aggregator.start();
         endpoint = new MockTcpEndpoint(aggregator);
         port = await endpoint.listen(0);
@@ -162,7 +168,7 @@ describe('MockAggregator', () => {
         expect(client.lines.some(line => line.includes('"final":true')), 'a dropped client gets no final line').to.equal(false);
         const late = lineClient();
         await until(() => late.lines.length > 0);
-        expect(aggregator.fault('end-run')).to.equal('Ended the run, as when gempba\'s process exits');
+        expect(aggregator.fault('end-run')).to.equal('Ended the run: its search finished, and gempba\'s process exits');
         await until(() => late.closed && ended);
         expect(aggregator.clients).to.equal(0);
         expect(BroadcastEnvelope.parse(late.lines[late.lines.length - 1]).final, 'the run\'s final line').to.equal(true);
@@ -195,6 +201,88 @@ describe('MockAggregator', () => {
         const [before, last] = [lines[lines.length - 2], lines[lines.length - 1]];
         expect(last.ranks!.map(frame => frame.seq_no)).to.deep.equal(before.ranks!.map(frame => frame.seq_no + 1));
         expect(logged).to.include('Sent the run\'s final line to 1 client');
+    });
+
+    describe('how the run ends, as gempba v5.0.0 says it', () => {
+
+        /** The last line read, with `end` as the mock wrote it. */
+        async function lastLine(client: LineClient): Promise<BroadcastEnvelope> {
+            await until(() => client.closed);
+            const line = client.lines[client.lines.length - 1];
+            return { ...BroadcastEnvelope.parse(line), end: JSON.parse(line).end };
+        }
+
+        async function connected(): Promise<LineClient> {
+            const client = lineClient();
+            await until(() => client.lines.length > 0);
+            return client;
+        }
+
+        it('says a run whose search finished completed', async () => {
+            await serve();
+            const client = await connected();
+            aggregator.fault('end-run');
+            expect((await lastLine(client)).end).to.deep.equal({ reason: 'completed' });
+            await until(() => ended);
+            expect(killed).to.equal(false);
+        });
+
+        it('stops the run for a stop line with its token: it winds down and ends interrupted from a dashboard', async () => {
+            await serve({}, {}, undefined, { stopToken: 's3cret' });
+            const client = await connected();
+            client.socket.write('{"kind":"stop","token":"wrong"}\n');
+            await until(() => logged.some(message => message.startsWith('Refused a stop line from ') && message.endsWith(': the wrong token')));
+            expect(aggregator.run.stopping).to.equal(false);
+            client.socket.write('{"kind":"stop","token":"s3cret"}\n');
+            await until(() => logged.some(message => message.startsWith('Stopped the run, for ')));
+            expect(aggregator.run.stopping).to.equal(true);
+            const last = await lastLine(client);
+            expect([last.final, last.end]).to.deep.equal([true, { reason: 'interrupted', trigger: 'control' }]);
+        });
+
+        it('refuses every stop line while the run has no GEMPBA_STOP_TOKEN', async () => {
+            await serve();
+            const client = await connected();
+            client.socket.write('{"kind":"stop","token":"s3cret"}\n');
+            await until(() => logged.some(message => message.endsWith(': this run has no GEMPBA_STOP_TOKEN')));
+            expect(aggregator.run.stopping).to.equal(false);
+        });
+
+        it('ends a run sent SIGTERM interrupted by it, with its last frames', async () => {
+            await serve();
+            const client = await connected();
+            expect(aggregator.fault('signal-run')).to.equal('Sent SIGTERM: the run winds down and ends interrupted');
+            const last = await lastLine(client);
+            expect(last.end).to.deep.equal({ reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' });
+            expect(last.ranks).not.to.be.empty;
+        });
+
+        it('kills the run: every client closes without the final line', async () => {
+            await serve();
+            const client = await connected();
+            expect(aggregator.fault('kill-run')).to.equal('Killed the run: gempba\'s process died without its final line');
+            await until(() => client.closed);
+            expect(client.lines.some(line => line.includes('"final":true'))).to.equal(false);
+            expect([ended, killed, aggregator.clients]).to.deep.equal([true, true, 0]);
+        });
+
+        it('at fidelity gempba 4.3, says nothing of the end, ignores a stop line, and dies on SIGTERM', async () => {
+            await serve({ fidelity: 'gempba-4.3' }, {}, undefined, { stopToken: 's3cret' });
+            const client = await connected();
+            client.socket.write('{"kind":"stop","token":"s3cret"}\n');
+            await until(() => logged.some(message => message.endsWith(': gempba 4.3 drops an unknown kind')));
+            expect(aggregator.fault('signal-run')).to.equal('Sent SIGTERM: gempba 4.3 has no handler for it, so its process died without its final line');
+            await until(() => client.closed);
+            expect(client.lines.some(line => line.includes('"final":true'))).to.equal(false);
+            expect(killed).to.equal(true);
+
+            await endpoint.close();
+            await serve({ fidelity: 'gempba-4.3' });
+            const late = await connected();
+            aggregator.fault('end-run');
+            const last = await lastLine(late);
+            expect([last.final, last.end]).to.deep.equal([true, undefined]);
+        });
     });
 
     it('sends the final line on Stop too, with every frame though paused', async () => {
