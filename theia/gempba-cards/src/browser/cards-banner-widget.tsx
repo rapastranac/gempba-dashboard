@@ -46,6 +46,6 @@ export class CardsBannerWidget extends ReactWidget {
     }
 
     protected bar(): StreamText.Bar | undefined {
-        return StreamText.bar(this.telemetry.condition, this.telemetry.lastFrameAt, Date.now());
+        return StreamText.bar(this.telemetry.condition, this.telemetry.lastFrameAt, Date.now(), this.telemetry.snapshot?.end);
     }
 }

@@ -28,8 +28,8 @@ A desktop telemetry dashboard for the [GemPBA](https://github.com/rapastranac/ge
   <img alt="Cards: the node, socket and rank tree beside a rank's live panel, with six charts of the rank's CPU, tasks and idle time" src="docs/images/cards.png">
 </p>
 
-- **Data that stops still makes sense.** When a run pauses, ends or the connection goes, the views keep what they last showed, fully usable, dimmed a little, under a bar that says why and since when: `Paused`, `Run ended`, `Reconnecting…`, or `Not live` and its cause, with what brings the data back. Nothing clears until you press **Clear** or listen again.
-- **The run, in your hands.** Pause and resume gempba's telemetry, ask for a fresh snapshot while it is paused, mark a moment of the run with a label, and set how often every frame arrives.
+- **Data that stops still makes sense.** When a run pauses, ends or the connection goes, the views keep what they last showed, fully usable, dimmed a little, under a bar that says why and since when: `Paused`, how the run ended, `Reconnecting…`, or `Not live` and its cause, with what brings the data back. From gempba v5.0.0 the run says how it ended: `Run completed` with its result proven, or interrupted by a signal such as `SIGTERM`, from a dashboard or by its program, with its best result so far. A stream that closes without the run's final line says the run was killed or the connection dropped, since the two can't be told apart. Nothing clears until you press **Clear** or listen again.
+- **The run, in your hands.** Pause and resume gempba's telemetry, ask for a fresh snapshot while it is paused, mark a moment of the run with a label, stop the run with its stop token (gempba v5.0.0 and later), and set how often every frame arrives.
 
 <p align="center">
   <img alt="The Grid after Stop Listening: the data kept and dimmed under a bar reading Not live, last frame 6 s ago, stopped, with Listen again and Clear" src="docs/images/frozen.png">
@@ -78,9 +78,9 @@ The builds are not code-signed yet, so the OS warns the first time:
 
 - **Connection** (the plug icon on the left) opens with the stream's state on top, then four panels:
   - **Session:** Local, Host or Jump host, and for SSH the host, port and key, then **Connect**. Local needs no session.
-  - **Target:** the compute node (Jump host) and gempba's port, then **Listen**; **Stop** ends the stream.
+  - **Target:** the compute node (Jump host) and gempba's port, then **Listen**; **Stop listening** ends the stream.
   - **Refresh rate:** a preset or your own, in milliseconds, and how often frames actually arrive. One rate drives every frame, in every window.
-  - **Run:** **Pause** or **Resume**, **Snapshot**, a **Mark** with its label, and **Clear data** once the data is no longer live.
+  - **Run:** **Pause** or **Resume**, **Snapshot**, **Stop the run**, a **Mark** with its label, and **Clear data** once the data is no longer live. Stop the run asks for the stop token the run was started with, its `GEMPBA_STOP_TOKEN`; the run then stops gracefully, keeping its best result so far. With another token, or none, it keeps running.
 - **Grid:** click a tile to select its node; double-click it, or press Enter, to open it in Cards.
 - **Cards:** pick a row to see its panel. **View all…** lists a rank's outgoing peers, and the tab's buttons expand the selected row or collapse the tree. The **Charts** button adds a chart or resets the layout; each chart's menu shows a count as a rate or so far, swaps it, moves it or removes it.
 - **The status bar** sums the stream up, such as `4 nodes · 26.6k tasks/s · 500 ms`, or `stopped · data from 17:02:29` once it stops. Click it for the live controls: the refresh rate, the run controls, Stop Listening, Disconnect and Clear Data. Every command is also in the command palette (F1) as `GemPBA: …`.

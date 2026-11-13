@@ -31,7 +31,8 @@ export namespace MockLabels {
 
     export const FIDELITIES: readonly MockChoice<MockFidelity>[] = [
         { value: 'gempba-4.3', label: 'gempba 4.3', detail: 'As gempba v4.3.0 sends it: roles, the run\'s setup and the time accounting, every frame at one interval' },
-        { value: 'full', label: 'Every field', detail: 'Every field filled in, socket CPU and memory too' }
+        { value: 'gempba-5.0', label: 'gempba 5.0', detail: 'gempba 4.3 and what gempba v5.0.0 adds so far: how the run ended, on its final line, and the stop line' },
+        { value: 'full', label: 'Every field', detail: 'Every field filled in, socket CPU and memory too, with how the run ended and the stop line' }
     ];
 
     export const KEY_SOURCES: readonly MockChoice<MockKeySource>[] = [

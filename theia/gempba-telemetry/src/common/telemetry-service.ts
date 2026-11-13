@@ -71,6 +71,11 @@ export interface TelemetryService {
     requestSnapshot(): Promise<void>;
     /** Marks this moment of the run with a label of 1 to 64 bytes, listed in the run's markers. */
     mark(label: string): Promise<void>;
+    /**
+     * Asks gempba v5.0.0 or later to stop the run: it winds down and sends its final line, interrupted from a dashboard.
+     * gempba takes it only with the token in the `GEMPBA_STOP_TOKEN` the run was started with.
+     */
+    stopRun(token: string): Promise<void>;
     /** Saves a new refresh rate as the user's setting, which applies it in every window. */
     setIntervalMs(intervalMs: number): Promise<void>;
 }
