@@ -2,13 +2,15 @@ import { StreamCondition } from '@gempba/core';
 
 /**
  * A control the user sends a running gempba (v4.3.0 and later): pause or resume its telemetry, ask for one full line
- * now, or mark a moment of the run with a label, listed in the run's markers.
+ * now, or mark a moment of the run with a label, listed in the run's markers. From gempba v5.0.0, stop the run with
+ * its stop token: it winds down and ends with its best result so far.
  */
 export type RunControl =
     | { readonly kind: 'pause' }
     | { readonly kind: 'resume' }
     | { readonly kind: 'snapshot' }
-    | { readonly kind: 'mark', readonly label: string };
+    | { readonly kind: 'mark', readonly label: string }
+    | { readonly kind: 'stop', readonly token: string };
 
 export namespace RunControl {
 
@@ -37,7 +39,7 @@ export namespace RunControl {
         return bytes > MAX_LABEL_BYTES ? `At most ${MAX_LABEL_BYTES} bytes in UTF-8; this label has ${bytes}` : undefined;
     }
 
-    /** `pause`, `resume`, `snapshot`, or `mark "phase 2"`: how the status names the control. */
+    /** `pause`, `resume`, `snapshot`, `mark "phase 2"` or `stop`: how the status names the control, never with its token. */
     export function text(control: RunControl): string {
         return control.kind === 'mark' ? `mark ${JSON.stringify(control.label)}` : control.kind;
     }
