@@ -163,10 +163,25 @@ describe('MockAggregator', () => {
         const late = lineClient();
         await until(() => late.lines.length > 0);
         expect(aggregator.fault('end-run')).to.equal('Ended the run, as when gempba\'s process exits');
-        await until(() => late.closed);
-        expect(ended).to.equal(true);
+        await until(() => late.closed && ended);
         expect(aggregator.clients).to.equal(0);
         expect(BroadcastEnvelope.parse(late.lines[late.lines.length - 1]).final, 'the run\'s final line').to.equal(true);
+    });
+
+    it('stops only once every client has taken the final line, so endpoints closed after it don\'t cut the line off', async () => {
+        await serve();
+        const reader = lineClient();
+        const stalled = lineClient();
+        await until(() => reader.lines.length > 0 && stalled.lines.length > 0);
+        stalled.socket.pause();
+        const startedAt = Date.now();
+        let stopped = false;
+        const stopping = aggregator.stop().then(() => stopped = true);
+        await until(() => reader.closed);
+        expect(BroadcastEnvelope.parse(reader.lines[reader.lines.length - 1]).final).to.equal(true);
+        expect(stopped, 'a client that doesn\'t read holds the stop').to.equal(false);
+        await stopping;
+        expect(Date.now() - startedAt, 'until the close grace runs out').to.be.at.least(MockAggregator.CLOSE_GRACE_MS - 50);
     });
 
     it('ends the run with its final line, every rank\'s last frame, the only line marked final', async () => {

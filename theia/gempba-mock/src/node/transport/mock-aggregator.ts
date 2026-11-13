@@ -57,9 +57,9 @@ export class MockAggregator {
      * That is the run's final line: every rank's last frame, marked `"final":true` even while paused, so a consumer can
      * tell a finished run from a lost connection.
      */
-    stop(): void {
+    stop(): Promise<void> {
         if (!this.running) {
-            return;
+            return Promise.resolve();
         }
         this.running = false;
         clearTimeout(this.timer);
@@ -71,7 +71,8 @@ export class MockAggregator {
             streams.forEach(stream => this.send(stream, final));
             this.log(`Sent the run\'s final line to ${streams.length} client${streams.length === 1 ? '' : 's'}`);
         }
-        streams.forEach(stream => this.close(stream, true));
+        // resolves once every client has taken the final line, so an SSH server closed after it doesn't cut the line off
+        return Promise.all(streams.map(stream => this.close(stream, true))).then(() => undefined);
     }
 
     /** Serves a connected client, a TCP socket or an SSH channel, named `who` in the log. */
@@ -212,24 +213,36 @@ export class MockAggregator {
         }
     }
 
-    /** Forgets the client at once, so nothing more is written to it, then closes it: at once, or once it has what it was sent. */
-    protected close(stream: Duplex, graceful = false): void {
+    /**
+     * Forgets the client at once, so nothing more is written to it, then closes it: at once, or once it has what it was
+     * sent, which the promise waits for.
+     */
+    protected close(stream: Duplex, graceful = false): Promise<void> {
         if (this.clientsNow.delete(stream)) {
             this.options.onChange?.();
         }
-        if (graceful && !stream.destroyed) {
-            stream.end();
-            // a client that doesn't read what is left is closed anyway
-            setTimeout(() => stream.destroy(), MockAggregator.CLOSE_GRACE_MS).unref();
-        } else {
+        if (!graceful || stream.destroyed) {
             stream.destroy();
+            return Promise.resolve();
         }
+        return new Promise(resolve => {
+            // a client that doesn't read what is left is closed anyway
+            const timer = setTimeout(() => {
+                stream.destroy();
+                resolve();
+            }, MockAggregator.CLOSE_GRACE_MS);
+            timer.unref();
+            stream.once('close', () => {
+                clearTimeout(timer);
+                resolve();
+            });
+            stream.end();
+        });
     }
 
     protected end(): void {
         this.log('The run ended: gempba\'s process exits and closes every client');
-        this.stop();
-        this.options.onEnded?.();
+        this.stop().then(() => this.options.onEnded?.());
     }
 
     protected log(message: string): void {

@@ -195,7 +195,8 @@ export class MockService implements MockServer {
         const { aggregator, tcp, ssh } = this;
         this.aggregator = this.tcp = this.ssh = undefined;
         this.reach = undefined;
-        aggregator?.stop();
+        // every client takes the final line before the endpoints close, or an SSH channel loses it with its session
+        await aggregator?.stop();
         await Promise.all([tcp?.close(), ssh?.close()]);
     }
 
