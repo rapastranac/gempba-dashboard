@@ -17,17 +17,26 @@ export namespace RunControl {
     /** gempba keeps a marker's label from 1 to 64 bytes in UTF-8, and ignores a mark outside that. */
     export const MAX_LABEL_BYTES = 64;
 
-    /** Which controls a stream in this condition takes: Pause while live, Resume while paused, Snapshot and Mark in either. */
+    /** Which controls a stream in this condition takes: Pause while live, Resume while paused, Snapshot, Mark and Stop in either. */
     export interface Offered {
         readonly pause: boolean;
         readonly resume: boolean;
         readonly snapshot: boolean;
         readonly mark: boolean;
+        readonly stop: boolean;
     }
 
     export function offered(condition: StreamCondition | undefined): Offered {
         const connected = condition === 'live' || condition === 'paused';
-        return { pause: condition === 'live', resume: condition === 'paused', snapshot: connected, mark: connected };
+        return { pause: condition === 'live', resume: condition === 'paused', snapshot: connected, mark: connected, stop: connected };
+    }
+
+    /**
+     * Why a stop with this token can't go: gempba stops the run only for the token in the `GEMPBA_STOP_TOKEN` it was
+     * started with, so an empty one never matches. It refuses a wrong token in its own log; nothing comes back.
+     */
+    export function tokenProblem(token: string): string | undefined {
+        return token.length === 0 ? 'Enter the run\'s stop token' : undefined;
     }
 
     /** Why gempba would ignore this label, or `undefined` when it keeps it. */

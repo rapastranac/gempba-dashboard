@@ -192,11 +192,15 @@ export class TelemetryServerImpl implements TelemetryServer {
 
     async sendControl(control: RunControl): Promise<void> {
         const what = RunControl.text(control);
-        const problem = control.kind === 'mark' ? RunControl.labelProblem(control.label) : undefined;
+        const problem = control.kind === 'mark' ? RunControl.labelProblem(control.label)
+            : control.kind === 'stop' ? RunControl.tokenProblem(control.token) : undefined;
         if (problem) {
             this.status(`${what} not sent: ${problem}`);
+        } else if (!this.telemetry?.send(ControlLine.of(control))) {
+            this.status(`${what} not sent, the connection is down`);
         } else {
-            this.status(this.telemetry?.send(ControlLine.of(control)) ? `${what} sent` : `${what} not sent, the connection is down`);
+            // gempba answers a stop only with its final line; it refuses a wrong token in its own log
+            this.status(control.kind === 'stop' ? `${what} sent: the run stops only if the token matches` : `${what} sent`);
         }
     }
 

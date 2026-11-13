@@ -199,6 +199,15 @@ describe('TelemetryServerImpl', () => {
         await eventually(() => received.length === 5);
         expect(received.slice(1)).to.deep.equal(['{"kind":"pause"}', '{"kind":"resume"}', '{"kind":"snapshot"}', '{"kind":"mark","label":"phase 2"}']);
         expect(client.statuses.slice(-2)).to.deep.equal(['mark "phase 2" sent', 'mark "" not sent: Enter a label']);
+
+        await server.sendControl({ kind: 'stop', token: '' });
+        await server.sendControl({ kind: 'stop', token: 's3cret' });
+        await eventually(() => received.length === 6);
+        expect(received.at(-1)).to.equal('{"kind":"stop","token":"s3cret"}');
+        expect(client.statuses.slice(-2)).to.deep.equal([
+            'stop not sent: Enter the run\'s stop token',
+            'stop sent: the run stops only if the token matches'
+        ]);
     });
 
     it('stopping a local stream ends it and disconnects', async () => {
