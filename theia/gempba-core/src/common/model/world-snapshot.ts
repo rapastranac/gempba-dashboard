@@ -1,4 +1,5 @@
 import { NodeSnapshot } from './node-snapshot';
+import { RunEnd } from './run-end';
 import { RunSetup } from './run-setup';
 import { StructureKey } from './structure-key';
 import { RankSnapshot } from './rank-snapshot';
@@ -21,6 +22,8 @@ export interface WorldSnapshot {
     readonly paused: boolean;
     /** Whether this is the run's last line, sent at shutdown with its totals. */
     readonly final: boolean;
+    /** How the run ended, on its final line from gempba v5.0.0 on; absent before, and from an older gempba. */
+    readonly end?: RunEnd;
     /**
      * Whether the line carried its header alone, as gempba's do while paused: the data is the last line's again, and
      * no new frame. A snapshot or the final line sent while paused carries frames, and leaves this unset.
