@@ -1,3 +1,4 @@
+import { CommandRegistry } from '@theia/core/lib/common/command';
 import { MessageService } from '@theia/core/lib/common/message-service';
 import { FileUri } from '@theia/core/lib/common/file-uri';
 import { codicon } from '@theia/core/lib/browser/widgets/widget';
@@ -8,6 +9,7 @@ import { FileDialogService } from '@theia/filesystem/lib/browser/file-dialog/fil
 import {
     ConnectionMode, ConnectionState, DashboardSettings, RefreshInterval, SessionSpec, StreamCondition, TargetSpec
 } from '@gempba/core';
+import { TelemetryCommands } from '@gempba/telemetry/lib/browser';
 import { ObservedIntervals, RankHistoryService, RunControl, StatusText, TelemetryService } from '@gempba/telemetry/lib/common';
 import { LiveIndicator, Panel, SegmentedControl, SegmentedOption, VisibleRefresh } from '@gempba/ui/lib/browser';
 import { Liveness } from '@gempba/ui/lib/common/liveness';
@@ -71,6 +73,7 @@ export class ConnectionWidget extends ReactWidget {
     @inject(SettingsServer) protected readonly settingsServer: SettingsServer;
     @inject(FileDialogService) protected readonly fileDialog: FileDialogService;
     @inject(MessageService) protected readonly messages: MessageService;
+    @inject(CommandRegistry) protected readonly commands: CommandRegistry;
     @inject(RememberedRatesMove) protected readonly ratesMove: RememberedRatesMove;
 
     protected settings = DashboardSettings.defaults();
@@ -213,7 +216,7 @@ export class ConnectionWidget extends ReactWidget {
             </label>
             <div className='gempba-connection-row'>
                 <IconButton icon='radio-tower' label='Listen' primary={true} disabled={!canListen} onClick={() => this.listen()} />
-                <IconButton icon='debug-stop' label='Stop' disabled={state !== ConnectionState.LISTENING} onClick={() => this.run(this.telemetry.stop())} />
+                <IconButton icon='debug-stop' label='Stop listening' disabled={state !== ConnectionState.LISTENING} onClick={() => this.run(this.telemetry.stop())} />
             </div>
         </Panel>;
     }
@@ -246,6 +249,8 @@ export class ConnectionWidget extends ReactWidget {
                     ? <IconButton icon='debug-continue' label='Resume' disabled={!offered.resume} onClick={() => this.run(this.telemetry.resume())} />
                     : <IconButton icon='debug-pause' label='Pause' disabled={!offered.pause} onClick={() => this.run(this.telemetry.pause())} />}
                 <IconButton icon='device-camera' label='Snapshot' disabled={!offered.snapshot} onClick={() => this.run(this.telemetry.requestSnapshot())} />
+                <IconButton icon='stop-circle' label='Stop the run' disabled={!offered.stop}
+                    onClick={() => this.run(this.commands.executeCommand(TelemetryCommands.STOP_RUN.id))} />
             </div>
             <label>Marker
                 <span className='gempba-connection-row'>

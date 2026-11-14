@@ -32,6 +32,8 @@ export class MockService implements MockServer {
     protected reach?: MockReach;
     protected warnings: string[] = [];
     protected ended = false;
+    /** How the last run ended, once it has; `killed` when it closed without its final line. */
+    protected endedAs: Pick<MockStatus, 'end' | 'killed'> = {};
 
     /** `remember` keeps the configuration last started for the next run; the command line leaves it alone. */
     constructor(protected readonly home: string = os.homedir(), protected readonly rememberRuns = true) { }
@@ -44,7 +46,7 @@ export class MockService implements MockServer {
     async status(): Promise<MockStatus> {
         const run = this.aggregator?.run;
         if (!this.aggregator || !run) {
-            return this.ended ? { ...MockStatus.stopped(), ended: true, config: this.config } : MockStatus.stopped();
+            return this.ended ? { ...MockStatus.stopped(), ended: true, ...this.endedAs, config: this.config } : MockStatus.stopped();
         }
         return {
             running: true, ended: false, config: this.config, clients: this.aggregator.clients, intervalMs: run.intervalMs,
@@ -71,7 +73,9 @@ export class MockService implements MockServer {
         this.ended = false;
         this.warnings = [];
         const run = new MockRun(MockConfig.shapeOf(config), config.scheduler, config.live, config.seed, undefined, config.roles);
-        const aggregator = new MockAggregator(run, { log: message => this.log(message), onEnded: () => this.onEnded(), onChange: () => this.publish() });
+        const aggregator = new MockAggregator(run, {
+            log: message => this.log(message), onEnded: killed => this.onEnded(run, killed), onChange: () => this.publish(), stopToken: config.stopToken
+        });
         this.aggregator = aggregator;
         aggregator.start();
         const { access } = config;
@@ -183,10 +187,12 @@ export class MockService implements MockServer {
         };
     }
 
-    /** gempba's process exited: its port closes, and the status says the run ended. */
-    protected onEnded(): void {
+    /** gempba's process exited or was killed: its port closes, and the status says how the run ended. */
+    protected onEnded(run: MockRun, killed: boolean): void {
+        const endedAs = killed ? { killed } : { end: MockConfig.endsAndStops(run.live.fidelity) ? run.end : undefined };
         this.shutDown().then(() => {
             this.ended = true;
+            this.endedAs = endedAs;
             this.publish();
         });
     }
@@ -195,7 +201,8 @@ export class MockService implements MockServer {
         const { aggregator, tcp, ssh } = this;
         this.aggregator = this.tcp = this.ssh = undefined;
         this.reach = undefined;
-        aggregator?.stop();
+        // every client takes the final line before the endpoints close, or an SSH channel loses it with its session
+        await aggregator?.stop();
         await Promise.all([tcp?.close(), ssh?.close()]);
     }
 

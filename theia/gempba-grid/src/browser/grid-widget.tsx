@@ -112,7 +112,7 @@ export class GridWidget extends ReactWidget {
     }
 
     protected bar(now: number): StreamText.Bar | undefined {
-        return StreamText.bar(this.telemetry.condition, this.telemetry.lastFrameAt, now);
+        return StreamText.bar(this.telemetry.condition, this.telemetry.lastFrameAt, now, this.telemetry.snapshot?.end);
     }
 
     protected renderOverview(overview: GridOverview): React.ReactNode {

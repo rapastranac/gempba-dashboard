@@ -64,7 +64,7 @@ describe('MockService', () => {
         expect(status).to.deep.include({ running: true, ended: false, clients: 0, ranks: 4, reach: { mode: ConnectionMode.LOCAL, gempbaPort: port } });
         expect(JSON.parse(await firstLine(port)).nodes).to.have.lengthOf(1);
         expect(lines[0].message).to.equal(`Started: Running · Local on 127.0.0.1:${port} · 1 node, 4 ranks · 0 clients; `
-            + 'Semi-centralized, Steady, load 85 %, gempba 4.3, seed 42');
+            + 'Semi-centralized, Steady, load 85 %, gempba 5.0, seed 42');
         expect(statuses.at(-1)!.running).to.equal(true);
         expect((await service.lastConfig()).access.gempbaPort).to.equal(port);
         await service.stop();
@@ -101,9 +101,11 @@ describe('MockService', () => {
         expect((await service.status()).config!.live).to.include({ scenario: 'slow', loadPct: 40 });
         expect(lines.at(-1)!.message).to.equal('Now Slow tasks, load 40 %');
         expect((await service.lastConfig()).live.scenario).to.equal('slow');
-        expect(await service.fault('end-run')).to.equal('Ended the run, as when gempba\'s process exits');
+        expect(await service.fault('end-run')).to.equal('Ended the run: its search finished, and gempba\'s process exits');
         await new Promise(resolve => setTimeout(resolve, 50));
-        expect(await service.status()).to.include({ running: false, ended: true });
+        const ended = await service.status();
+        expect(ended).to.deep.include({ running: false, ended: true, end: { reason: 'completed' } });
+        expect(MockStatus.summary(ended)).to.equal('Ended: Run completed, and gempba\'s process exited');
         let refused: unknown;
         await firstLine(port).catch(error => refused = error);
         expect((refused as NodeJS.ErrnoException).code).to.equal('ECONNREFUSED');

@@ -199,6 +199,15 @@ describe('TelemetryServerImpl', () => {
         await eventually(() => received.length === 5);
         expect(received.slice(1)).to.deep.equal(['{"kind":"pause"}', '{"kind":"resume"}', '{"kind":"snapshot"}', '{"kind":"mark","label":"phase 2"}']);
         expect(client.statuses.slice(-2)).to.deep.equal(['mark "phase 2" sent', 'mark "" not sent: Enter a label']);
+
+        await server.sendControl({ kind: 'stop', token: '' });
+        await server.sendControl({ kind: 'stop', token: 's3cret' });
+        await eventually(() => received.length === 6);
+        expect(received.at(-1)).to.equal('{"kind":"stop","token":"s3cret"}');
+        expect(client.statuses.slice(-2)).to.deep.equal([
+            'stop not sent: Enter the run\'s stop token',
+            'stop sent: the run stops only if the token matches'
+        ]);
     });
 
     it('stopping a local stream ends it and disconnects', async () => {
@@ -251,6 +260,12 @@ describe('TelemetryServerImpl', () => {
         expect(client.statuses.filter(text => text.includes('retrying'))).to.deep.equal([]);
         expect(client.states.at(-1)).to.equal(ConnectionState.LISTENING);
         expect(client.links).to.deep.equal([StreamLink.UP, StreamLink.RETRYING]);
+    });
+
+    it('says how the run ended when its final line does', async () => {
+        await listenToOneLine(RECORDED.replace('"final":false', '"final":true,"end":{"reason":"interrupted","trigger":"signal","signal":"SIGTERM"}'));
+        await eventually(() => client.statuses.some(text => text.startsWith('run interrupted by SIGTERM; waiting for the next run on ')));
+        expect(client.snapshots[0].end).to.deep.equal({ reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' });
     });
 
     it('reads a stream that closes without the final line as a lost connection, and retries', async () => {

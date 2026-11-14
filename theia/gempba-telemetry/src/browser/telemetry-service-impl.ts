@@ -163,6 +163,10 @@ export class TelemetryServiceImpl implements TelemetryService {
         return this.server.sendControl({ kind: 'mark', label });
     }
 
+    stopRun(token: string): Promise<void> {
+        return this.server.sendControl({ kind: 'stop', token });
+    }
+
     setIntervalMs(intervalMs: number): Promise<void> {
         return this.rateSettings.set(intervalMs);
     }

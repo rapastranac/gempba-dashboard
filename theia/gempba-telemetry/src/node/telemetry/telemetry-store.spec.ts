@@ -71,4 +71,15 @@ describe('TelemetryStore', () => {
         store.reset();
         expect(store.ingest(withoutTopology(2)).nodes.map(n => n.host)).to.deep.equal([WorldSnapshotMapper.UNKNOWN_HOST]);
     });
+
+    it('keeps the last data under a final line that says how the run ended', () => {
+        const store = new TelemetryStore();
+        const before = store.ingest({ ...withTopology(1), run_id: 'a' });
+        const final = store.ingest({ ...withTopology(2), run_id: 'a', final: true, end: { reason: 'completed' } });
+        expect([final.final, final.end]).to.deep.equal([true, { reason: 'completed' }]);
+        expect(final.nodes.map(n => n.host)).to.deep.equal(before.nodes.map(n => n.host));
+        const headerOnly = store.ingest({ version: 2, ts: 3, elapsed_seconds: 0, run_id: 'a', final: true, end: { reason: 'interrupted', trigger: 'code' } });
+        expect([headerOnly.headerOnly, headerOnly.end]).to.deep.equal([true, { reason: 'interrupted', trigger: 'code' }]);
+        expect(headerOnly.nodes, 'the last data').to.equal(final.nodes);
+    });
 });

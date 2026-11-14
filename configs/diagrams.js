@@ -19,7 +19,7 @@ const COLORS = {
 const FONT = "-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif";
 const CODE = "ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace";
 
-const escape = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escape = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 /** A row's words, with the parts in backticks set in the code font. */
 function words(row) {

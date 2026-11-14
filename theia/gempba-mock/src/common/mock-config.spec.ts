@@ -33,9 +33,16 @@ describe('MockConfig', () => {
         expect(MockConfig.of({ shape: { ranksPerNode: 3, workersPerNode: 6 } }).shape.ranksPerNode).to.equal(3);
     });
 
-    it('sends gempba 4.3\'s telemetry by default, and takes it for a fidelity it no longer offers', () => {
-        expect(MockConfig.defaults().live.fidelity).to.equal('gempba-4.3');
-        expect(MockConfig.of({ live: { fidelity: 'gempba-4.2' } }).live.fidelity).to.equal('gempba-4.3');
+    it('sends what gempba 5.0 adds so far by default, and takes it for a fidelity it no longer offers', () => {
+        expect(MockConfig.defaults().live.fidelity).to.equal('gempba-5.0');
+        expect(MockConfig.of({ live: { fidelity: 'gempba-4.2' } }).live.fidelity).to.equal('gempba-5.0');
+        expect(MockConfig.FIDELITIES.map(MockConfig.endsAndStops)).to.deep.equal([false, true, true]);
+    });
+
+    it('runs without a GEMPBA_STOP_TOKEN by default, and keeps a saved one', () => {
+        expect(MockConfig.defaults().stopToken).to.equal('');
+        expect(MockConfig.of({ stopToken: 's3cret' }).stopToken).to.equal('s3cret');
+        expect(MockConfig.of({ stopToken: 7 }).stopToken).to.equal('');
     });
 
     it('checks the ports, and the SSH ones only when SSH is used', () => {

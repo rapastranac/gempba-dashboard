@@ -108,6 +108,18 @@ describe('WorldSnapshotMapper', () => {
         expect(WorldSnapshot.totalRanks(model)).to.equal(3);
     });
 
+    it('carries how the run ended from its final line, and only from it', () => {
+        const ended = (end: BroadcastEnvelope['end'], final = true) =>
+            WorldSnapshotMapper.toWorldSnapshot({ ...twoSocketEnvelope(), final, end }).end;
+        expect(ended({ reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' })).to.deep.equal({ reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' });
+        expect(ended({ reason: 'completed' })).to.deep.equal({ reason: 'completed' });
+        expect(ended({ reason: 'interrupted', trigger: 'a future trigger' }), 'an unknown trigger is dropped').to.deep.equal({ reason: 'interrupted' });
+        expect(ended({ reason: 'a future reason' }), 'an unknown reason says nothing').to.equal(undefined);
+        expect(ended({ reason: 'completed' }, false), 'not a final line').to.equal(undefined);
+        expect(ended(undefined), 'gempba 4.x').to.equal(undefined);
+        expect(WorldSnapshotMapper.toWorldSnapshot({ ...twoSocketEnvelope(), final: true })).not.to.have.property('end');
+    });
+
     it('resolves the node header fields', () => {
         const node = firstNode(twoSocketEnvelope());
         expect(node.host).to.equal('n0');

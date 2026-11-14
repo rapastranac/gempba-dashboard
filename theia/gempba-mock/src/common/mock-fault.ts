@@ -1,9 +1,9 @@
 /** One-shot disturbances the mocker can inject into a running mock, to watch how the dashboard copes. */
-export type MockFault = 'stall-node' | 'restart-rank' | 'drop-clients' | 'add-rank' | 'remove-rank' | 'malformed-line' | 'end-run';
+export type MockFault = 'stall-node' | 'restart-rank' | 'drop-clients' | 'add-rank' | 'remove-rank' | 'malformed-line' | 'end-run' | 'signal-run' | 'kill-run';
 
 export namespace MockFault {
 
-    export const ALL: readonly MockFault[] = ['stall-node', 'restart-rank', 'drop-clients', 'add-rank', 'remove-rank', 'malformed-line', 'end-run'];
+    export const ALL: readonly MockFault[] = ['stall-node', 'restart-rank', 'drop-clients', 'add-rank', 'remove-rank', 'malformed-line', 'end-run', 'signal-run', 'kill-run'];
 
     /** How long a stalled node sends no new frames. */
     export const STALL_MS = 10_000;
@@ -17,6 +17,8 @@ export namespace MockFault {
             case 'remove-rank': return 'Remove a rank';
             case 'malformed-line': return 'Send a malformed line';
             case 'end-run': return 'End the run';
+            case 'signal-run': return 'Send SIGTERM';
+            case 'kill-run': return 'Kill the run';
         }
     }
 }

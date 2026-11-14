@@ -25,7 +25,8 @@ export class TelemetryStore {
         this.lastRunId = envelope.run_id ?? this.lastRunId;
         const headerOnly = isHeaderOnly(envelope);
         if (this.lastSnapshot && headerOnly) {
-            return { ...this.lastSnapshot, paused: envelope.paused === true, final: envelope.final === true, headerOnly };
+            const { end: _lastEnd, ...last } = this.lastSnapshot;
+            return { ...last, paused: envelope.paused === true, final: envelope.final === true, ...WorldSnapshotMapper.endOf(envelope), headerOnly };
         }
         this.lastSnapshot = WorldSnapshotMapper.toWorldSnapshot(this.withTopology(envelope));
         return headerOnly ? { ...this.lastSnapshot, headerOnly } : this.lastSnapshot;
