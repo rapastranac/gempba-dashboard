@@ -127,6 +127,12 @@ describe('wire protocol', () => {
         expect(frame.rank).to.equal(5);
         expect(frame.edges_out).to.be.empty;
     });
+
+    it('reads how the run ended from gempba v5.0.0\'s final line, as sent', () => {
+        const line = '{"version":2,"ts":1,"elapsed_seconds":2,"final":true,"end":{"reason":"interrupted","trigger":"signal","signal":"SIGTERM"},"ranks":[]}';
+        expect(BroadcastEnvelope.parse(line).end).to.deep.equal({ reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' });
+        expect(BroadcastEnvelope.parse('{"version":2,"ts":1,"final":true}').end, 'gempba 4.x').to.equal(undefined);
+    });
 });
 
 describe('ControlLine', () => {
@@ -161,6 +167,12 @@ describe('ControlLine', () => {
         expect(ControlLine.parse('{"kind":"mark","label":"phase 2"}')).to.deep.equal({ kind: ControlKind.Mark, label: 'phase 2' });
         expect(ControlLine.parse(`{"kind":"mark","label":"${'é'.repeat(32)}"}`), '64 bytes').to.deep.equal({ kind: ControlKind.Mark, label: 'é'.repeat(32) });
         expect(ControlLine.isInterval({ kind: ControlKind.Pause })).to.equal(false);
+    });
+
+    it('writes and reads gempba v5.0.0\'s stop with its token, a missing token as an empty one', () => {
+        expect(ControlLine.write(ControlLine.of({ kind: 'stop', token: 's3"cret' }))).to.equal('{"kind":"stop","token":"s3\\"cret"}\n');
+        expect(ControlLine.parse('{"kind":"stop","token":"s3cret"}')).to.deep.equal({ kind: ControlKind.Stop, token: 's3cret' });
+        expect(ControlLine.parse('{"kind":"stop"}')).to.deep.equal({ kind: ControlKind.Stop, token: '' });
     });
 
     it('reads anything malformed or unknown as undefined', () => {

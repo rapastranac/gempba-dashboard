@@ -1,13 +1,16 @@
 import { Duplex } from 'stream';
 import { RefreshInterval } from '@gempba/core';
 import { ControlKind, ControlLine } from '@gempba/telemetry/lib/node/protocol/wire-protocol';
+import { MockConfig } from '../../common/mock-config';
 import { MockFault } from '../../common/mock-fault';
 import { MockRun } from '../sim/mock-run';
 
 export interface MockAggregatorOptions {
     readonly log?: (message: string) => void;
-    /** Once the run ends, after every client is closed: gempba's process has exited. */
-    readonly onEnded?: () => void;
+    /** Once the run ends, after every client is closed: gempba's process has exited, or was killed without its final line. */
+    readonly onEnded?: (killed: boolean) => void;
+    /** The run's `GEMPBA_STOP_TOKEN`, which a stop line must carry; absent or empty, every stop line is refused. */
+    readonly stopToken?: string;
     /** Whenever the clients or the intervals change. */
     readonly onChange?: () => void;
     /** A client whose unsent output passes this is dropped, so it never holds the others back. */
@@ -20,7 +23,7 @@ export interface MockAggregatorOptions {
  * The mock's stand-in for gempba's aggregator, the telemetry server on rank 0: it advances the run with the wall clock and, every broadcast interval,
  * writes the run's latest frames to every client, the first one the moment a client connects. Control lines from any
  * client set the run's interval, clamped as gempba clamps it, and apply at once. When it stops, as gempba's process
- * exits, it closes every client, each first getting the run's final line.
+ * exits, it closes every client, each first getting the run's final line; a killed process closes them without it.
  */
 export class MockAggregator {
 
@@ -57,9 +60,9 @@ export class MockAggregator {
      * That is the run's final line: every rank's last frame, marked `"final":true` even while paused, so a consumer can
      * tell a finished run from a lost connection.
      */
-    stop(): void {
+    stop(): Promise<void> {
         if (!this.running) {
-            return;
+            return Promise.resolve();
         }
         this.running = false;
         clearTimeout(this.timer);
@@ -71,7 +74,8 @@ export class MockAggregator {
             streams.forEach(stream => this.send(stream, final));
             this.log(`Sent the run\'s final line to ${streams.length} client${streams.length === 1 ? '' : 's'}`);
         }
-        streams.forEach(stream => this.close(stream, true));
+        // resolves once every client has taken the final line, so an SSH server closed after it doesn't cut the line off
+        return Promise.all(streams.map(stream => this.close(stream, true))).then(() => undefined);
     }
 
     /** Serves a connected client, a TCP socket or an SSH channel, named `who` in the log. */
@@ -118,6 +122,13 @@ export class MockAggregator {
                 this.send(stream, '{"version":1,"ts":');
             }
             message = 'Sent a malformed line';
+        } else if (fault === 'kill-run' || (fault === 'signal-run' && !MockConfig.endsAndStops(this.mock.live.fidelity))) {
+            message = fault === 'kill-run'
+                ? 'Killed the run: gempba\'s process died without its final line'
+                : 'Sent SIGTERM: gempba 4.3 has no handler for it, so its process died without its final line';
+            this.log(message);
+            this.kill();
+            return message;
         } else {
             message = this.mock.fault(fault);
         }
@@ -159,7 +170,8 @@ export class MockAggregator {
 
     /**
      * Answers a control line as gempba v4.3.0 does: it takes the one interval under either of its names, ignores the node
-     * interval, and pauses, resumes, snapshots and marks.
+     * interval, and pauses, resumes, snapshots and marks; from fidelity gempba 5.0 on it drops the two older interval names as
+     * unknown kinds and takes a stop with the run's token, as gempba v5.0.0 does.
      */
     protected control(line: string, who: string): void {
         const message = ControlLine.parse(line);
@@ -168,6 +180,10 @@ export class MockAggregator {
             return;
         }
         if (ControlLine.isInterval(message)) {
+            if (message.kind !== ControlKind.SetIntervalMs && !MockConfig.takesOldIntervals(this.mock.live.fidelity)) {
+                this.log(`Ignored ${message.kind} from ${who}: gempba 5.0 drops an unknown kind`);
+                return;
+            }
             if (message.kind === ControlKind.SetNodeIntervalMs) {
                 this.log(`Ignored ${message.kind} from ${who}: gempba 4.3 drives node frames at the one interval`);
                 return;
@@ -194,11 +210,39 @@ export class MockAggregator {
         } else if (message.kind === ControlKind.Pause) {
             this.mock.pause();
             this.log(`Paused, for ${who}: the ranks stop sending frames and the lines carry the header alone`);
+        } else if (message.kind === ControlKind.Stop) {
+            this.log(this.stopFor(message.token, who));
         } else {
             this.mock.resume();
             this.log(`Resumed, for ${who}`);
         }
         this.options.onChange?.();
+    }
+
+    /** Answers a stop line as gempba v5.0.0 does: only with the run's own token, and only in its log. */
+    protected stopFor(token: string, who: string): string {
+        if (!MockConfig.endsAndStops(this.mock.live.fidelity)) {
+            return `Ignored a stop line from ${who}: gempba 4.3 drops an unknown kind`;
+        }
+        const expected = this.options.stopToken ?? '';
+        if (expected === '') {
+            return `Refused a stop line from ${who}: this run has no GEMPBA_STOP_TOKEN`;
+        }
+        if (token !== expected) {
+            return `Refused a stop line from ${who}: the wrong token`;
+        }
+        return this.mock.requestStop('control')
+            ? `Stopped the run, for ${who}: it winds down and ends interrupted`
+            : `Took a stop line from ${who}: the run is already stopping`;
+    }
+
+    /** gempba's process dies at once, as on SIGKILL: every client closes without the run's final line. */
+    protected kill(): void {
+        this.running = false;
+        clearTimeout(this.timer);
+        this.timer = undefined;
+        this.closeAll();
+        this.options.onEnded?.(true);
     }
 
     protected drop(stream: Duplex, why: string): void {
@@ -212,24 +256,36 @@ export class MockAggregator {
         }
     }
 
-    /** Forgets the client at once, so nothing more is written to it, then closes it: at once, or once it has what it was sent. */
-    protected close(stream: Duplex, graceful = false): void {
+    /**
+     * Forgets the client at once, so nothing more is written to it, then closes it: at once, or once it has what it was
+     * sent, which the promise waits for.
+     */
+    protected close(stream: Duplex, graceful = false): Promise<void> {
         if (this.clientsNow.delete(stream)) {
             this.options.onChange?.();
         }
-        if (graceful && !stream.destroyed) {
-            stream.end();
-            // a client that doesn't read what is left is closed anyway
-            setTimeout(() => stream.destroy(), MockAggregator.CLOSE_GRACE_MS).unref();
-        } else {
+        if (!graceful || stream.destroyed) {
             stream.destroy();
+            return Promise.resolve();
         }
+        return new Promise(resolve => {
+            // a client that doesn't read what is left is closed anyway
+            const timer = setTimeout(() => {
+                stream.destroy();
+                resolve();
+            }, MockAggregator.CLOSE_GRACE_MS);
+            timer.unref();
+            stream.once('close', () => {
+                clearTimeout(timer);
+                resolve();
+            });
+            stream.end();
+        });
     }
 
     protected end(): void {
         this.log('The run ended: gempba\'s process exits and closes every client');
-        this.stop();
-        this.options.onEnded?.();
+        this.stop().then(() => this.options.onEnded?.(false));
     }
 
     protected log(message: string): void {

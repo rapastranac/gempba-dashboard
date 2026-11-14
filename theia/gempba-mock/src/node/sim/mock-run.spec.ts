@@ -335,10 +335,33 @@ describe('MockRun', () => {
             expect(envelope(mock).topology!.nodes![0].ranks).to.have.lengthOf(2);
         });
 
-        it('ends the run', () => {
+        it('ends the run, completed', () => {
             const mock = run();
             mock.fault('end-run');
-            expect(mock.ended).to.equal(true);
+            expect([mock.ended, mock.end]).to.deep.equal([true, { reason: 'completed' }]);
+        });
+
+        it('winds a stopped run down, then ends it interrupted by the first stop', () => {
+            const mock = run();
+            mock.advanceTo(1000);
+            expect(mock.fault('signal-run')).to.equal('Sent SIGTERM: the run winds down and ends interrupted');
+            expect(mock.requestStop('control'), 'the first stop wins').to.equal(false);
+            expect([mock.stopping, mock.end]).to.deep.equal([true, undefined]);
+            mock.advanceTo(1000 + MockRun.WIND_DOWN_MS - MockRun.STEP_MS);
+            expect(mock.ended).to.equal(false);
+            mock.advanceTo(1000 + MockRun.WIND_DOWN_MS + MockRun.STEP_MS);
+            expect([mock.ended, mock.stopping, mock.end]).to.deep.equal([true, false, { reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' }]);
+            expect(BroadcastEnvelope.parse(mock.line(1, { final: true })).end).to.deep.equal({ reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' });
+            expect(BroadcastEnvelope.parse(mock.line(1)).end, 'only on the final line').to.equal(undefined);
+        });
+
+        it('keeps a drained run\'s stop, and writes no end at fidelity gempba 4.3', () => {
+            const mock = run({ scenario: 'ramp', fidelity: 'gempba-4.3' });
+            mock.advanceTo(30_000);
+            mock.requestStop('code');
+            mock.advanceTo(600_000);
+            expect(mock.end).to.deep.equal({ reason: 'interrupted', trigger: 'code' });
+            expect(BroadcastEnvelope.parse(mock.line(1, { final: true })).end).to.equal(undefined);
         });
     });
 

@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { RunEnd } from '../model/run-end';
 import { ClockText } from './clock-text';
 import { StreamText } from './stream-text';
 
@@ -16,14 +17,30 @@ describe('StreamText', () => {
             .to.deep.equal({ tone: 'paused', text: 'Paused · last frame 12 s ago', actions: ['resume', 'snapshot'] });
     });
 
-    it('says a dropped link is reconnecting, offering nothing while the client retries', () => {
-        expect(StreamText.bar('reconnecting', lastFrameAt, lastFrameAt + 3_000))
-            .to.deep.equal({ tone: 'stale', text: 'Reconnecting… · last frame 3 s ago', actions: [] });
+    it('says a link that dropped without the run\'s final line is reconnecting, and why it may have, offering nothing while the client retries', () => {
+        expect(StreamText.bar('reconnecting', lastFrameAt, lastFrameAt + 3_000)).to.deep.equal({
+            tone: 'stale', text: 'Reconnecting… · last frame 3 s ago · no final line: the run was killed, or the connection dropped', actions: []
+        });
     });
 
     it('says the run ended and the hub waits for the next, with the time of its last frame, offering Clear', () => {
         expect(StreamText.bar('ended', lastFrameAt, lastFrameAt + 125_000)).to.deep.equal({
             tone: 'ended', text: 'Run ended · last frame 2 min ago (12:04:31) · waiting for the next run', actions: ['clear']
+        });
+    });
+
+    it('says how the run ended when its final line does, and what its last state holds', () => {
+        const ended = (end: RunEnd) => StreamText.bar('ended', lastFrameAt, lastFrameAt + 125_000, end)?.text;
+        expect(ended({ reason: 'completed' })).to.equal('Run completed · result proven · last frame 2 min ago (12:04:31) · waiting for the next run');
+        expect(ended({ reason: 'interrupted', trigger: 'signal', signal: 'SIGTERM' }))
+            .to.equal('Run interrupted by SIGTERM · best result so far · last frame 2 min ago (12:04:31) · waiting for the next run');
+        expect(ended({ reason: 'interrupted', trigger: 'control' }))
+            .to.equal('Run stopped from a dashboard · best result so far · last frame 2 min ago (12:04:31) · waiting for the next run');
+    });
+
+    it('keeps saying how the run ended once the stream stops, as when the SSH session closes after the final line', () => {
+        expect(StreamText.bar('lost', lastFrameAt, lastFrameAt + 125_000, { reason: 'completed' })).to.deep.equal({
+            tone: 'off', text: 'Run completed · result proven · last frame 2 min ago (12:04:31) · connection lost', actions: ['connect', 'clear']
         });
     });
 

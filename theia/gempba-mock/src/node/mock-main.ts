@@ -21,7 +21,8 @@ const USAGE = `Usage: npm run mock -- [options]
   --scheduler semi-centralized|centralized
   --coordinator N          the rank the scheduler's coordinator runs on (0)
   --no-roles               declare no roles: no coordinator, every rank a worker
-  --load PCT --fidelity gempba-4.3|full --seed N
+  --load PCT --fidelity gempba-4.3|gempba-5.0|full --seed N
+  --stop-token TOKEN       the run's GEMPBA_STOP_TOKEN, which a stop line must carry (none)
   --bench                  time building and serializing frames, then exit`;
 
 const { values } = parseArgs({
@@ -30,7 +31,7 @@ const { values } = parseArgs({
         nodes: { type: 'string' }, sockets: { type: 'string' }, cores: { type: 'string' }, smt: { type: 'boolean' }, ranks: { type: 'string' },
         pool: { type: 'string' }, mem: { type: 'string' }, cgroup: { type: 'string' }, scenario: { type: 'string' },
         scheduler: { type: 'string' }, coordinator: { type: 'string' }, load: { type: 'string' }, fidelity: { type: 'string' }, seed: { type: 'string' },
-        'no-roles': { type: 'boolean' }, bench: { type: 'boolean' }, help: { type: 'boolean' }
+        'stop-token': { type: 'string' }, 'no-roles': { type: 'boolean' }, bench: { type: 'boolean' }, help: { type: 'boolean' }
     }
 });
 
@@ -68,7 +69,8 @@ const config: MockConfig = {
         loadPct: number(values.load, defaults.live.loadPct),
         fidelity: choice(values.fidelity, MockConfig.FIDELITIES, defaults.live.fidelity, '--fidelity')
     },
-    seed: number(values.seed, defaults.seed)
+    seed: number(values.seed, defaults.seed),
+    stopToken: values['stop-token'] ?? defaults.stopToken
 };
 if (values.nodes !== undefined && !values.bench && config.access.mode !== ConnectionMode.JUMP) {
     fail('--nodes needs --mode jump: Local is this machine and Host one VM, each a single node');

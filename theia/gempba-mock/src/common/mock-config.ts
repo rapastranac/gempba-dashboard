@@ -11,6 +11,8 @@ export interface MockConfig {
     readonly live: MockLive;
     /** The same seed and shape give the same run. */
     readonly seed: number;
+    /** The run's `GEMPBA_STOP_TOKEN`, which a stop line must carry; empty, the run has none and refuses every stop line. */
+    readonly stopToken: string;
 }
 
 /** How the dashboard reaches the mock's telemetry: directly in Local mode, through the mock SSH server in Host and Jump. */
@@ -71,14 +73,27 @@ export interface MockRoles {
     readonly declared: boolean;
 }
 
-/** What the mocker sends: `gempba-4.3` telemetry as gempba v4.3.0 sends it, zeros included, and `full` with every field filled in. */
-export type MockFidelity = 'gempba-4.3' | 'full';
+/**
+ * What the mocker sends: `gempba-4.3` telemetry as gempba v4.3.0 sends it, zeros included; `gempba-5.0` with what gempba
+ * v5.0.0 adds so far, how the run ended and the stop line (gempba#465); and `full` with every field filled in.
+ */
+export type MockFidelity = 'gempba-4.3' | 'gempba-5.0' | 'full';
 
 export namespace MockConfig {
 
     export const SCENARIOS: readonly MockScenario[] = ['steady', 'slow', 'ramp', 'imbalanced', 'bursty'];
     export const SCHEDULERS: readonly MockScheduler[] = ['semi-centralized', 'centralized'];
-    export const FIDELITIES: readonly MockFidelity[] = ['gempba-4.3', 'full'];
+    export const FIDELITIES: readonly MockFidelity[] = ['gempba-4.3', 'gempba-5.0', 'full'];
+
+    /** Whether the run says how it ended on its final line and takes a stop line, as gempba v5.0.0 does (gempba#465). */
+    export function endsAndStops(fidelity: MockFidelity): boolean {
+        return fidelity !== 'gempba-4.3';
+    }
+
+    /** Whether the run still takes schema 1's interval lines, which gempba v5.0.0 drops as unknown kinds (gempba#373). */
+    export function takesOldIntervals(fidelity: MockFidelity): boolean {
+        return fidelity === 'gempba-4.3';
+    }
     export const KEY_SOURCES: readonly MockKeySource[] = ['system', 'generated'];
 
     export const MAX_RANKS = 4096;
@@ -102,8 +117,9 @@ export namespace MockConfig {
             },
             scheduler: 'semi-centralized',
             roles: { coordinatorRank: 0, declared: true },
-            live: { scenario: 'steady', loadPct: 85, fidelity: 'gempba-4.3' },
-            seed: 42
+            live: { scenario: 'steady', loadPct: 85, fidelity: 'gempba-5.0' },
+            seed: 42,
+            stopToken: ''
         };
     }
 
@@ -145,7 +161,8 @@ export namespace MockConfig {
                 loadPct: numberOr(live.loadPct, fallback.live.loadPct),
                 fidelity: oneOf(live.fidelity, FIDELITIES, fallback.live.fidelity)
             },
-            seed: numberOr(json.seed, fallback.seed)
+            seed: numberOr(json.seed, fallback.seed),
+            stopToken: typeof json.stopToken === 'string' ? json.stopToken : fallback.stopToken
         };
     }
 

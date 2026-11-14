@@ -1,5 +1,5 @@
 import {
-    CoreUsageSnapshot, NodeSnapshot, NodeUtilization, RunSetup, SocketSnapshot, StructureKey, RankAccounting, SchedulerRole, RankSnapshot, WorldSnapshot
+    CoreUsageSnapshot, NodeSnapshot, NodeUtilization, RunEnd, RunSetup, SocketSnapshot, StructureKey, RankAccounting, SchedulerRole, RankSnapshot, WorldSnapshot
 } from '@gempba/core';
 import { BroadcastEnvelope, NodeFrame, TopologyNode, TopologyRun, TopologySocket, RankFrame, RankIdentity } from '../protocol/wire-protocol';
 
@@ -73,8 +73,20 @@ export namespace WorldSnapshotMapper {
             runId: envelope.run_id ?? '',
             run: envelope.topology?.run && toRunSetup(envelope.topology.run),
             paused: envelope.paused === true,
-            final: envelope.final === true
+            final: envelope.final === true,
+            ...endOf(envelope)
         };
+    }
+
+    /** How the run ended, read only from a final line, and only when gempba says it was completed or interrupted. */
+    export function endOf(envelope: BroadcastEnvelope): { readonly end?: RunEnd } {
+        const reason = RunEnd.REASONS.find(each => each === envelope.end?.reason);
+        if (envelope.final !== true || !envelope.end || !reason) {
+            return {};
+        }
+        const trigger = RunEnd.TRIGGERS.find(each => each === envelope.end?.trigger);
+        const signal = envelope.end.signal;
+        return { end: { reason, ...(trigger && { trigger }), ...(signal && { signal }) } };
     }
 
     function toRunSetup(run: TopologyRun): RunSetup {

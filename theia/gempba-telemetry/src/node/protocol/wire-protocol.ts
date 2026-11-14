@@ -21,10 +21,22 @@ export interface BroadcastEnvelope {
     readonly paused?: boolean;
     /** True only on the line rank 0, the aggregator, sends at shutdown, with the run's totals, before it closes; schema 2. */
     readonly final?: boolean;
+    /** How the run ended, on the final line only; gempba v5.0.0 (gempba#465). */
+    readonly end?: RunEndWire;
     readonly topology?: Topology;
     /** Every rank's frame, whatever its role. */
     readonly ranks?: readonly RankFrame[];
     readonly nodes?: readonly NodeFrame[];
+}
+
+/**
+ * How the run ended: `reason` is `completed` or `interrupted`; an interrupted run also has its `trigger` (`code`,
+ * `signal` or `control`), and a stop by signal its name, such as `SIGTERM`. Read as sent; the mapper checks the values.
+ */
+export interface RunEndWire {
+    readonly reason?: string;
+    readonly trigger?: string;
+    readonly signal?: string;
 }
 
 export interface Topology {
@@ -211,10 +223,18 @@ export namespace BroadcastEnvelope {
             elapsed_seconds: num(json.elapsed_seconds),
             paused: bool(json.paused),
             final: bool(json.final),
+            end: nested(json.end, RunEndWire.fromJson),
             topology: nested(json.topology, Topology.fromJson),
             ranks: list(json.ranks, RankFrame.fromJson),
             nodes: list(json.nodes, NodeFrame.fromJson)
         };
+    }
+}
+
+export namespace RunEndWire {
+    export function fromJson(value: unknown): RunEndWire {
+        const json = objectOf(value);
+        return { reason: str(json.reason), trigger: str(json.trigger), signal: str(json.signal) };
     }
 }
 
@@ -392,11 +412,13 @@ export enum ControlKind {
     /** From gempba v4.3.0: one full line now, paused or not. */
     Snapshot = 'snapshot',
     /** From gempba v4.3.0: a labelled moment, listed in the run's markers. */
-    Mark = 'mark'
+    Mark = 'mark',
+    /** From gempba v5.0.0: wind the run down, with the run's stop token; an older gempba drops it as an unknown kind. */
+    Stop = 'stop'
 }
 
-/** One control line: an interval in whole milliseconds, a marker's label, or the kind alone. */
-export type ControlLine = ControlLine.Interval | ControlLine.Mark | ControlLine.Plain;
+/** One control line: an interval in whole milliseconds, a marker's label, a stop with its token, or the kind alone. */
+export type ControlLine = ControlLine.Interval | ControlLine.Mark | ControlLine.Stop | ControlLine.Plain;
 
 export namespace ControlLine {
 
@@ -412,6 +434,12 @@ export namespace ControlLine {
         readonly label: string;
     }
 
+    /** gempba stops the run only when `token` matches the `GEMPBA_STOP_TOKEN` it was started with. */
+    export interface Stop {
+        readonly kind: ControlKind.Stop;
+        readonly token: string;
+    }
+
     export interface Plain {
         readonly kind: ControlKind.Pause | ControlKind.Resume | ControlKind.Snapshot;
     }
@@ -423,12 +451,19 @@ export namespace ControlLine {
         return line.kind === ControlKind.SetIntervalMs || line.kind === ControlKind.SetWorkerIntervalMs || line.kind === ControlKind.SetNodeIntervalMs;
     }
 
-    /** The line as written on the socket, its newline included: an interval in whole milliseconds, a mark with its label. */
+    /** The line as written on the socket, its newline included: an interval in whole milliseconds, a mark with its label, a stop with its token. */
     export function write(line: ControlLine): string {
         if (isInterval(line)) {
             return JSON.stringify({ kind: line.kind, value: Math.round(line.value) }) + '\n';
         }
-        return JSON.stringify(line.kind === ControlKind.Mark ? { kind: line.kind, label: line.label } : { kind: line.kind }) + '\n';
+        switch (line.kind) {
+            case ControlKind.Mark:
+                return JSON.stringify({ kind: line.kind, label: line.label }) + '\n';
+            case ControlKind.Stop:
+                return JSON.stringify({ kind: line.kind, token: line.token }) + '\n';
+            default:
+                return JSON.stringify({ kind: line.kind }) + '\n';
+        }
     }
 
     export function format(kind: IntervalKind, value: number): string {
@@ -446,6 +481,8 @@ export namespace ControlLine {
                 return { kind: ControlKind.Snapshot };
             case 'mark':
                 return { kind: ControlKind.Mark, label: control.label };
+            case 'stop':
+                return { kind: ControlKind.Stop, token: control.token };
         }
     }
 
@@ -473,6 +510,9 @@ export namespace ControlLine {
                 const bytes = label === undefined ? 0 : new TextEncoder().encode(label).length;
                 return label !== undefined && bytes >= 1 && bytes <= MAX_LABEL_BYTES ? { kind, label } : undefined;
             }
+            case ControlKind.Stop:
+                // gempba reads a missing token as an empty one, which never matches
+                return { kind, token: str(json.token) ?? '' };
             default:
                 return { kind };
         }

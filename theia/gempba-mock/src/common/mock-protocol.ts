@@ -1,4 +1,4 @@
-import { ConnectionMode } from '@gempba/core';
+import { ConnectionMode, RunEnd } from '@gempba/core';
 import { MockConfig, MockLive, MockShape } from './mock-config';
 import { MockFault } from './mock-fault';
 
@@ -37,8 +37,12 @@ export interface MockLogLine {
 
 export interface MockStatus {
     readonly running: boolean;
-    /** The last run ended on its own or by the End the run fault, rather than by Stop. */
+    /** The last run ended on its own or by a fault, rather than by Stop. */
     readonly ended: boolean;
+    /** How the last run ended, as its final line said; absent at fidelity gempba 4.3. */
+    readonly end?: RunEnd;
+    /** The last run was killed: its clients closed without the final line. */
+    readonly killed?: boolean;
     /** The running or ended run's configuration. */
     readonly config?: MockConfig;
     readonly clients: number;
@@ -74,7 +78,13 @@ export namespace MockStatus {
     /** e.g. `Running · Local on 127.0.0.1:9000 · 1 node, 4 ranks · 1 client`. */
     export function summary(status: MockStatus): string {
         if (!status.running || !status.config) {
-            return status.ended ? 'Ended: gempba\'s process exited' : 'Stopped';
+            if (!status.ended) {
+                return 'Stopped';
+            }
+            if (status.killed) {
+                return 'Killed: gempba\'s process died without its final line';
+            }
+            return status.end ? `Ended: ${RunEnd.headline(status.end)}, and gempba's process exited` : 'Ended: gempba\'s process exited';
         }
         const { access } = status.config;
         const shape = MockConfig.shapeOf(status.config);

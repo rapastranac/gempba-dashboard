@@ -106,6 +106,10 @@ export class MockWidget extends ReactWidget {
                             { hint: COUNTS[key].hint })}
                     </React.Fragment>)}
                 {this.field('Seed', this.draft.seed, running, seed => this.edit({ seed }), { hint: 'The same seed and cluster give the same run' })}
+                {this.field('Stop token', this.draft.stopToken, running, stopToken => this.edit({ stopToken }), {
+                    numeric: false,
+                    hint: 'The run\'s GEMPBA_STOP_TOKEN, which Stop the Run must send; empty, the run has none and refuses every stop, as gempba does'
+                })}
                 <label className='gempba-mock-check'>
                     <input type='checkbox' checked={this.draft.smt} disabled={running} onChange={e => this.edit({ smt: e.target.checked })} />
                     SMT, two threads per core
@@ -151,7 +155,8 @@ export class MockWidget extends ReactWidget {
             ['Compute node', reach.targetHost],
             ['gempba port', String(reach.gempbaPort)],
             ['Passcode', status.config?.access.mfa && reach.mode !== ConnectionMode.LOCAL ? status.config.access.mfaCode : undefined],
-            ['Host key', reach.hostKeyFingerprint]
+            ['Host key', reach.hostKeyFingerprint],
+            ['Stop token', status.config?.stopToken || undefined]
         ];
         return <dl className='gempba-mock-reach'>
             {rows.filter(([, value]) => value !== undefined).map(([label, value]) => <React.Fragment key={label}>

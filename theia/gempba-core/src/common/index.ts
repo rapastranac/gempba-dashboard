@@ -30,6 +30,7 @@ export * from './model/core-usage-snapshot';
 export * from './model/node-snapshot';
 export * from './model/peer-snapshot';
 export * from './model/rank-snapshot';
+export * from './model/run-end';
 export * from './model/run-setup';
 export * from './model/socket-snapshot';
 export * from './model/structure-key';

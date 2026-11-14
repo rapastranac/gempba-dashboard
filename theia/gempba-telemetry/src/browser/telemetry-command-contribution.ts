@@ -19,6 +19,7 @@ export namespace TelemetryCommands {
     export const RESUME: Command = { id: 'gempba.resume', category: CATEGORY, label: 'Resume' };
     export const SNAPSHOT: Command = { id: 'gempba.snapshot', category: CATEGORY, label: 'Snapshot' };
     export const MARK: Command = { id: 'gempba.mark', category: CATEGORY, label: 'Mark…' };
+    export const STOP_RUN: Command = { id: 'gempba.stopRun', category: CATEGORY, label: 'Stop the Run…' };
     export const SET_RATE: Command = { id: 'gempba.setRefreshRate', category: CATEGORY, label: 'Set Refresh Rate…' };
 }
 
@@ -106,6 +107,10 @@ export class TelemetryCommandContribution implements CommandContribution, MenuCo
             isEnabled: () => offered().mark,
             execute: () => this.mark()
         });
+        registry.registerCommand(TelemetryCommands.STOP_RUN, {
+            isEnabled: () => offered().stop,
+            execute: () => this.stopRun()
+        });
     }
 
     registerMenus(menus: MenuModelRegistry): void {
@@ -114,7 +119,7 @@ export class TelemetryCommandContribution implements CommandContribution, MenuCo
         [TelemetryCommands.STOP, TelemetryCommands.DISCONNECT]
             .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.STREAM, { commandId: command.id, order: String(index) }));
         menus.registerMenuAction(TelemetryMenus.DATA, { commandId: TelemetryCommands.CLEAR.id });
-        [TelemetryCommands.PAUSE, TelemetryCommands.RESUME, TelemetryCommands.SNAPSHOT, TelemetryCommands.MARK]
+        [TelemetryCommands.PAUSE, TelemetryCommands.RESUME, TelemetryCommands.SNAPSHOT, TelemetryCommands.MARK, TelemetryCommands.STOP_RUN]
             .forEach((command, index) => menus.registerMenuAction(TelemetryMenus.RUN, { commandId: command.id, order: String(index) }));
     }
 
@@ -126,6 +131,20 @@ export class TelemetryCommandContribution implements CommandContribution, MenuCo
         });
         if (label !== undefined) {
             await this.run(this.telemetry.mark(label.trim()));
+        }
+    }
+
+    /** The token prompt is the confirmation: Enter stops the run, Escape leaves it running. */
+    protected async stopRun(): Promise<void> {
+        const token = await this.quickInput.input({
+            title: 'GemPBA: Stop the Run',
+            placeHolder: 'GEMPBA_STOP_TOKEN',
+            prompt: 'The stop token the run was started with. It stops gracefully, keeping its best result so far.',
+            password: true,
+            validateInput: async input => RunControl.tokenProblem(input)
+        });
+        if (token !== undefined) {
+            await this.run(this.telemetry.stopRun(token));
         }
     }
 
