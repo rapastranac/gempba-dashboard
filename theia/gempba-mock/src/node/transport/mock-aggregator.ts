@@ -170,7 +170,8 @@ export class MockAggregator {
 
     /**
      * Answers a control line as gempba v4.3.0 does: it takes the one interval under either of its names, ignores the node
-     * interval, and pauses, resumes, snapshots and marks; from fidelity gempba 5.0 on it also takes a stop with the run's token.
+     * interval, and pauses, resumes, snapshots and marks; from fidelity gempba 5.0 on it drops the two older interval names as
+     * unknown kinds and takes a stop with the run's token, as gempba v5.0.0 does.
      */
     protected control(line: string, who: string): void {
         const message = ControlLine.parse(line);
@@ -179,6 +180,10 @@ export class MockAggregator {
             return;
         }
         if (ControlLine.isInterval(message)) {
+            if (message.kind !== ControlKind.SetIntervalMs && !MockConfig.takesOldIntervals(this.mock.live.fidelity)) {
+                this.log(`Ignored ${message.kind} from ${who}: gempba 5.0 drops an unknown kind`);
+                return;
+            }
             if (message.kind === ControlKind.SetNodeIntervalMs) {
                 this.log(`Ignored ${message.kind} from ${who}: gempba 4.3 drives node frames at the one interval`);
                 return;
