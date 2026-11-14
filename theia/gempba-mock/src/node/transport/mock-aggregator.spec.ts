@@ -97,13 +97,38 @@ describe('MockAggregator', () => {
         clients.push(telemetry);
         telemetry.start();
         await until(() => frames.length > 0);
-        expect(telemetry.sendControl(ControlKind.SetWorkerIntervalMs, 10)).to.equal(true);
+        expect(telemetry.sendControl(ControlKind.SetIntervalMs, 10)).to.equal(true);
         await until(() => aggregator.run.intervalMs === 50);
-        expect(logged.some(message => message.startsWith('set_worker_interval_ms → 50 ms (clamped from 10), from TCP client'))).to.equal(true);
+        expect(logged.some(message => message.startsWith('set_interval_ms → 50 ms (clamped from 10), from TCP client'))).to.equal(true);
         const counted = frames.length;
         await new Promise(resolve => setTimeout(resolve, 600));
         expect(frames.length - counted).to.be.at.least(5);
-        telemetry.sendControl(ControlKind.SetNodeIntervalMs, 2000);
+    });
+
+    it('drops the older interval names as unknown kinds from gempba 5.0, as gempba v5.0.0 does', async () => {
+        for (const fidelity of ['gempba-5.0', 'full'] as const) {
+            await serve({ fidelity });
+            const client = lineClient();
+            await until(() => client.lines.length > 0);
+            const before = aggregator.run.intervalMs;
+            client.socket.write('{"kind":"set_worker_interval_ms","value":100}\n{"kind":"set_node_interval_ms","value":2000}\n');
+            await until(() => logged.filter(message => message.endsWith(': gempba 5.0 drops an unknown kind')).length === 2);
+            expect(logged.filter(message => message.startsWith('Ignored set_')).map(message => message.split(' ')[1]), fidelity)
+                .to.deep.equal(['set_worker_interval_ms', 'set_node_interval_ms']);
+            expect(aggregator.run.intervalMs, fidelity).to.equal(before);
+            aggregator.stop();
+            await endpoint.close();
+        }
+    });
+
+    it('at fidelity gempba 4.3, takes the interval under its older name and ignores the node interval', async () => {
+        await serve({ fidelity: 'gempba-4.3' });
+        const client = lineClient();
+        await until(() => client.lines.length > 0);
+        client.socket.write('{"kind":"set_worker_interval_ms","value":10}\n');
+        await until(() => aggregator.run.intervalMs === 50);
+        expect(logged.some(message => message.startsWith('set_worker_interval_ms → 50 ms (clamped from 10), from TCP client'))).to.equal(true);
+        client.socket.write('{"kind":"set_node_interval_ms","value":2000}\n');
         await until(() => logged.some(message => message.startsWith('Ignored set_node_interval_ms')));
         expect(aggregator.run.intervalMs, 'gempba 4.3 ignores the node interval').to.equal(50);
     });

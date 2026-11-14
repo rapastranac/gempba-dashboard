@@ -89,6 +89,11 @@ export namespace MockConfig {
     export function endsAndStops(fidelity: MockFidelity): boolean {
         return fidelity !== 'gempba-4.3';
     }
+
+    /** Whether the run still takes schema 1's interval lines, which gempba v5.0.0 drops as unknown kinds (gempba#373). */
+    export function takesOldIntervals(fidelity: MockFidelity): boolean {
+        return fidelity === 'gempba-4.3';
+    }
     export const KEY_SOURCES: readonly MockKeySource[] = ['system', 'generated'];
 
     export const MAX_RANKS = 4096;
