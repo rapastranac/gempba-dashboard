@@ -1,6 +1,6 @@
 {
   "name": "@gempba/plugins",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "license": "MIT",
   "description": "GemPBA Dashboard plugin support: VS Code extensions from Open VSX, such as color themes, with the IDE parts the plugin runtime brings stripped again.",
@@ -14,8 +14,8 @@
     }
   ],
   "dependencies": {
-    "@gempba/shell": "2.0.0",
-    "@gempba/ui": "2.0.0",
+    "@gempba/shell": "2.1.0",
+    "@gempba/ui": "2.1.0",
     "@theia/ai-core": "1.76.0",
     "@theia/ai-mcp": "1.76.0",
     "@theia/core": "1.76.0",

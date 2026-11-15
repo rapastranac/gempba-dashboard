@@ -1,6 +1,6 @@
 {
   "name": "@gempba/updater",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "license": "MIT",
   "description": "GemPBA Dashboard updates: checks the public repository's GitHub Releases at startup and from Help, and installs a newer version on the user's click.",
